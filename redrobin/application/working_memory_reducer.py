@@ -28,6 +28,7 @@ from typing import Any
 
 from redrobin.application.event_bus import EventBus
 from redrobin.domain.memory import Credential, Finding, Host, Session
+from redrobin.infrastructure.persistence.episodic_repo import EpisodicRepo
 from redrobin.infrastructure.persistence.working_memory_repo import WorkingMemoryRepo
 
 logger = logging.getLogger(__name__)
@@ -60,10 +61,15 @@ class WorkingMemoryReducer:
         bus: EventBus,
         repo: WorkingMemoryRepo,
         engagement_id: str,
+        episodic_repo: EpisodicRepo | None = None,
     ) -> None:
         self._bus = bus
         self._repo = repo
         self._engagement_id = engagement_id
+        # Slice 10: optional Episodic store. When provided, every
+        # ``opsec.verdict`` event is appended as an Episode so the
+        # ``LessonPromoter`` has a full audit trail to aggregate over.
+        self._episodic = episodic_repo
         # Optional callback invoked once the reducer has subscribed and is ready
         # to consume events. Tests use this to avoid sleep-based races; production
         # callers can leave it unset.
@@ -147,12 +153,33 @@ class WorkingMemoryReducer:
         self._repo.upsert_session(session)
 
     def _on_verdict(self, payload: dict[str, Any]) -> None:
-        if payload.get("verdict") != "BLOCK":
-            return
+        verdict = payload.get("verdict", "UNKNOWN")
         command = payload.get("command", "?")
         reason = payload.get("reason", "")
         beacon_id_raw = payload.get("beacon_id")
         beacon_id = str(beacon_id_raw) if beacon_id_raw is not None else None
+
+        # Slice 10: every verdict (not only BLOCK) becomes an Episode so the
+        # promoter sees full operator activity. Failures here must not crash
+        # the reducer — the working-memory finding path below is more
+        # important for live operators.
+        if self._episodic is not None:
+            try:
+                self._episodic.record(
+                    engagement_id=self._engagement_id,
+                    correlation_id=str(payload.get("correlation_id", "") or ""),
+                    command=str(command),
+                    verdict=str(verdict),
+                    reason=str(reason),
+                )
+            except Exception:
+                logger.exception("episodic record failed for verdict=%s", verdict)
+
+        # Finding append still only fires on BLOCK — the working-memory
+        # findings stream is a curated operator-visible audit list, not a
+        # full event log.
+        if verdict != "BLOCK":
+            return
         finding = Finding(
             kind="opsec_block",
             summary=f"Blocked command: {command} — {reason}",

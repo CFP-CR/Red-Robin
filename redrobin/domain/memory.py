@@ -131,3 +131,39 @@ class Fact:
     source_engagement_id: str | None
     created_at: datetime
     embedding: list[float] | None = None
+
+
+@dataclass(frozen=True)
+class Episode:
+    """Raw OPSEC verdict episode — one row per ``opsec.verdict`` event.
+
+    Episodes are the audit trail the ``LessonPromoter`` aggregates over: when
+    the same ``(command, verdict)`` pair recurs at or above threshold and the
+    verdict is BLOCK or WARN, a single ``PromotedLesson`` is upserted into
+    the long-term store so future LLM judgments can retrieve it from L1.
+    """
+
+    id: int | None  # None until persisted
+    engagement_id: str
+    correlation_id: str
+    command: str
+    verdict: str  # ALLOW | WARN | BLOCK | UNKNOWN
+    reason: str
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class PromotedLesson:
+    """L1 long-term record synthesised from recurring episodes.
+
+    Distinct from ``Lesson`` (free-form engagement-specific learning stored in
+    L3 Episodic): a ``PromotedLesson`` is a structured pattern record keyed by
+    ``(command, verdict)`` and surfaced cross-engagement for future judgments.
+    """
+
+    id: int | None  # None until persisted
+    command: str
+    verdict: str  # BLOCK | WARN
+    summary: str
+    occurrence_count: int
+    created_at: datetime
