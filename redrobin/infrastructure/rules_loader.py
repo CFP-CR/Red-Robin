@@ -9,22 +9,38 @@ the filesystem.
 The `passthrough.yaml` file is handled separately (whitelist of commands that
 skip Layer B escalation). RulesLoader skips it.
 
-Sigma-format rules (``shared/sigma/*.yaml``) are loaded as stub ``Rule``
-objects so they appear in ``list_rules``; the full Sigma evaluation engine
-lands in a later Phase 2 slice.
+Sigma support is intentionally minimal — enough to match real-world tradecraft
+detection rules without depending on the upstream pySigma engine:
+
+* ``CommandLine`` (and the alias ``cmd``) maps to the ``args`` predicate field.
+* ``Image`` maps to the ``command`` predicate field via the executable basename
+  (``\\mimikatz.exe`` → ``mimikatz``).
+* Modifiers ``|contains``, ``|startswith``, ``|endswith`` map to the obvious
+  operators; a bare field (no modifier) is an equality check.
+* List values are OR within a single predicate (Sigma's documented semantics).
+* Multiple selection fields AND together (also Sigma's default).
+* Detection blocks beyond ``selection`` (named selections, ``condition``
+  expressions) are ignored — only the ``selection`` block is interpreted.
+* Other modifiers (``|all``, ``|re``, ``|cidr``, ``|base64``, etc.) are
+  ignored with a warning; the rule still loads as a degraded stub.
+
+This covers the substring/prefix/suffix cases that operator-facing tradecraft
+rules actually use today. The full pySigma engine can land in a later slice if
+heavier expressivity (regex, CIDR matching, named-selection conditions)
+becomes a requirement.
 """
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 import yaml
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
-from redrobin.domain.rules import Rule, RuleMatch, RuleSeverity
+from redrobin.domain.rules import MatchPredicate, Rule, RuleMatch, RuleSeverity
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +57,109 @@ _SIGMA_LEVEL_TO_SEVERITY = {
     "high": RuleSeverity.DANGER,
     "critical": RuleSeverity.DANGER,
 }
+
+# Sigma field name → predicate field on the rule.
+# ``Image`` is the full process image path on Sysmon/Windows; the predicate
+# treats it as ``command`` (basename) since Red Robin's verdict path receives
+# operator-typed commands, not full image paths.
+_SIGMA_FIELD_TO_PREDICATE: dict[str, str] = {
+    "commandline": "args",
+    "cmd": "args",
+    "image": "command",
+}
+
+# Sigma modifier → predicate operator. A field without a modifier is "equals".
+_SIGMA_MODIFIER_TO_OP: dict[str, str] = {
+    "contains": "contains",
+    "startswith": "startswith",
+    "endswith": "endswith",
+}
+
+
+def _coerce_image_value_to_basename(value: str) -> str:
+    """``\\path\\to\\mimikatz.exe`` → ``mimikatz``.
+
+    Sigma's ``Image|endswith`` typically carries a path suffix like
+    ``\\mimikatz.exe`` to anchor on the executable name. Red Robin's verdict
+    path doesn't see the full process image; the operator types the bare
+    command name. So we extract the executable basename without extension and
+    convert the ``endswith`` constraint to an ``equals`` on ``command``.
+    """
+    cleaned = value.replace("/", "\\").rsplit("\\", 1)[-1]
+    if cleaned.lower().endswith(".exe"):
+        cleaned = cleaned[:-4]
+    return cleaned
+
+
+def _parse_sigma_detection(
+    path: Path, detection: Any
+) -> tuple[MatchPredicate, ...]:
+    """Translate a Sigma ``detection`` block into a tuple of predicates.
+
+    Only the ``selection`` block is interpreted. Unknown field names and
+    unknown modifiers are skipped with a debug log; the resulting rule loads
+    as a degraded stub (empty predicates → ``Rule.matches`` is always False)
+    so the operator can still see it in ``list_rules`` without being misled.
+    """
+    if not isinstance(detection, dict):
+        return ()
+    selection = detection.get("selection")
+    if not isinstance(selection, dict):
+        return ()
+
+    predicates: list[MatchPredicate] = []
+    for sigma_key, raw_value in selection.items():
+        # Split "Field|modifier" — Sigma allows multiple chained modifiers
+        # but the common case is a single one. We support the first modifier
+        # and ignore extras.
+        parts = str(sigma_key).split("|")
+        field_name = parts[0].strip().lower()
+        modifier = parts[1].strip().lower() if len(parts) > 1 else None
+
+        predicate_field = _SIGMA_FIELD_TO_PREDICATE.get(field_name)
+        if predicate_field is None:
+            logger.debug(
+                "%s: sigma field %r not supported by Red Robin minimal sigma engine, "
+                "skipping predicate",
+                path,
+                sigma_key,
+            )
+            continue
+
+        if modifier is None:
+            op = "equals"
+        elif modifier in _SIGMA_MODIFIER_TO_OP:
+            op = _SIGMA_MODIFIER_TO_OP[modifier]
+        else:
+            logger.debug(
+                "%s: sigma modifier %r on %r not supported, skipping predicate",
+                path,
+                modifier,
+                sigma_key,
+            )
+            continue
+
+        # Sigma allows scalar or list values; list = OR across values.
+        if isinstance(raw_value, list):
+            raw_values = [str(v) for v in raw_value]
+        else:
+            raw_values = [str(raw_value)]
+
+        # Image fields contain a path; collapse to bare executable name and
+        # demote the operator from endswith → equals on ``command``.
+        if field_name == "image":
+            raw_values = [_coerce_image_value_to_basename(v) for v in raw_values]
+            op = "equals"
+
+        predicates.append(
+            MatchPredicate(
+                field=predicate_field,  # type: ignore[arg-type]
+                op=op,  # type: ignore[arg-type]
+                values=tuple(raw_values),
+            )
+        )
+
+    return tuple(predicates)
 
 
 class RulesLoader:
@@ -127,15 +246,23 @@ class RulesLoader:
         severity = _SIGMA_LEVEL_TO_SEVERITY.get(level, RuleSeverity.WARN)
 
         title = str(data.get("title", path.stem))
-        # Stub command pulled from the file stem so the Rule is well-formed;
-        # Sigma detection logic is wired in by the Layer A Sigma engine task.
+
+        # The native ``RuleMatch.command`` is unused when ``match_predicates``
+        # is populated, but the dataclass field is required. Use the file stem
+        # as a stable placeholder so the legacy-path equality check (which
+        # never runs on a Sigma rule) is at least well-defined.
+        legacy_match = RuleMatch(command=path.stem, arg_pattern=None)
+
+        predicates = _parse_sigma_detection(path, data.get("detection"))
+
         return Rule(
             id=rule_id,
-            match=RuleMatch(command=path.stem, arg_pattern=None),
+            match=legacy_match,
             severity=severity,
             reason=title,
             suggestions=(),
             sources=(f"sigma:{path.name}",),
+            match_predicates=predicates,
         )
 
     def start_hot_reload(self, callback: Callable[[list[Rule]], None]) -> None:
