@@ -22,7 +22,6 @@ from redrobin.api.events_router import router as events_router
 from redrobin.api.tui_ws import router as tui_ws_router
 from redrobin.api.verdicts_router import router as verdicts_router
 from redrobin.application.rules_lifecycle import RulesLoader
-from redrobin.domain.rules import Rule
 
 logger = logging.getLogger(__name__)
 
@@ -37,16 +36,19 @@ def _default_rules_dir() -> Path:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     rules_dir = _default_rules_dir()
+    if "REDROBIN_RULES_DIR" not in os.environ:
+        logger.warning(
+            "REDROBIN_RULES_DIR not set; defaulting to %s — set explicitly in tests/CI to avoid home pollution.",
+            rules_dir,
+        )
     rules_dir.mkdir(parents=True, exist_ok=True)
 
     rules_loader = RulesLoader(rule_dir=rules_dir)
     initial_rules = rules_loader.load_all()
     app.state.rules_loader = rules_loader
-    app.state.rules = initial_rules
 
-    def _on_reload(rules: list[Rule]) -> None:
-        app.state.rules = rules
-        logger.info("rules reloaded: count=%d", len(rules))
+    def _on_reload(rules: list) -> None:
+        logger.debug("rules_loader: reloaded %d rules", len(rules))
 
     rules_loader.start_hot_reload(_on_reload)
     logger.info(
