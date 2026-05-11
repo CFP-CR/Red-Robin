@@ -20,6 +20,7 @@ Helpers:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 from redrobin.application.event_bus import EventBus
 from redrobin.application.kb_service import KBService
@@ -32,6 +33,9 @@ from redrobin.domain.rules import Rule
 from redrobin.infrastructure.filesystem import REDROBIN_ROOT
 from redrobin.infrastructure.llm.anthropic_client import AnthropicClient
 from redrobin.infrastructure.llm.voyage_client import VoyageClient
+from redrobin.infrastructure.persistence.context_summary_repo import (
+    ContextSummaryRepo,
+)
 from redrobin.infrastructure.rules_loader import RulesLoader
 from redrobin.infrastructure.vector_store import VectorStore
 
@@ -71,15 +75,31 @@ class _DegradedLayerB:
         )
 
 
-def _build_layer_b() -> LayerBProvider:
-    """Build real LayerBEngine. Falls back to degraded no-op when API keys missing."""
+def _build_layer_b(
+    *,
+    summary_repo: ContextSummaryRepo | None = None,
+    engagement_id_provider: Callable[[], str] | None = None,
+) -> LayerBProvider:
+    """Build real LayerBEngine. Falls back to degraded no-op when API keys missing.
+
+    Slice 13 threads the L5 sliding-window summary repo + engagement-id
+    provider into the engine so :meth:`LayerBEngine.evaluate` can read the
+    latest summary and inject it as a cached system block. Both are optional
+    so callers that don't wire the summariser (older tests, the degraded
+    path) keep working unchanged.
+    """
     try:
         llm = AnthropicClient()
         voyage = VoyageClient()
         kb_index_path = REDROBIN_ROOT / "shared" / "kb-index" / "index.npz"
         store = VectorStore.load(kb_index_path) if kb_index_path.exists() else VectorStore()
         kb = KBService(voyage=voyage, store=store)
-        return LayerBEngine(llm=llm, kb=kb)
+        return LayerBEngine(
+            llm=llm,
+            kb=kb,
+            summary_repo=summary_repo,
+            engagement_id_provider=engagement_id_provider,
+        )
     except RuntimeError:
         # API keys missing — fall back to a no-op Layer B so daemon can still serve
         # Layer A verdicts. Logged at startup; operator sees the banner in TUI.
@@ -99,7 +119,12 @@ class PipelineDependencies:
     layer_b: LayerBProvider
 
 
-def build_default_dependencies(rules: list[Rule] | None = None) -> PipelineDependencies:
+def build_default_dependencies(
+    rules: list[Rule] | None = None,
+    *,
+    summary_repo: ContextSummaryRepo | None = None,
+    engagement_id_provider: Callable[[], str] | None = None,
+) -> PipelineDependencies:
     """Resolve the real LayerA/LayerB stack from disk + API keys.
 
     Used by the daemon lifespan. ``rules`` is optional: if the caller already
@@ -107,6 +132,11 @@ def build_default_dependencies(rules: list[Rule] | None = None) -> PipelineDepen
     so the hot-reload watcher has a handle on the loader), it should pass them
     in to avoid double-loading. When ``None``, the factory falls back to
     ``REDROBIN_ROOT/rules`` for backward compatibility.
+
+    Slice 13 adds ``summary_repo`` + ``engagement_id_provider`` so the
+    lifespan can thread the L5 sliding-window summary repo into Layer B at
+    construction time. Both default to ``None`` so test callers that don't
+    care about the summariser stay unaffected.
 
     The scope is wildcard (empty out_of_scope) until engagement-aware scope
     wiring lands in Slice 6.
@@ -120,7 +150,10 @@ def build_default_dependencies(rules: list[Rule] | None = None) -> PipelineDepen
             rules = []
     layer_a = LayerAEngine(rules=rules, passthrough=set(DEFAULT_PASSTHROUGH))
     scope = ScopeEnforcer(in_scope=[], out_of_scope=[])
-    layer_b = _build_layer_b()
+    layer_b = _build_layer_b(
+        summary_repo=summary_repo,
+        engagement_id_provider=engagement_id_provider,
+    )
     return PipelineDependencies(scope=scope, layer_a=layer_a, layer_b=layer_b)
 
 

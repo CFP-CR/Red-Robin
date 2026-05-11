@@ -30,6 +30,7 @@ class LLMProvider(ABC):
         stable_system_prompt: str,
         cacheable_kb_chunks: list[str],
         cacheable_engagement_summary: str = "",
+        cacheable_recent_summary: str = "",
         dynamic_state: str,
         user_message: str,
         max_tokens: int = 1024,
@@ -40,7 +41,13 @@ class LLMProvider(ABC):
           1. Stable prompt (persona + format spec) → 1h cache.
           2. KB chunks (RAG retrieval, per-query) → 5min cache.
           3. Engagement summary (stable per session, slice 7) → 5min cache.
-          4. Dynamic state (per-turn working memory) → uncached.
+          4. Recent summary (sliding-window L5 compression, slice 13) → 5min cache.
+          5. Dynamic state (per-turn working memory) → uncached.
+
+        Slice 13 splits the L5 sliding-window summary into its own block so
+        cache invalidation stays orthogonal: the engagement summary changes
+        rarely (engagement switch) while the recent summary changes every
+        ~25 verdicts (window boundary).
 
         Empty strings / empty lists collapse their block away so the system
         array stays minimal.

@@ -25,6 +25,9 @@ from redrobin.application.kb_service import KBService
 from redrobin.application.redactor import Redactor
 from redrobin.domain.llm import LLMProvider
 from redrobin.domain.opsec import Verdict, VerdictAction
+from redrobin.infrastructure.persistence.context_summary_repo import (
+    ContextSummaryRepo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +81,8 @@ class LayerBEngine:
         kb: KBService,
         top_k_kb_chunks: int = 5,
         context_provider: type[EngagementContext] = EngagementContext,
+        summary_repo: ContextSummaryRepo | None = None,
+        engagement_id_provider: Callable[[], str] | None = None,
     ):
         self._llm = llm
         self._kb = kb
@@ -89,6 +94,16 @@ class LayerBEngine:
         # the LLM boundary). Verdict flow unchanged; only wire payload is
         # affected.
         self._redactor = Redactor()
+        # Slice 13 — inject the latest L5 sliding-window summary into a
+        # separate cached system block so long engagements stay coherent
+        # after the most recent verdicts roll off the in-memory window.
+        # ``engagement_id_provider`` returns the active engagement so the
+        # repo lookup picks the right summary even after a mid-session
+        # engagement switch. Both kwargs default to ``None`` so the legacy
+        # call sites (unit tests, build-without-summarizer paths) keep
+        # working — the cached block collapses when no summary is found.
+        self._summary_repo = summary_repo
+        self._engagement_id_provider = engagement_id_provider
         # Retroactive hook — bound by the factory to
         # ``VerdictPipeline._on_retroactive`` so callers that drive Layer B
         # outside the pipeline still surface retroactive verdicts on the bus.
@@ -120,6 +135,24 @@ class LayerBEngine:
             if self._engagement_summary
             else ""
         )
+        # Slice 13 — pull the latest L5 sliding-window summary for the
+        # active engagement. The repo lookup is one indexed sqlite query
+        # (engagement_id + LIMIT 1) per evaluate() — well below the per-call
+        # LLM latency floor, so this stays a fixed-cost addition.
+        recent_summary_block = ""
+        if (
+            self._summary_repo is not None
+            and self._engagement_id_provider is not None
+        ):
+            try:
+                eng_id = self._engagement_id_provider()
+                summaries = self._summary_repo.list_recent(eng_id, limit=1)
+                if summaries:
+                    recent_summary_block = summaries[0].text
+            except Exception:
+                logger.exception(
+                    "Layer B: failed to load recent summary; continuing without it"
+                )
         # Reserved for future per-turn working memory (e.g., hosts seen this
         # tick). Today the daemon does not feed working memory into Layer B,
         # so dynamic_state stays empty and Anthropic skips the block entirely.
@@ -141,6 +174,7 @@ class LayerBEngine:
                 stable_system_prompt=SYSTEM_PROMPT,
                 cacheable_kb_chunks=kb_chunks,
                 cacheable_engagement_summary=engagement_block,
+                cacheable_recent_summary=recent_summary_block,
                 dynamic_state=dynamic_state,
                 user_message=user_message,
             )

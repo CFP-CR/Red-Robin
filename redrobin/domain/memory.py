@@ -167,3 +167,20 @@ class PromotedLesson:
     summary: str
     occurrence_count: int
     created_at: datetime
+
+
+@dataclass(frozen=True)
+class ContextSummary:
+    """L5 sliding-window summary — engagement-specific compression of recent episodes.
+
+    Produced periodically by ``L5Summarizer`` once enough new episodes have
+    accumulated (``window_size``). Persisted in :class:`ContextSummaryRepo`
+    and surfaced as a cached system block in Layer B's prompt so long
+    engagements stay coherent after the most recent verdicts roll off the
+    in-memory window.
+    """
+
+    engagement_id: str
+    text: str
+    window_size: int
+    created_at: datetime = field(default_factory=datetime.now)

@@ -26,9 +26,15 @@ from redrobin.application.cs_adapter_lifecycle import build_adapter, load_adapte
 from redrobin.application.engagement_loader import Engagement, EngagementLoader
 from redrobin.application.event_bus import EventBus
 from redrobin.application.lesson_promoter import LessonPromoter
-from redrobin.application.longterm_lifecycle import EpisodicRepo, LongtermRepo
+from redrobin.application.longterm_lifecycle import (
+    ContextSummaryRepo,
+    EpisodicRepo,
+    LongtermRepo,
+    build_summarizer_llm,
+)
 from redrobin.application.rules_lifecycle import RulesLoader
 from redrobin.application.scope_enforcer import ScopeEnforcer
+from redrobin.application.summarizer import L5Summarizer
 from redrobin.application.verdict_pipeline_factory import (
     build_default_dependencies,
     build_pipeline,
@@ -141,6 +147,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.episodic_repo = episodic_repo
     app.state.longterm_repo = longterm_repo
 
+    # Slice 13 — L5 sliding-window summary store. Persists periodic
+    # compressions of recent episodes so long engagements stay coherent
+    # after the most recent verdicts roll off the in-memory window.
+    summary_path = Path(
+        os.environ.get(
+            "REDROBIN_SUMMARY_PATH",
+            str(Path.home() / ".redrobin" / "context_summaries.db"),
+        )
+    )
+    summary_repo = ContextSummaryRepo(summary_path)
+    app.state.summary_repo = summary_repo
+
     # Reducer subscribes to the bus and mutates working memory + episodic log.
     reducer = WorkingMemoryReducer(
         bus=event_bus,
@@ -160,7 +178,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Slice 6: ``scope`` is built from engagement.yaml above (or wildcard
     # fallback). The factory still ships a default scope on ``deps.scope`` —
     # we override it here with the engagement-aware enforcer.
-    deps = build_default_dependencies(rules=initial_rules)
+    # Slice 13 — read the active engagement_id off ``app.state`` each call so
+    # a future engagement switch surfaces the right summary on the next
+    # verdict without rebuilding Layer B. Today the slug is set once in
+    # lifespan, but the indirection is cheap and keeps the API stable.
+    def _engagement_id_provider() -> str:
+        return getattr(app.state, "engagement_id", engagement_id)
+
+    deps = build_default_dependencies(
+        rules=initial_rules,
+        summary_repo=summary_repo,
+        engagement_id_provider=_engagement_id_provider,
+    )
     # Slice 7 — inject the engagement summary into Layer B's cached system
     # prompt so retroactive verdicts incorporate engagement-specific OPSEC
     # posture (low-detection priority, scope nuances, prior tradecraft
@@ -234,13 +263,46 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     promoter_task = asyncio.create_task(_promoter_loop(), name="lesson_promoter")
     app.state.promoter_task = promoter_task
 
+    # Slice 13 — periodic L5 sliding-window summariser. Reads recent episodes
+    # from the same ``episodic_repo`` the reducer writes to, compresses them
+    # via the cheap summariser model, and appends one row per window to the
+    # ``summary_repo`` that Layer B reads on every ``evaluate(...)`` call.
+    # Schedules next to the promoter loop so a single daemon-wide cancel
+    # tears both down on shutdown.
+    summarizer = L5Summarizer(
+        episodic_repo=episodic_repo,
+        summary_repo=summary_repo,
+        llm=build_summarizer_llm(),
+        engagement_id=engagement_id,
+        window_size=int(os.environ.get("REDROBIN_L5_WINDOW", "25")),
+    )
+    app.state.summarizer = summarizer
+    summarizer_interval = float(
+        os.environ.get("REDROBIN_L5_INTERVAL_SEC", "30")
+    )
+
+    async def _summarizer_loop() -> None:
+        try:
+            while True:
+                await asyncio.sleep(summarizer_interval)
+                try:
+                    await summarizer.run_once()
+                except Exception:
+                    logger.exception("L5 summariser run failed")
+        except asyncio.CancelledError:
+            return
+
+    summarizer_task = asyncio.create_task(_summarizer_loop(), name="l5_summarizer")
+    app.state.summarizer_task = summarizer_task
+
     logger.info(
         "daemon lifespan startup complete: rules_dir=%s rules=%d adapters=%d "
-        "promoter_interval=%.1fs",
+        "promoter_interval=%.1fs l5_interval=%.1fs",
         rules_dir,
         len(initial_rules),
         len(app.state.cs_adapters),
         promoter_interval,
+        summarizer_interval,
     )
 
     try:
@@ -255,12 +317,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 await client.aclose()
             except Exception:
                 logger.exception("error closing cs_adapter %s", name)
-        # 1. Cancel the promoter loop first. It runs independently of the bus
-        #    and reducer; if we cancel it before bus.close() we avoid a tail
-        #    promotion racing the shutdown.
+        # 1. Cancel the promoter + summariser loops first. Both run
+        #    independently of the bus and reducer; cancelling them before
+        #    ``bus.close()`` avoids a tail promotion/summarisation racing
+        #    the shutdown.
         promoter_task.cancel()
         try:
             await asyncio.wait_for(promoter_task, timeout=2.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            pass
+        summarizer_task.cancel()
+        try:
+            await asyncio.wait_for(summarizer_task, timeout=2.0)
         except (asyncio.TimeoutError, asyncio.CancelledError):
             pass
         # 2. Close the bus — this broadcasts the sentinel to all subscribers
