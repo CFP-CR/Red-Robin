@@ -192,3 +192,34 @@ on beacon_tasked {
 
 
 println("[Red Robin] .cna loaded; gate active.");
+
+
+# ===== Heartbeat — surface daemon outages in the CS event log =====
+# Without this loop the operator would silently keep typing while the alias
+# gate fails open (Sleep's HTTP timeouts swallow the dropped connection).
+# Hitting /v1/adapter/heartbeat every 30s gives them a visible warning.
+sub redrobin_heartbeat {
+    local('$url $conn $code');
+    try {
+        $url = [new URL: $REDROBIN_URL . "/v1/adapter/heartbeat?adapter=cs-main"];
+        $conn = [$url openConnection];
+        [$conn setRequestMethod: "GET"];
+        [$conn setConnectTimeout: 1000];
+        [$conn setReadTimeout: 1000];
+        $code = [$conn getResponseCode];
+        [$conn disconnect];
+        if ($code != 200) {
+            warn("[Red Robin] daemon heartbeat returned " . $code . "; alias gates may fail-open");
+        }
+    } catch $e {
+        warn("[Red Robin] daemon unreachable; alias gates will fail-open");
+    }
+}
+
+# Fire on a background thread so the main Aggressor event pump never blocks.
+fork({
+    while (1) {
+        sleep(30000);
+        redrobin_heartbeat();
+    }
+});

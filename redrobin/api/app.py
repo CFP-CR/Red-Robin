@@ -363,6 +363,17 @@ def create_app() -> FastAPI:
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/v1/adapter/heartbeat")
+    async def adapter_heartbeat(adapter: str) -> dict[str, str]:
+        """Simple liveness probe for the .cna heartbeat loop.
+
+        Unauthenticated and stateless — the .cna fires this every 30s so the
+        operator's CS event log warns "[Red Robin] daemon unreachable" the
+        moment the daemon dies. Distinct from POST /v1/adapters/heartbeat
+        which is session-bound and refreshes a live registry entry.
+        """
+        return {"status": "ok", "adapter": adapter}
+
     @app.get("/v1/readyz")
     async def readyz(request: Request) -> dict[str, str]:
         loader = getattr(request.app.state, "rules_loader", None)
