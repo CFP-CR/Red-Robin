@@ -331,12 +331,41 @@ def cmd_memory_edit(args: argparse.Namespace) -> int:
 
 
 def cmd_replay(args: argparse.Namespace) -> int:
-    # Minimal: print intent; full impl invokes Sliver-Mock-style replayer
+    import asyncio
+
+    import httpx
+
+    from redrobin.cli_helpers.replay import replay_to_daemon
+
     archive = Path(args.archive).expanduser().resolve()
     if not archive.exists():
         print(f"[!] {archive} does not exist", file=sys.stderr)
         return 1
-    print(f"[*] Replay {archive} at {args.speed}x - wire daemon-side in v0.1.1")
+    if not archive.is_file():
+        print(f"[!] {archive} is not a regular file", file=sys.stderr)
+        return 1
+
+    token: str | None = args.token
+    if token is None:
+        try:
+            token = get_or_create_token()
+        except Exception:
+            token = None
+
+    base_url = args.base_url
+
+    async def _run() -> int:
+        async with httpx.AsyncClient() as client:
+            return await replay_to_daemon(
+                file=archive, client=client, base_url=base_url, token=token
+            )
+
+    try:
+        n = asyncio.run(_run())
+    except httpx.HTTPError as e:
+        print(f"[!] replay failed: {e}", file=sys.stderr)
+        return 1
+    print(f"[+] Replayed {n} event(s) to {base_url}")
     return 0
 
 
@@ -433,8 +462,23 @@ def build_parser() -> argparse.ArgumentParser:
     memory_edit.set_defaults(func=cmd_memory_edit)
 
     replay = sub.add_parser("replay")
-    replay.add_argument("archive")
-    replay.add_argument("--speed", type=float, default=1.0)
+    replay.add_argument("archive", help="Path to a JSONL trace file")
+    replay.add_argument(
+        "--base-url",
+        default="http://127.0.0.1:7777",
+        help="Daemon HTTP base URL (default: http://127.0.0.1:7777)",
+    )
+    replay.add_argument(
+        "--token",
+        default=None,
+        help="Bearer token (defaults to ~/.redrobin/transport.token)",
+    )
+    replay.add_argument(
+        "--speed",
+        type=float,
+        default=1.0,
+        help="Reserved for future pacing control (currently unused)",
+    )
     replay.set_defaults(func=cmd_replay)
 
     return parser

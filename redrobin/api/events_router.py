@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from redrobin.api.auth import require_bearer
 from redrobin.application.engagement_service import EngagementService
@@ -62,3 +62,21 @@ async def ingest(
         f.write(json.dumps(envelope) + "\n")
 
     return {"ok": True, "stored": True}
+
+
+@router.post("/replay", status_code=202)
+async def replay_event(event: dict[str, Any], request: Request) -> dict[str, str]:
+    """Forward an event onto the in-process event bus so all subscribers see it.
+
+    Used by ``redrobin replay`` to feed an archived JSONL trace through the
+    daemon as if it were live. No schema validation — the trace owner is
+    responsible for ensuring it matches whatever consumers expect.
+    """
+    bus = getattr(request.app.state, "event_bus", None)
+    if bus is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="event_bus not initialized",
+        )
+    await bus.publish(event)
+    return {"status": "accepted"}

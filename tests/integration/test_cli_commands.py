@@ -135,3 +135,162 @@ async def test_kb_ingest_chunk_ids_are_indexed(tmp_path):
     # IDs should be unique and ordered
     assert len(chunk_ids) == len(set(chunk_ids))
     assert chunk_ids == sorted(chunk_ids, key=lambda s: int(s.rsplit("_", 1)[-1]))
+
+
+@pytest.mark.asyncio
+async def test_replay_posts_each_line(tmp_path):
+    import json
+
+    import httpx
+
+    from redrobin.cli_helpers.replay import replay_to_daemon
+
+    src = tmp_path / "trace.jsonl"
+    src.write_text(
+        json.dumps({"type": "c2.beacon_output", "payload": {"beacon_id": "B-1", "output": "hi"}})
+        + "\n"
+        + json.dumps(
+            {"type": "c2.beacon_checkin", "payload": {"beacon_id": "B-2", "hostname": "WIN10"}}
+        )
+        + "\n"
+    )
+
+    posted: list[dict] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        posted.append(json.loads(req.content))
+        return httpx.Response(202)
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        n = await replay_to_daemon(
+            file=src, client=client, base_url="http://daemon", token=None
+        )
+    assert n == 2
+    assert posted[0]["type"] == "c2.beacon_output"
+    assert posted[1]["type"] == "c2.beacon_checkin"
+
+
+@pytest.mark.asyncio
+async def test_replay_skips_blank_lines(tmp_path):
+    import json
+
+    import httpx
+
+    from redrobin.cli_helpers.replay import replay_to_daemon
+
+    src = tmp_path / "trace.jsonl"
+    src.write_text(
+        "\n"
+        + json.dumps({"type": "c2.beacon_output", "payload": {"beacon_id": "B-1"}})
+        + "\n"
+        + "   \n"
+        + json.dumps({"type": "c2.beacon_checkin", "payload": {"beacon_id": "B-2"}})
+        + "\n"
+    )
+
+    posted: list[dict] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        posted.append(json.loads(req.content))
+        return httpx.Response(202)
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        n = await replay_to_daemon(
+            file=src, client=client, base_url="http://daemon", token=None
+        )
+    assert n == 2
+    assert len(posted) == 2
+
+
+@pytest.mark.asyncio
+async def test_replay_sends_bearer_token_when_provided(tmp_path):
+    import json
+
+    import httpx
+
+    from redrobin.cli_helpers.replay import replay_to_daemon
+
+    src = tmp_path / "trace.jsonl"
+    src.write_text(json.dumps({"type": "c2.beacon_output"}) + "\n")
+
+    seen_auth: list[str | None] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen_auth.append(req.headers.get("authorization"))
+        return httpx.Response(202)
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        n = await replay_to_daemon(
+            file=src, client=client, base_url="http://daemon", token="secret-xyz"
+        )
+    assert n == 1
+    assert seen_auth == ["Bearer secret-xyz"]
+
+
+def test_replay_endpoint_publishes_to_event_bus(tmp_path, monkeypatch):
+    """POST /v1/events/replay forwards the body to the in-process EventBus."""
+    import asyncio
+
+    from fastapi.testclient import TestClient
+
+    root = tmp_path / ".redrobin"
+    root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("REDROBIN_RULES_DIR", str(root / "rules"))
+    monkeypatch.setattr("redrobin.infrastructure.filesystem.REDROBIN_ROOT", root)
+    monkeypatch.setattr("redrobin.application.verdict_pipeline_factory.REDROBIN_ROOT", root)
+    monkeypatch.setattr("redrobin.api.events_router.REDROBIN_ROOT", root)
+    monkeypatch.setattr("redrobin.application.engagement_service.REDROBIN_ROOT", root)
+    from redrobin.application.verdict_pipeline_factory import reset_pipeline_cache
+
+    reset_pipeline_cache()
+
+    from redrobin.api.app import create_app
+    from redrobin.infrastructure.transport.bearer import get_or_create_token
+
+    app = create_app()
+    auth = {"Authorization": f"Bearer {get_or_create_token()}"}
+    payload = {"type": "c2.beacon_output", "payload": {"beacon_id": "B-1", "output": "hi"}}
+
+    seen: list[dict] = []
+    with TestClient(app) as client:
+        # Subscribe directly to the daemon's bus to capture published events.
+        bus = app.state.event_bus
+        q = asyncio.get_event_loop().run_until_complete(bus.subscribe())
+
+        r = client.post("/v1/events/replay", json=payload, headers=auth)
+        assert r.status_code == 202
+        assert r.json() == {"status": "accepted"}
+
+        # Drain the queue (publish is sync at the queue level via put_nowait).
+        async def _drain():
+            while not q.empty():
+                seen.append(await q.get())
+
+        asyncio.get_event_loop().run_until_complete(_drain())
+
+    types = [e.get("type") for e in seen]
+    assert "c2.beacon_output" in types
+
+
+def test_replay_endpoint_requires_auth(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    root = tmp_path / ".redrobin"
+    root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("REDROBIN_RULES_DIR", str(root / "rules"))
+    monkeypatch.setattr("redrobin.infrastructure.filesystem.REDROBIN_ROOT", root)
+    monkeypatch.setattr("redrobin.application.verdict_pipeline_factory.REDROBIN_ROOT", root)
+    monkeypatch.setattr("redrobin.api.events_router.REDROBIN_ROOT", root)
+    monkeypatch.setattr("redrobin.application.engagement_service.REDROBIN_ROOT", root)
+    from redrobin.application.verdict_pipeline_factory import reset_pipeline_cache
+
+    reset_pipeline_cache()
+
+    from redrobin.api.app import create_app
+
+    with TestClient(create_app()) as client:
+        r = client.post("/v1/events/replay", json={"type": "c2.beacon_output"})
+    assert r.status_code in (401, 422)
