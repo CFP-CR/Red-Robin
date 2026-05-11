@@ -37,3 +37,21 @@ def test_ws_forwards_published_event(app_client):
         evt = ws.receive_json()
         assert evt["type"] == "opsec.verdict"
         assert evt["payload"]["verdict"] == "ALLOW"
+
+
+def test_two_ws_clients_both_receive(app_client):
+    app, client = app_client
+    token = get_or_create_token()
+    with client.websocket_connect(f"/v1/tui?token={token}") as ws_a, \
+            client.websocket_connect(f"/v1/tui?token={token}") as ws_b:
+        ws_a.receive_json()  # snapshot
+        ws_b.receive_json()  # snapshot
+        client.portal.call(
+            app.state.event_bus.publish,
+            {"type": "opsec.verdict", "payload": {"verdict": "BLOCK"}},
+        )
+        ea = ws_a.receive_json()
+        eb = ws_b.receive_json()
+        assert ea["type"] == "opsec.verdict"
+        assert eb["type"] == "opsec.verdict"
+        assert ea == eb
