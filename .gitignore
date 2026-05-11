@@ -32,3 +32,6 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+# Alembic dev-time DB (not for production state)
+.redrobin-dev.db
