@@ -30,7 +30,10 @@ def layer_a_with_mimikatz():
 
 @pytest.fixture
 def scope():
-    return ScopeEnforcer(in_scope=["*.acme.local"], out_of_scope=["10.0.99.0/24"])
+    # Canonical engagement.yaml semantics: bare domain → suffix match.
+    # ``acme.local`` matches ``dc01.acme.local`` via the spec's domain-suffix
+    # rule; the legacy ``*.acme.local`` glob is no longer accepted by check().
+    return ScopeEnforcer(in_scope=["acme.local"], out_of_scope=["10.0.99.0/24"])
 
 
 @pytest.fixture

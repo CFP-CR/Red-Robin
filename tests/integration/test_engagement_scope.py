@@ -74,3 +74,12 @@ async def test_lifespan_loads_engagement_scope_into_pipeline(tmp_path, monkeypat
         scope = app.state.verdict_pipeline._scope
         assert scope.is_in_scope("dc01.corp.local") is True
         assert scope.is_in_scope("api.bigcorp.com") is False
+        # Gap #4 closure: the live verdict path calls ``scope.check(targets)``,
+        # which must agree with ``is_in_scope``. Before Slice 6 this assertion
+        # would have failed — ``check`` walked the fnmatch-based ``_matches_any``
+        # while ``is_in_scope`` walked the suffix/CIDR matcher, so the live
+        # pipeline did not actually enforce engagement.yaml-loaded scope.
+        assert scope.check(["dc01.corp.local"]) is None
+        violation = scope.check(["api.bigcorp.com"])
+        assert violation is not None
+        assert "out-of-scope" in violation

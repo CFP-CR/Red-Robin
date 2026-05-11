@@ -2,7 +2,7 @@
 
 Per spec §1.2.1 verdict pipeline + §6 T9 threat mitigation. Extracts target
 hosts/IPs from common Beacon command patterns and validates them against the
-engagement's out_of_scope list (glob + CIDR).
+engagement.yaml-loaded scope (exact host + domain-suffix + CIDR + wildcard).
 
 Coverage (v0.1):
   - jump <method> <target>
@@ -12,14 +12,24 @@ Coverage (v0.1):
   - link <target>
   - shell/run with nxc / crackmapexec / -H / --host / --target flags
 
-Out-of-scope:
+Scope matching (single source of truth — shared by ``check`` and ``is_in_scope``):
+  - ``"*"`` wildcard matches anything
+  - exact hostname/IP match
+  - domain-suffix match (``corp.local`` matches ``dc01.corp.local``)
+  - CIDR membership (``10.0.0.0/24`` matches ``10.0.0.5``); CIDR overlap when
+    the target is itself a network (e.g., nxc against ``192.168.1.0/24``)
+  - ``out_of_scope`` wins on conflict
+
+Out-of-scope (deliberately):
   - IPv6 target extraction (v0.2 — adds ipv6_address pattern)
   - DNS resolution (out of v0.1 scope; operator may write hostname OR IP)
+  - fnmatch globs — Phase 1's ``_matches_any`` used fnmatch but the spec
+    never anchored to globs; engagement.yaml uses bare hostnames + CIDRs. The
+    glob matcher was dropped in Slice 6 to close gap #4 (live verdict path).
 """
 
 from __future__ import annotations
 
-import fnmatch
 import ipaddress
 import re
 
@@ -53,32 +63,49 @@ class ScopeEnforcer:
         return targets
 
     def check(self, targets: list[str]) -> str | None:
-        """Return violation reason if any target matches out_of_scope; None otherwise."""
+        """Return violation reason for the first target not in scope; None otherwise.
+
+        Slice 6 (gap #4 closure): now uses :meth:`is_in_scope` semantics —
+        a target is in scope iff it is not in ``out_of_scope`` AND it matches
+        ``in_scope`` (or in_scope contains the ``"*"`` wildcard). Targets
+        outside the positive in_scope list are rejected, not just those
+        explicitly listed in out_of_scope.
+        """
         for target in targets:
-            if self._matches_any(target, self.out_of_scope):
+            if not self.is_in_scope(target):
                 return f"ROE violation: target {target!r} is out-of-scope"
         return None
 
     def is_in_scope(self, target: str) -> bool:
         """Return True iff ``target`` is in scope per engagement.yaml semantics.
 
-        Slice 6 — engagement-aware scope check used by the lifespan to validate
-        operator-supplied targets against the loaded engagement. Distinct from
-        :meth:`check` (which is glob-based and walks ``out_of_scope`` only):
-        ``is_in_scope`` enforces the full positive+negative ROE per spec.
+        Slice 6 — single source of truth for scope evaluation, used by both
+        the live verdict pipeline (via :meth:`check`) and the engagement
+        loader's lifespan wiring.
 
         Match rules (out_of_scope wins on conflict):
           - ``"*"`` wildcard matches anything
-          - exact hostname match
-          - domain suffix match (``corp.local`` matches ``dc01.corp.local``)
-          - CIDR membership (``10.0.0.0/24`` matches ``10.0.0.5``)
+          - exact hostname/IP match
+          - domain-suffix match (``corp.local`` matches ``dc01.corp.local``)
+          - CIDR membership (``10.0.0.0/24`` matches ``10.0.0.5``); CIDR overlap
+            when the target is itself a network (e.g., ``192.168.1.0/24``)
         """
-        if self._is_in_scope_match(target, self.out_of_scope):
+        if self._matches_any(target, self.out_of_scope):
             return False
-        return self._is_in_scope_match(target, self.in_scope) or "*" in self.in_scope
+        if "*" in self.in_scope:
+            return True
+        return self._matches_any(target, self.in_scope)
 
     @staticmethod
-    def _is_in_scope_match(target: str, patterns: list[str]) -> bool:
+    def _matches_any(target: str, patterns: list[str]) -> bool:
+        """Canonical matcher — exact, suffix, CIDR membership, CIDR overlap.
+
+        Single matcher shared by ``check`` and ``is_in_scope``. Replaces the
+        Phase 1 fnmatch-based glob matcher (which was never part of the spec)
+        and the parallel ``_is_in_scope_match`` helper (which lacked CIDR
+        overlap). Closes gap #4 by ensuring the live verdict path enforces
+        engagement.yaml-loaded scope per spec semantics.
+        """
         for pat in patterns:
             if pat == "*":
                 return True
@@ -87,36 +114,22 @@ class ScopeEnforcer:
             if "/" in pat:
                 try:
                     net = ipaddress.ip_network(pat, strict=False)
-                    try:
-                        if ipaddress.ip_address(target) in net:
-                            return True
-                    except ValueError:
-                        continue
                 except ValueError:
-                    pass
-            if target.endswith("." + pat):
-                return True
-        return False
-
-    @staticmethod
-    def _matches_any(target: str, patterns: list[str]) -> bool:
-        for p in patterns:
-            # CIDR?
-            if "/" in p:
-                try:
-                    net = ipaddress.ip_network(p, strict=False)
-                    # If target is an IP, check membership
+                    net = None
+                if net is not None:
+                    # Target is a bare IP — membership.
                     try:
                         if ipaddress.ip_address(target) in net:
                             return True
                     except ValueError:
-                        # target is not a bare IP (e.g., hostname or CIDR itself);
-                        # try parsing target as a network and check overlap
+                        # Target is itself a CIDR — check overlap. Safety
+                        # critical: if out_of_scope=10.0.0.0/16 and target
+                        # is 10.0.99.0/24, the subnet relationship must
+                        # still trigger a block.
                         try:
                             target_net = ipaddress.ip_network(target, strict=False)
                         except ValueError:
                             target_net = None
-                        # subnet_of requires matching network classes (v4 vs v6)
                         if isinstance(net, ipaddress.IPv4Network) and isinstance(
                             target_net, ipaddress.IPv4Network
                         ):
@@ -127,9 +140,7 @@ class ScopeEnforcer:
                         ):
                             if target_net.subnet_of(net) or net.subnet_of(target_net):
                                 return True
-                except ValueError:
-                    pass  # not a valid CIDR; fall through to glob
-            # Glob match (hostname patterns)
-            if fnmatch.fnmatch(target.lower(), p.lower()):
+            # Domain-suffix match (canonical engagement.yaml semantics).
+            if target.endswith("." + pat):
                 return True
         return False
