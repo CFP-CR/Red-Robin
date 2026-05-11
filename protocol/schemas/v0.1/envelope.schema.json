@@ -7,19 +7,22 @@
   "properties": {
     "spec_version": {
       "type": "string",
+      "description": "Wire protocol version. Must match major.minor of supported range; only v0.1.x in v0.1 ship.",
       "pattern": "^0\\.1\\.\\d+$"
     },
     "id": {
       "type": "string",
-      "pattern": "^evt_[0-9A-Z]{26}$",
-      "description": "ULID prefixed with evt_"
+      "description": "Event ID — ULID prefixed with evt_. Crockford base32 (no I/L/O/U).",
+      "pattern": "^evt_[0-9ABCDEFGHJKMNPQRSTVWXYZ]{26}$"
     },
     "ts": {
       "type": "string",
-      "format": "date-time"
+      "description": "RFC3339 UTC timestamp (e.g., 2026-05-10T14:32:00.000Z)",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$"
     },
     "source": {
       "type": "object",
+      "description": "Provenance of the event (adapter that emitted it, engagement context).",
       "required": ["adapter", "version", "engagement_id"],
       "properties": {
         "adapter": {"type": "string"},
@@ -31,6 +34,7 @@
     },
     "event": {
       "type": "object",
+      "description": "Type-tagged event payload. See protocol/schemas/v0.1/events/.",
       "required": ["type"],
       "properties": {
         "type": {
@@ -52,7 +56,8 @@
       }
     },
     "extensions": {
-      "type": "object"
+      "type": "object",
+      "description": "Forward-compatible namespaced extensions. Vendor-specific keys go here."
     }
   },
   "additionalProperties": false
