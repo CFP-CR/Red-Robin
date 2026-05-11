@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable
 
 from redrobin.application.kb_service import KBService
+from redrobin.application.redactor import Redactor
 from redrobin.domain.llm import LLMProvider
 from redrobin.domain.opsec import Verdict, VerdictAction
 
@@ -83,6 +84,11 @@ class LayerBEngine:
         self._top_k = top_k_kb_chunks
         self._context_cls = context_provider
         self._engagement_summary = ""  # set per-engagement by daemon (Task 28+)
+        # Slice 12 — sanitize the operator's command before it is embedded in
+        # the user prompt sent to Anthropic. Closes gap #19 (secrets leak at
+        # the LLM boundary). Verdict flow unchanged; only wire payload is
+        # affected.
+        self._redactor = Redactor()
         # Retroactive hook — bound by the factory to
         # ``VerdictPipeline._on_retroactive`` so callers that drive Layer B
         # outside the pipeline still surface retroactive verdicts on the bus.
@@ -118,9 +124,15 @@ class LayerBEngine:
         # tick). Today the daemon does not feed working memory into Layer B,
         # so dynamic_state stays empty and Anthropic skips the block entirely.
         dynamic_state = ""
+        # Slice 12 — scrub secrets from both the parsed command and raw input
+        # before embedding them in the user prompt. The LLM's verdict reasoning
+        # is unaffected: it can still see flag names (/password) and command
+        # shapes, just not the cleartext value.
+        safe_command = self._redactor.redact(command)
+        safe_raw = self._redactor.redact(raw)
         user_message = (
-            f"Proposed command: {command}\n"
-            f"Raw input: {raw}\n\n"
+            f"Proposed command: {safe_command}\n"
+            f"Raw input: {safe_raw}\n\n"
             "Decide: PASS / WARN / BLOCK with rationale + suggestions."
         )
 
