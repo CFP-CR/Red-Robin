@@ -1,10 +1,14 @@
 """Slice 14 integration: heartbeat, VectorStore JSON, doctor exit code."""
 from __future__ import annotations
 
+import json
+
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
 from redrobin.api.app import create_app
+from redrobin.infrastructure.vector_store import VectorStore
 
 
 @pytest.fixture
@@ -34,3 +38,54 @@ def test_heartbeat_endpoint(tmp_path, monkeypatch, _isolated_root):
         body = resp.json()
         assert body["status"] == "ok"
         assert body["adapter"] == "cs-main"
+
+
+def test_vector_store_metadata_json_serializable(tmp_path):
+    """Nested-dict metadata survives a save/load round-trip via JSON.
+
+    The Phase 1 implementation persisted ``metadata`` via ``repr()`` and
+    rebuilt it with ``eval()`` — fine for flat dicts but unsafe + lossy for
+    anything with a numeric type or nested structure. JSON keeps the shape
+    intact and removes the eval() footgun.
+    """
+    store = VectorStore()
+    store.add(
+        ids=["d1-0"],
+        texts=["hello"],
+        vectors=[[0.1, 0.2, 0.3]],
+        metadatas=[{"tags": ["x"], "score": 0.9, "obj": {"nested": True}}],
+    )
+    out_path = tmp_path / "kb.npz"
+    store.save(out_path)
+
+    reloaded = VectorStore.load(out_path)
+    hits = reloaded.search(query_vector=[0.1, 0.2, 0.3], top_k=1)
+    assert len(hits) == 1
+    record, _score = hits[0]
+    assert record.id == "d1-0"
+    assert record.metadata == {"tags": ["x"], "score": 0.9, "obj": {"nested": True}}
+
+
+def test_vector_store_metadata_persisted_as_json_not_repr(tmp_path):
+    """Lock in JSON-on-disk so a future refactor can't quietly regress.
+
+    Reads the .npz raw and asserts each metadata blob parses as JSON. This
+    is the bit that actually closes gap #22 — the previous round-trip
+    happened to work for flat dicts even with repr(), so a round-trip test
+    alone wouldn't catch a regression to repr().
+    """
+    store = VectorStore()
+    store.add(
+        ids=["a"],
+        texts=["t"],
+        vectors=[[1.0, 0.0]],
+        metadatas=[{"k": "v", "n": 1}],
+    )
+    path = tmp_path / "index.npz"
+    store.save(path)
+
+    data = np.load(path, allow_pickle=True)
+    raw = str(data["metas"][0])
+    # JSON-loadable; repr() would emit single quotes and fail json.loads.
+    parsed = json.loads(raw)
+    assert parsed == {"k": "v", "n": 1}

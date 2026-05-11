@@ -6,6 +6,7 @@ Vectors live in memory, persisted as a single .npz at `~/.redrobin/shared/kb-ind
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -74,8 +75,14 @@ class VectorStore:
             return
         ids = np.array([r.id for r in self._records], dtype=object)
         texts = np.array([r.text for r in self._records], dtype=object)
-        # metadatas serialized as repr — JSON would be cleaner; defer to v0.2
-        metas = np.array([repr(r.metadata) for r in self._records], dtype=object)
+        # Metadata is JSON-serialized so downstream code can filter on tags,
+        # scores, nested dicts, etc. Previously stored via repr() — fine for
+        # flat string dicts but lossy for typed/nested structures and unsafe
+        # to deserialize (load() used eval()).
+        metas = np.array(
+            [json.dumps(r.metadata, sort_keys=True) for r in self._records],
+            dtype=object,
+        )
         np.savez(path, vectors=self._matrix, ids=ids, texts=texts, metas=metas)
 
     @classmethod
@@ -88,11 +95,19 @@ class VectorStore:
         ids = data["ids"]
         texts = data["texts"]
         metas = data["metas"]
-        for id_, text, meta_repr in zip(ids, texts, metas, strict=True):
+        for id_, text, meta_blob in zip(ids, texts, metas, strict=True):
+            blob = str(meta_blob)
             try:
-                meta = eval(str(meta_repr)) if str(meta_repr) else {}  # safe for dict literals
-            except Exception:
-                meta = {}
+                meta = json.loads(blob) if blob else {}
+            except json.JSONDecodeError:
+                # Tolerate legacy indexes written with repr() so an operator
+                # upgrading from a pre-Slice-14 build doesn't lose their KB.
+                # Next save() rewrites them as JSON automatically.
+                try:
+                    legacy = eval(blob, {"__builtins__": {}}, {})  # noqa: S307
+                    meta = legacy if isinstance(legacy, dict) else {}
+                except Exception:
+                    meta = {}
             store._records.append(VectorRecord(id=str(id_), text=str(text), metadata=meta))
         store._matrix = vectors.astype(np.float32)
         return store
