@@ -25,6 +25,8 @@ from redrobin.api.verdicts_router import router as verdicts_router
 from redrobin.application.cs_adapter_lifecycle import build_adapter, load_adapter_configs
 from redrobin.application.engagement_loader import Engagement, EngagementLoader
 from redrobin.application.event_bus import EventBus
+from redrobin.application.lesson_promoter import LessonPromoter
+from redrobin.application.longterm_lifecycle import EpisodicRepo, LongtermRepo
 from redrobin.application.rules_lifecycle import RulesLoader
 from redrobin.application.scope_enforcer import ScopeEnforcer
 from redrobin.application.verdict_pipeline_factory import (
@@ -117,9 +119,34 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if not working_memory_repo.exists():
         working_memory_repo.save(WorkingMemory(engagement_id=engagement_id))
 
-    # Reducer subscribes to the bus and mutates working memory.
+    # Slice 10 — L3 Episodic + L1 Long-term stores. Episodic captures every
+    # opsec.verdict event as a raw Episode; LessonPromoter aggregates
+    # recurring patterns into structured PromotedLessons stored long-term.
+    # Closes gap #15: Phase 1 wired both repos but nothing wrote to them, so
+    # L1 retrieval was permanently empty.
+    ep_path = Path(
+        os.environ.get(
+            "REDROBIN_EPISODIC_PATH",
+            str(Path.home() / ".redrobin" / "episodic.db"),
+        )
+    )
+    lt_path = Path(
+        os.environ.get(
+            "REDROBIN_LONGTERM_PATH",
+            str(Path.home() / ".redrobin" / "longterm.db"),
+        )
+    )
+    episodic_repo = EpisodicRepo(ep_path)
+    longterm_repo = LongtermRepo(lt_path)
+    app.state.episodic_repo = episodic_repo
+    app.state.longterm_repo = longterm_repo
+
+    # Reducer subscribes to the bus and mutates working memory + episodic log.
     reducer = WorkingMemoryReducer(
-        bus=event_bus, repo=working_memory_repo, engagement_id=engagement_id
+        bus=event_bus,
+        repo=working_memory_repo,
+        engagement_id=engagement_id,
+        episodic_repo=episodic_repo,
     )
     started = asyncio.Event()
     reducer.on_started = started.set  # type: ignore[attr-defined]
@@ -178,11 +205,42 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception:
             logger.exception("Failed to load CS adapter %s", cfg.name)
 
+    # Slice 10 — background task that runs LessonPromoter on a fixed cadence
+    # so recurring (command, verdict) patterns auto-promote into L1 without
+    # operator intervention. Interval default of 60s keeps daemon overhead
+    # negligible while still surfacing patterns within a normal engagement
+    # session.
+    promoter_min = int(os.environ.get("REDROBIN_PROMOTER_MIN_OCCURRENCES", "3"))
+    promoter = LessonPromoter(
+        episodic_repo=episodic_repo,
+        longterm_repo=longterm_repo,
+        min_occurrences=promoter_min,
+    )
+    promoter_interval = float(
+        os.environ.get("REDROBIN_PROMOTER_INTERVAL_SEC", "60")
+    )
+
+    async def _promoter_loop() -> None:
+        try:
+            while True:
+                await asyncio.sleep(promoter_interval)
+                try:
+                    await promoter.promote(engagement_id)
+                except Exception:
+                    logger.exception("promoter run failed")
+        except asyncio.CancelledError:
+            return
+
+    promoter_task = asyncio.create_task(_promoter_loop(), name="lesson_promoter")
+    app.state.promoter_task = promoter_task
+
     logger.info(
-        "daemon lifespan startup complete: rules_dir=%s rules=%d adapters=%d",
+        "daemon lifespan startup complete: rules_dir=%s rules=%d adapters=%d "
+        "promoter_interval=%.1fs",
         rules_dir,
         len(initial_rules),
         len(app.state.cs_adapters),
+        promoter_interval,
     )
 
     try:
@@ -197,10 +255,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 await client.aclose()
             except Exception:
                 logger.exception("error closing cs_adapter %s", name)
-        # 1. Close the bus first — this broadcasts the sentinel to all subscribers
-        #    including the reducer. The bus close is what signals reducer to exit.
+        # 1. Cancel the promoter loop first. It runs independently of the bus
+        #    and reducer; if we cancel it before bus.close() we avoid a tail
+        #    promotion racing the shutdown.
+        promoter_task.cancel()
+        try:
+            await asyncio.wait_for(promoter_task, timeout=2.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            pass
+        # 2. Close the bus — this broadcasts the sentinel to all subscribers
+        #    including the reducer. The bus close is what signals reducer to exit
+        #    after flushing any final episode write to the episodic DB.
         await event_bus.close()
-        # 2. Wait for the reducer to drain and exit cleanly.
+        # 3. Wait for the reducer to drain and exit cleanly.
         try:
             await asyncio.wait_for(reducer_task, timeout=2.0)
         except asyncio.TimeoutError:
