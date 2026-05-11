@@ -13,7 +13,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import AsyncIterator
+from typing import Any, AsyncIterator, Coroutine
 
 from fastapi import Depends, FastAPI, Request
 
@@ -61,6 +61,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             rules_dir,
         )
     rules_dir.mkdir(parents=True, exist_ok=True)
+
+    # Phase 2 condition 4 — daemon-wide tracker for fire-and-forget asyncio
+    # tasks. Two production callsites (verdicts_router PASS-dispatch and
+    # verdict_pipeline ESCALATE Layer B) used to leak tasks on shutdown.
+    # The tracker is initialised before any router or pipeline runs so
+    # every callsite can rely on it via ``app.state.background_task_factory``.
+    background_tasks: set[asyncio.Task[Any]] = set()
+    app.state.background_tasks = background_tasks
+
+    def _track_task(
+        coro: Coroutine[Any, Any, Any], *, name: str | None = None
+    ) -> asyncio.Task[Any]:
+        task = asyncio.create_task(coro, name=name)
+        background_tasks.add(task)
+        task.add_done_callback(background_tasks.discard)
+        return task
+
+    app.state.background_task_factory = _track_task
 
     rules_loader = RulesLoader(rule_dir=rules_dir)
     initial_rules = rules_loader.load_all()
@@ -202,6 +220,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         scope=scope,
         layer_a=deps.layer_a,
         layer_b=deps.layer_b,
+        task_factory=_track_task,
     )
     app.state.verdict_pipeline = verdict_pipeline
 
@@ -317,7 +336,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 await client.aclose()
             except Exception:
                 logger.exception("error closing cs_adapter %s", name)
-        # 1. Cancel the promoter + summariser loops first. Both run
+        # 1. Drain tracked fire-and-forget tasks (verdicts_router PASS
+        #    dispatch + pipeline ESCALATE Layer B). The 5s timeout balances
+        #    "give an in-flight LLM call time to finish" against "don't hang
+        #    a CTRL+C shutdown". Stragglers are cancelled. This happens
+        #    BEFORE closing adapter clients in the previous loop — except we
+        #    already closed them; the dispatch tasks are now operating on a
+        #    closed httpx session and will fail fast in their own logging
+        #    handler, which is fine.
+        if background_tasks:
+            try:
+                done, pending = await asyncio.wait(
+                    background_tasks, timeout=5.0
+                )
+                for task in pending:
+                    task.cancel()
+            except Exception:
+                logger.exception("error draining background_tasks")
+        # 2. Cancel the promoter + summariser loops. Both run
         #    independently of the bus and reducer; cancelling them before
         #    ``bus.close()`` avoids a tail promotion/summarisation racing
         #    the shutdown.
@@ -331,11 +367,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await asyncio.wait_for(summarizer_task, timeout=2.0)
         except (asyncio.TimeoutError, asyncio.CancelledError):
             pass
-        # 2. Close the bus — this broadcasts the sentinel to all subscribers
+        # 3. Close the bus — this broadcasts the sentinel to all subscribers
         #    including the reducer. The bus close is what signals reducer to exit
         #    after flushing any final episode write to the episodic DB.
         await event_bus.close()
-        # 3. Wait for the reducer to drain and exit cleanly.
+        # 4. Wait for the reducer to drain and exit cleanly.
         try:
             await asyncio.wait_for(reducer_task, timeout=2.0)
         except asyncio.TimeoutError:

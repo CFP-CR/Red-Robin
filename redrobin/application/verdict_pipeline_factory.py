@@ -27,7 +27,11 @@ from redrobin.application.kb_service import KBService
 from redrobin.application.layer_a_engine import LayerAEngine
 from redrobin.application.layer_b_engine import LayerBEngine
 from redrobin.application.scope_enforcer import ScopeEnforcer
-from redrobin.application.verdict_pipeline import LayerBProvider, VerdictPipeline
+from redrobin.application.verdict_pipeline import (
+    LayerBProvider,
+    TaskFactory,
+    VerdictPipeline,
+)
 from redrobin.domain.opsec import Verdict, VerdictAction
 from redrobin.domain.rules import Rule
 from redrobin.infrastructure.filesystem import REDROBIN_ROOT
@@ -163,6 +167,7 @@ def build_pipeline(
     scope: ScopeEnforcer,
     layer_a: LayerAEngine,
     layer_b: LayerBProvider,
+    task_factory: TaskFactory | None = None,
 ) -> VerdictPipeline:
     """Build a bus-aware pipeline and wire the Layer B retroactive callback.
 
@@ -170,12 +175,17 @@ def build_pipeline(
     so external Layer B implementations can drive the bus emission path
     without going through ``_run_layer_b``. In Phase 1 the pipeline still
     orchestrates Layer B itself, so the binding is a forward-compat seam.
+
+    ``task_factory`` defaults to ``asyncio.create_task`` but the daemon
+    lifespan passes a tracked variant so fire-and-forget Layer B tasks
+    register on ``app.state.background_tasks`` and drain on shutdown.
     """
     pipeline = VerdictPipeline(
         scope=scope,
         layer_a=layer_a,
         layer_b=layer_b,
         event_bus=event_bus,
+        task_factory=task_factory,
     )
     # Wire the hook on whichever Layer B implementation we got — real
     # ``LayerBEngine`` always has the attribute; the degraded stub above

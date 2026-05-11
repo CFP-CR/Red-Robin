@@ -129,12 +129,19 @@ async def quick(
     # the team server from this path; WARN is operator-soft-warned and the
     # caller (alias body) decides whether to send. We fire-and-forget so the
     # HTTP response is not blocked on the CS side-channel.
+    #
+    # Phase 2 condition 4: use the lifespan's tracked task factory so the
+    # dispatch coroutine is registered on ``app.state.background_tasks`` and
+    # the shutdown finalizer awaits / cancels it instead of leaking.
     if (
         verdict.action == VerdictAction.PASS
         and req.adapter
         and req.bid
     ):
-        asyncio.create_task(
+        factory = getattr(
+            request.app.state, "background_task_factory", asyncio.create_task
+        )
+        factory(
             _dispatch_to_cs_adapter(request, req.adapter, req.bid, req.command)
         )
 

@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Awaitable, Callable, Protocol
+from typing import Any, Awaitable, Callable, Coroutine, Protocol
 
 from redrobin.application.event_bus import EventBus
 from redrobin.application.layer_a_engine import LayerAEngine
@@ -40,6 +40,13 @@ class LayerBProvider(Protocol):
 
 
 RetroactiveCallback = Callable[[Verdict], Awaitable[None]]
+TaskFactory = Callable[[Coroutine[Any, Any, Any]], asyncio.Task[Any]]
+
+
+def _default_task_factory(coro: Coroutine[Any, Any, Any]) -> asyncio.Task[Any]:
+    """Untracked ``asyncio.create_task`` — leaks on shutdown, used only when
+    the pipeline is constructed outside a daemon lifespan (unit tests)."""
+    return asyncio.create_task(coro)
 
 
 class VerdictPipeline:
@@ -51,6 +58,7 @@ class VerdictPipeline:
         layer_b: LayerBProvider,
         event_bus: EventBus | None = None,
         on_retroactive_verdict: RetroactiveCallback | None = None,
+        task_factory: TaskFactory | None = None,
     ):
         self._scope = scope
         self._layer_a = layer_a
@@ -60,6 +68,11 @@ class VerdictPipeline:
         # observe the Verdict object directly. Slice 5+ uses ``_on_retroactive``
         # (kwargs form) for bus emission.
         self._on_retroactive_legacy = on_retroactive_verdict
+        # Task factory plumbed in from the api lifespan so fire-and-forget
+        # Layer B tasks are tracked on ``app.state.background_tasks`` and
+        # drained on shutdown. Falls back to a bare ``asyncio.create_task``
+        # for unit-test callers that don't run inside a FastAPI lifespan.
+        self._task_factory: TaskFactory = task_factory or _default_task_factory
 
     async def quick_verdict(
         self,
@@ -103,7 +116,9 @@ class VerdictPipeline:
         if verdict.action == VerdictAction.ESCALATE:
             # Fire-and-forget Layer B (Stage 3). Pass the immediate verdict so
             # the retroactive emission can carry it as ``previous_verdict``.
-            asyncio.create_task(
+            # The task factory ties this into ``app.state.background_tasks``
+            # in production so shutdown awaits / cancels it instead of leaking.
+            self._task_factory(
                 self._run_layer_b(
                     command=command,
                     raw=raw,
