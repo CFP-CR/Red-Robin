@@ -1,0 +1,5 @@
+{
+  "type": "operator.question",
+  "text": "Is it safe to run mimikatz on this host?",
+  "priority": "urgent"
+}

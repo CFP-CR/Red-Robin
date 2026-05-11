@@ -1,0 +1,8 @@
+{
+  "type": "operator.question",
+  "text": "Is it safe to run mimikatz on this host given the EDR observed?",
+  "context_refs": [
+    "evt_01HZX9KXXR8QF3T2ABCDEFGHJK",
+    "evt_01HZX9KXXR8QF3T2ABCDEFGHJL"
+  ]
+}

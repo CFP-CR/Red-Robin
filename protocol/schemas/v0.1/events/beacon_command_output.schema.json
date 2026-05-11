@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://red-robin.io/protocol/v0.1/events/beacon_command_output.schema.json",
+  "title": "beacon.command_output event payload",
+  "type": "object",
+  "required": ["type", "bid", "task_id", "output"],
+  "properties": {
+    "type": {"const": "beacon.command_output"},
+    "bid": {"type": "string"},
+    "task_id": {"type": "string"},
+    "output": {"type": "string"},
+    "exit_status": {"type": ["integer", "null"]}
+  },
+  "additionalProperties": false
+}

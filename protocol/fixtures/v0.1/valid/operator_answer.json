@@ -1,0 +1,9 @@
+{
+  "type": "operator.answer",
+  "question_id": "evt_01HZX9KXXR8QF3T2QUESTIONID",
+  "text": "No — CrowdStrike Falcon is observed on the host. Use nanodump instead, and migrate to an unmonitored process first.",
+  "citations": [
+    "evt_01HZX9KXXR8QF3T2ABCDEFGHJK",
+    "kb_safetykatz_v2"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://red-robin.io/protocol/v0.1/events/adapter_heartbeat.schema.json",
+  "title": "adapter.heartbeat event payload",
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type": {"const": "adapter.heartbeat"}
+  },
+  "additionalProperties": false
+}

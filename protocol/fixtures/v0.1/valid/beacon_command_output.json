@@ -1,0 +1,7 @@
+{
+  "type": "beacon.command_output",
+  "bid": "bid_4291",
+  "task_id": "tsk_01HZXAB9MK2P6Q9TFGHJKLMNPQ",
+  "output": "PRIVILEGES INFORMATION\n----------------------\nSeShutdownPrivilege            Disabled\n",
+  "exit_status": 0
+}

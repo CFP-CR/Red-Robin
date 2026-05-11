@@ -1,0 +1,7 @@
+{
+  "type": "beacon.command_output",
+  "bid": "bid_4291",
+  "task_id": "tsk_01HZXAB9MK2P6Q9TFGHJKLMNPQ",
+  "output": "some output",
+  "exit_status": "success"
+}

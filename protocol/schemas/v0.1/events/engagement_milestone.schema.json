@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://red-robin.io/protocol/v0.1/events/engagement_milestone.schema.json",
+  "title": "engagement.milestone event payload",
+  "type": "object",
+  "required": ["type", "phase", "milestone_id", "status", "progress_pct"],
+  "properties": {
+    "type": {"const": "engagement.milestone"},
+    "phase": {"type": "string"},
+    "milestone_id": {"type": "string"},
+    "status": {"type": "string"},
+    "progress_pct": {"type": "integer", "minimum": 0, "maximum": 100}
+  },
+  "additionalProperties": false
+}

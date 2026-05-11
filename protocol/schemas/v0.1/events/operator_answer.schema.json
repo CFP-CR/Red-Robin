@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://red-robin.io/protocol/v0.1/events/operator_answer.schema.json",
+  "title": "operator.answer event payload",
+  "type": "object",
+  "required": ["type", "question_id", "text"],
+  "properties": {
+    "type": {"const": "operator.answer"},
+    "question_id": {"type": "string"},
+    "text": {"type": "string"},
+    "citations": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

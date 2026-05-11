@@ -1,0 +1,6 @@
+{
+  "type": "beacon.command_input",
+  "bid": "bid_4291",
+  "operator": "alice",
+  "command": "shell"
+}

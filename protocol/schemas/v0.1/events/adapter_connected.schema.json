@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://red-robin.io/protocol/v0.1/events/adapter_connected.schema.json",
+  "title": "adapter.connected event payload",
+  "type": "object",
+  "required": ["type", "manifest", "session_id"],
+  "properties": {
+    "type": {"const": "adapter.connected"},
+    "manifest": {"type": "object", "description": "Full adapter manifest at connect time"},
+    "session_id": {"type": "string", "description": "ULID-like session ID for this adapter session"}
+  },
+  "additionalProperties": false
+}
