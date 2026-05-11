@@ -15,7 +15,6 @@ Full Sigma matching lands in a later Phase 2 slice.
 from __future__ import annotations
 
 import time
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
