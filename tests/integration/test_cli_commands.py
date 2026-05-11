@@ -147,10 +147,10 @@ async def test_replay_posts_each_line(tmp_path):
 
     src = tmp_path / "trace.jsonl"
     src.write_text(
-        json.dumps({"type": "c2.beacon_output", "payload": {"beacon_id": "B-1", "output": "hi"}})
+        json.dumps({"type": "beacon.command_output", "payload": {"bid": "B-1", "output": "hi"}})
         + "\n"
         + json.dumps(
-            {"type": "c2.beacon_checkin", "payload": {"beacon_id": "B-2", "hostname": "WIN10"}}
+            {"type": "beacon.initial", "payload": {"bid": "B-2", "host": "WIN10"}}
         )
         + "\n"
     )
@@ -167,8 +167,8 @@ async def test_replay_posts_each_line(tmp_path):
             file=src, client=client, base_url="http://daemon", token=None
         )
     assert n == 2
-    assert posted[0]["type"] == "c2.beacon_output"
-    assert posted[1]["type"] == "c2.beacon_checkin"
+    assert posted[0]["type"] == "beacon.command_output"
+    assert posted[1]["type"] == "beacon.initial"
 
 
 @pytest.mark.asyncio
@@ -182,10 +182,10 @@ async def test_replay_skips_blank_lines(tmp_path):
     src = tmp_path / "trace.jsonl"
     src.write_text(
         "\n"
-        + json.dumps({"type": "c2.beacon_output", "payload": {"beacon_id": "B-1"}})
+        + json.dumps({"type": "beacon.command_output", "payload": {"bid": "B-1"}})
         + "\n"
         + "   \n"
-        + json.dumps({"type": "c2.beacon_checkin", "payload": {"beacon_id": "B-2"}})
+        + json.dumps({"type": "beacon.initial", "payload": {"bid": "B-2"}})
         + "\n"
     )
 
@@ -213,7 +213,7 @@ async def test_replay_sends_bearer_token_when_provided(tmp_path):
     from redrobin.cli_helpers.replay import replay_to_daemon
 
     src = tmp_path / "trace.jsonl"
-    src.write_text(json.dumps({"type": "c2.beacon_output"}) + "\n")
+    src.write_text(json.dumps({"type": "beacon.command_output"}) + "\n")
 
     seen_auth: list[str | None] = []
 
@@ -252,7 +252,7 @@ def test_replay_endpoint_publishes_to_event_bus(tmp_path, monkeypatch):
 
     app = create_app()
     auth = {"Authorization": f"Bearer {get_or_create_token()}"}
-    payload = {"type": "c2.beacon_output", "payload": {"beacon_id": "B-1", "output": "hi"}}
+    payload = {"type": "beacon.command_output", "payload": {"bid": "B-1", "output": "hi"}}
 
     seen: list[dict] = []
     with TestClient(app) as client:
@@ -272,7 +272,7 @@ def test_replay_endpoint_publishes_to_event_bus(tmp_path, monkeypatch):
         asyncio.get_event_loop().run_until_complete(_drain())
 
     types = [e.get("type") for e in seen]
-    assert "c2.beacon_output" in types
+    assert "beacon.command_output" in types
 
 
 def test_replay_endpoint_requires_auth(tmp_path, monkeypatch):
@@ -292,5 +292,5 @@ def test_replay_endpoint_requires_auth(tmp_path, monkeypatch):
     from redrobin.api.app import create_app
 
     with TestClient(create_app()) as client:
-        r = client.post("/v1/events/replay", json={"type": "c2.beacon_output"})
+        r = client.post("/v1/events/replay", json={"type": "beacon.command_output"})
     assert r.status_code in (401, 422)

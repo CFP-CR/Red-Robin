@@ -71,7 +71,13 @@ class Finding:
 
 @dataclass
 class Session:
-    """Live beacon session observed via c2.beacon_checkin events."""
+    """Live beacon session observed via beacon.initial events.
+
+    Field naming on this dataclass predates the canonical wire schema;
+    ``beacon_id`` corresponds to wire ``bid``, ``hostname`` to wire ``host``,
+    and ``integrity`` to wire ``integrity_level``. The reducer performs the
+    rename at the boundary.
+    """
 
     beacon_id: str
     hostname: str | None = None

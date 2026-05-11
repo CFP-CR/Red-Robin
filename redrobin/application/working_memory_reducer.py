@@ -4,15 +4,22 @@ Slice 4 Task 4.1: builds the reducer in isolation. Task 4.2 will start it as a
 lifespan task and wire the snapshot read path; for now the reducer is exercised
 only by its own integration test.
 
-Event dispatch table:
+Event dispatch table (canonical wire types from ``redrobin/domain/events.py``):
 
-* ``c2.beacon_output``  → regex-parse output for NTLM hashes, hostnames, and
-  Kerberos artifacts; write credentials/hosts/findings.
-* ``c2.beacon_checkin`` → upsert a ``Session`` keyed by ``beacon_id``.
-* ``opsec.verdict``     → when ``verdict == "BLOCK"``, append a finding.
+* ``beacon.command_output``  → regex-parse ``output`` for NTLM hashes,
+  hostnames, and Kerberos artifacts; write credentials/hosts/findings.
+* ``beacon.initial``         → upsert a ``Session`` keyed by ``bid``.
+* ``opsec.verdict``          → when ``verdict == "BLOCK"``, append a finding.
 
 All other event types are silently ignored. Repo helpers are synchronous JSON
 load/save; they run on the loop thread because per-event payload size is tiny.
+
+Field-name conventions follow the wire schema:
+
+* Beacon identifier is ``bid`` (not ``beacon_id``).
+* Host on ``beacon.initial`` is ``host`` (not ``hostname``).
+* User integrity level on ``beacon.initial`` is ``integrity_level`` (not ``integrity``).
+* ``output`` and ``user`` map 1:1.
 
 The reducer is single-engagement: it carries an ``engagement_id`` for logging
 and tagging but does not multiplex repos. A future Task 4.x will fan out one
@@ -101,25 +108,26 @@ class WorkingMemoryReducer:
         etype = evt.get("type")
         payload_raw = evt.get("payload")
         payload: dict[str, Any] = payload_raw if isinstance(payload_raw, dict) else {}
-        if etype == "c2.beacon_output":
-            self._on_beacon_output(payload)
-        elif etype == "c2.beacon_checkin":
-            self._on_beacon_checkin(payload)
+        if etype == "beacon.command_output":
+            self._on_beacon_command_output(payload)
+        elif etype == "beacon.initial":
+            self._on_beacon_initial(payload)
         elif etype == "opsec.verdict":
             self._on_verdict(payload)
         # else: silently ignore — the bus is fan-out, not all events are for us.
 
-    def _on_beacon_output(self, payload: dict[str, Any]) -> None:
+    def _on_beacon_command_output(self, payload: dict[str, Any]) -> None:
         output = str(payload.get("output", ""))
-        beacon_id_raw = payload.get("beacon_id")
-        beacon_id = str(beacon_id_raw) if beacon_id_raw is not None else None
+        # Canonical wire field is ``bid`` (per protocol/schemas/v0.1).
+        bid_raw = payload.get("bid")
+        bid = str(bid_raw) if bid_raw is not None else None
 
         for m in _NTLM_LINE.finditer(output):
             cred = Credential(
                 domain=m.group("domain"),
                 username=m.group("user"),
                 ntlm_hash=m.group("hash"),
-                source_beacon_id=beacon_id,
+                source_beacon_id=bid,
             )
             self._repo.upsert_credential(cred)
 
@@ -131,22 +139,23 @@ class WorkingMemoryReducer:
         if _KERBEROS_TICKET.search(output) is not None:
             finding = Finding(
                 kind="kerberos_ticket_observed",
-                summary=f"Kerberos artifacts seen on beacon {beacon_id}",
-                source_beacon_id=beacon_id,
+                summary=f"Kerberos artifacts seen on beacon {bid}",
+                source_beacon_id=bid,
             )
             self._repo.append_finding(finding)
 
-    def _on_beacon_checkin(self, payload: dict[str, Any]) -> None:
-        beacon_id_raw = payload.get("beacon_id")
-        if beacon_id_raw is None:
+    def _on_beacon_initial(self, payload: dict[str, Any]) -> None:
+        # Canonical wire fields: ``bid``, ``host``, ``user``, ``integrity_level``.
+        bid_raw = payload.get("bid")
+        if bid_raw is None:
             return
-        beacon_id = str(beacon_id_raw)
-        hostname_raw = payload.get("hostname")
+        bid = str(bid_raw)
+        host_raw = payload.get("host")
         user_raw = payload.get("user")
-        integrity_raw = payload.get("integrity")
+        integrity_raw = payload.get("integrity_level")
         session = Session(
-            beacon_id=beacon_id,
-            hostname=str(hostname_raw) if hostname_raw is not None else None,
+            beacon_id=bid,
+            hostname=str(host_raw) if host_raw is not None else None,
             user=str(user_raw) if user_raw is not None else None,
             integrity=str(integrity_raw) if integrity_raw is not None else None,
         )

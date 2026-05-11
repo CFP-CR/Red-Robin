@@ -43,7 +43,7 @@ async def _drain(bus: EventBus, task: asyncio.Task[None]) -> None:
 
 
 @pytest.mark.asyncio
-async def test_beacon_output_with_ntlm_writes_credential(tmp_path):
+async def test_beacon_command_output_with_ntlm_writes_credential(tmp_path):
     bus = EventBus()
     repo = _new_repo(tmp_path, "eng-ntlm")
     _, task = await _start_reducer(bus, repo, "eng-ntlm")
@@ -51,9 +51,9 @@ async def test_beacon_output_with_ntlm_writes_credential(tmp_path):
     try:
         await bus.publish(
             {
-                "type": "c2.beacon_output",
+                "type": "beacon.command_output",
                 "payload": {
-                    "beacon_id": "B-001",
+                    "bid": "B-001",
                     "output": (
                         "Username: CORP\\admin\n"
                         "NTLM: aad3b435b51404eeaad3b435b51404ee:"
@@ -76,7 +76,7 @@ async def test_beacon_output_with_ntlm_writes_credential(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_beacon_output_hostname_writes_host(tmp_path):
+async def test_beacon_command_output_hostname_writes_host(tmp_path):
     bus = EventBus()
     repo = _new_repo(tmp_path, "eng-host")
     _, task = await _start_reducer(bus, repo, "eng-host")
@@ -84,9 +84,9 @@ async def test_beacon_output_hostname_writes_host(tmp_path):
     try:
         await bus.publish(
             {
-                "type": "c2.beacon_output",
+                "type": "beacon.command_output",
                 "payload": {
-                    "beacon_id": "B-002",
+                    "bid": "B-002",
                     "output": "Hostname: dc01\n",
                 },
             }
@@ -103,7 +103,7 @@ async def test_beacon_output_hostname_writes_host(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_beacon_output_kerberos_appends_finding(tmp_path):
+async def test_beacon_command_output_kerberos_appends_finding(tmp_path):
     bus = EventBus()
     repo = _new_repo(tmp_path, "eng-krb")
     _, task = await _start_reducer(bus, repo, "eng-krb")
@@ -111,9 +111,9 @@ async def test_beacon_output_kerberos_appends_finding(tmp_path):
     try:
         await bus.publish(
             {
-                "type": "c2.beacon_output",
+                "type": "beacon.command_output",
                 "payload": {
-                    "beacon_id": "B-003",
+                    "bid": "B-003",
                     "output": "klist\nCached Tickets: (1)\n   Server: krbtgt/CORP\n",
                 },
             }
@@ -130,7 +130,7 @@ async def test_beacon_output_kerberos_appends_finding(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_beacon_checkin_writes_session(tmp_path):
+async def test_beacon_initial_writes_session(tmp_path):
     bus = EventBus()
     repo = _new_repo(tmp_path, "eng-sess")
     _, task = await _start_reducer(bus, repo, "eng-sess")
@@ -138,12 +138,12 @@ async def test_beacon_checkin_writes_session(tmp_path):
     try:
         await bus.publish(
             {
-                "type": "c2.beacon_checkin",
+                "type": "beacon.initial",
                 "payload": {
-                    "beacon_id": "B-004",
-                    "hostname": "DC01",
+                    "bid": "B-004",
+                    "host": "DC01",
                     "user": "CORP\\admin",
-                    "integrity": "high",
+                    "integrity_level": "high",
                 },
             }
         )
@@ -235,9 +235,9 @@ async def test_lifespan_starts_reducer_task(tmp_path, monkeypatch):
         assert not app.state.reducer_task.done()
         # Publish a beacon output with creds; reducer should write to working memory.
         await app.state.event_bus.publish({
-            "type": "c2.beacon_output",
+            "type": "beacon.command_output",
             "payload": {
-                "beacon_id": "B-100",
+                "bid": "B-100",
                 "output": "Username: CORP\\alice\nNTLM: aad3b435b51404eeaad3b435b51404ee:11111111111111111111111111111111",
             },
         })

@@ -1,6 +1,6 @@
 """E2E: beacon output replayed → reducer parses → working memory snapshot exposes creds + host.
 
-Slice 15 Task 15.2. Exercises the full real path:
+Slice 15 Task 15.2. Exercises the full real path with canonical wire types:
 
     POST /v1/events/replay (auth) → EventBus → WorkingMemoryReducer
                                                        ↓
@@ -8,9 +8,13 @@ Slice 15 Task 15.2. Exercises the full real path:
                                                        ↓
     WS /v1/tui connect → working_memory_snapshot frame includes the new state.
 
-The replay endpoint requires Bearer auth (Slice 11). The Host serializer
-emits the ``name`` field (uppercased by the reducer's normalisation), and
-Credentials emit ``domain`` + ``username`` + ``ntlm_hash``.
+The replay endpoint requires Bearer auth (Slice 11). Replay payloads use
+the canonical wire shape ``{type: "beacon.command_output", payload: {bid, ...}}``
+so the same trace fixture that exercises the bus also matches the wire
+schema for in-process replay.
+
+The Host serializer emits the ``name`` field (uppercased by the reducer's
+normalisation), and Credentials emit ``domain`` + ``username`` + ``ntlm_hash``.
 """
 from __future__ import annotations
 
@@ -57,9 +61,9 @@ def test_beacon_output_propagates_to_snapshot(daemon):
     token = _token()
 
     payload = {
-        "type": "c2.beacon_output",
+        "type": "beacon.command_output",
         "payload": {
-            "beacon_id": "B-1",
+            "bid": "B-1",
             "output": (
                 "Username: CORP\\alice\n"
                 "NTLM: aad3b435b51404eeaad3b435b51404ee:"
