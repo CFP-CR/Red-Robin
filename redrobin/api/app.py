@@ -24,6 +24,10 @@ from redrobin.api.tui_ws import router as tui_ws_router
 from redrobin.api.verdicts_router import router as verdicts_router
 from redrobin.application.event_bus import EventBus
 from redrobin.application.rules_lifecycle import RulesLoader
+from redrobin.application.verdict_pipeline_factory import (
+    build_default_dependencies,
+    build_pipeline,
+)
 from redrobin.application.working_memory_lifecycle import WorkingMemory, WorkingMemoryRepo
 from redrobin.application.working_memory_reducer import WorkingMemoryReducer
 
@@ -82,8 +86,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await started.wait()  # ensure subscription is active before yielding
     app.state.reducer_task = reducer_task
 
+    # Verdict pipeline — built once at startup with the bus wired so Layer A
+    # verdicts publish to the same bus the reducer + TUI WS subscribe to.
+    # Reuses the already-loaded rules to avoid double-reading the rules dir.
+    # Slice 6 will replace the wildcard scope with engagement-aware scope.
+    deps = build_default_dependencies(rules=initial_rules)
+    verdict_pipeline = build_pipeline(
+        event_bus=event_bus,
+        scope=deps.scope,
+        layer_a=deps.layer_a,
+        layer_b=deps.layer_b,
+    )
+    app.state.verdict_pipeline = verdict_pipeline
+
     def _on_reload(rules: list) -> None:
         logger.debug("rules_loader: reloaded %d rules", len(rules))
+        # Hot-reload Layer A: swap the rule set on the live engine so the
+        # singleton pipeline picks up edits without a daemon restart.
+        deps.layer_a.update_rules(rules)
 
     rules_loader.start_hot_reload(_on_reload)
     logger.info(

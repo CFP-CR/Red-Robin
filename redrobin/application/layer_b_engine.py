@@ -16,11 +16,20 @@ import logging
 import re
 from dataclasses import dataclass
 
+from typing import Awaitable, Callable
+
 from redrobin.application.kb_service import KBService
 from redrobin.domain.llm import LLMProvider
 from redrobin.domain.opsec import Verdict, VerdictAction
 
 logger = logging.getLogger(__name__)
+
+
+# Retroactive callback wired by VerdictPipeline (Slice 5). The pipeline itself
+# orchestrates Layer B today; the attribute exists so future callers can drive
+# the retroactive emission path without going through the pipeline. Kwargs form
+# matches ``VerdictPipeline._on_retroactive``.
+RetroactiveVerdictHook = Callable[..., Awaitable[None]]
 
 
 SYSTEM_PROMPT = """\
@@ -71,6 +80,12 @@ class LayerBEngine:
         self._top_k = top_k_kb_chunks
         self._context_cls = context_provider
         self._engagement_summary = ""  # set per-engagement by daemon (Task 28+)
+        # Retroactive hook — bound by the factory to
+        # ``VerdictPipeline._on_retroactive`` so callers that drive Layer B
+        # outside the pipeline still surface retroactive verdicts on the bus.
+        # Today the pipeline orchestrates Layer B itself, so this attribute is
+        # set-but-unused unless someone bypasses the pipeline.
+        self.on_retroactive_verdict: RetroactiveVerdictHook | None = None
 
     def set_engagement_summary(self, summary: str) -> None:
         """Called when active engagement changes; rebuilds dynamic state block."""
