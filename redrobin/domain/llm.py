@@ -3,6 +3,7 @@
 The ONE explicit abstraction in Red Robin (spec §9 closed decision 12).
 Justified by multi-impl: Anthropic v0.1 cloud, Ollama v0.2 local roadmap.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -12,6 +13,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class LLMResponse:
     """LLM completion result + cache-usage telemetry."""
+
     text: str
     cache_creation_input_tokens: int = 0
     cache_read_input_tokens: int = 0

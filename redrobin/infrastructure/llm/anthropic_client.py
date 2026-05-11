@@ -13,6 +13,7 @@ Cache invalidation rules:
   - KB chunks: invalidated on engagement switch or KB re-index
   - Dynamic state: never cached
 """
+
 from __future__ import annotations
 
 import anthropic
@@ -57,11 +58,13 @@ class AnthropicClient(LLMProvider):
             },
         ]
         if kb_text:
-            system_blocks.append({
-                "type": "text",
-                "text": kb_text,
-                "cache_control": {"type": "ephemeral"},
-            })
+            system_blocks.append(
+                {
+                    "type": "text",
+                    "text": kb_text,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            )
         if dynamic_state:
             system_blocks.append({"type": "text", "text": dynamic_state})
 
@@ -74,7 +77,8 @@ class AnthropicClient(LLMProvider):
 
         return LLMResponse(
             text=response.content[0].text,
-            cache_creation_input_tokens=getattr(response.usage, "cache_creation_input_tokens", 0) or 0,
+            cache_creation_input_tokens=getattr(response.usage, "cache_creation_input_tokens", 0)
+            or 0,
             cache_read_input_tokens=getattr(response.usage, "cache_read_input_tokens", 0) or 0,
             output_tokens=response.usage.output_tokens,
         )

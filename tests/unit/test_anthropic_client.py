@@ -1,4 +1,5 @@
 """Anthropic client with cache_control structured blocks (spec §13.3)."""
+
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
