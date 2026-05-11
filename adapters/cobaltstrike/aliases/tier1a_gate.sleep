@@ -1,0 +1,134 @@
+# Tier 1A: direct Beacon commands. Each alias body uses the CANONICAL SAFE
+# PATTERN: substr($0, strlen("<cmd> ")+1) to extract raw arg string.
+# This avoids the $2-is-first-token trap (Aggressor docs: $2 = first
+# whitespace-tokenized arg, NOT entire arg string).
+#
+# Sleep function references use the symbol from BeaconTaskBridge bytecode
+# (see docs/aggressor-alias-args.md for mapping table — verified Phase 1 spike).
+
+alias mimikatz {
+    if (redrobin_gate($1, "mimikatz", $0)) {
+        local('$args');
+        $args = substr($0, strlen("mimikatz ")+1);
+        &bmimikatz($1, $args);
+    }
+}
+
+alias dcsync {
+    if (redrobin_gate($1, "dcsync", $0)) {
+        local('$rest @parts');
+        $rest = substr($0, strlen("dcsync ")+1);
+        @parts = split(' ', $rest);
+        if (size(@parts) >= 2) {
+            &bdcsync($1, @parts[0], @parts[1]);
+        } else {
+            &bdcsync($1, @parts[0]);
+        }
+    }
+}
+
+alias hashdump {
+    if (redrobin_gate($1, "hashdump", $0)) {
+        &bhashdump($1);
+    }
+}
+
+alias logonpasswords {
+    if (redrobin_gate($1, "logonpasswords", $0)) {
+        &blogonpasswords($1);
+    }
+}
+
+alias kerberos_ticket_use {
+    if (redrobin_gate($1, "kerberos_ticket_use", $0)) {
+        local('$args');
+        $args = substr($0, strlen("kerberos_ticket_use ")+1);
+        &bkerberos_ticket_use($1, $args);
+    }
+}
+
+alias psexec {
+    if (redrobin_gate($1, "psexec", $0)) {
+        local('$args');
+        $args = substr($0, strlen("psexec ")+1);
+        &bpsexec($1, $args);
+    }
+}
+
+alias wmi {
+    if (redrobin_gate($1, "wmi", $0)) {
+        local('$args');
+        $args = substr($0, strlen("wmi ")+1);
+        &bwmi($1, $args);
+    }
+}
+
+alias winrm {
+    if (redrobin_gate($1, "winrm", $0)) {
+        local('$args');
+        $args = substr($0, strlen("winrm ")+1);
+        &bwinrm($1, $args);
+    }
+}
+
+alias jump {
+    if (redrobin_gate($1, "jump", $0)) {
+        local('$args');
+        $args = substr($0, strlen("jump ")+1);
+        &bjump($1, $args);
+    }
+}
+
+alias spawn {
+    if (redrobin_gate($1, "spawn", $0)) {
+        local('$args');
+        $args = substr($0, strlen("spawn ")+1);
+        &bspawn($1, $args);
+    }
+}
+
+alias bypassuac {
+    if (redrobin_gate($1, "bypassuac", $0)) {
+        local('$args');
+        $args = substr($0, strlen("bypassuac ")+1);
+        &bbypassuac($1, $args);
+    }
+}
+
+alias getsystem {
+    if (redrobin_gate($1, "getsystem", $0)) {
+        &bgetsystem($1);
+    }
+}
+
+alias elevate {
+    if (redrobin_gate($1, "elevate", $0)) {
+        local('$args');
+        $args = substr($0, strlen("elevate ")+1);
+        &belevate($1, $args);
+    }
+}
+
+alias inject {
+    if (redrobin_gate($1, "inject", $0)) {
+        local('$args');
+        $args = substr($0, strlen("inject ")+1);
+        &binject($1, $args);
+    }
+}
+
+alias dllinject {
+    if (redrobin_gate($1, "dllinject", $0)) {
+        local('$args');
+        $args = substr($0, strlen("dllinject ")+1);
+        &bdllinject($1, $args);
+    }
+}
+
+alias psinject {
+    if (redrobin_gate($1, "psinject", $0)) {
+        local('$args');
+        $args = substr($0, strlen("psinject ")+1);
+        &bpsinject($1, $args);
+    }
+}

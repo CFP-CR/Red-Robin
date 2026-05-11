@@ -1,0 +1,59 @@
+# Tier 1B: wrappers. The DAEMON inspects $0 (full raw line) for arg patterns
+# like 'nxc ldap', 'Rubeus.exe kerberoast', 'Invoke-Mimikatz' etc. Each alias
+# stub just passes $0 to the gate and forwards if PASS/WARN.
+
+alias shell {
+    if (redrobin_gate($1, "shell", $0)) {
+        local('$args');
+        $args = substr($0, strlen("shell ")+1);
+        &bshell($1, $args);
+    }
+}
+
+alias powershell {
+    if (redrobin_gate($1, "powershell", $0)) {
+        local('$args');
+        $args = substr($0, strlen("powershell ")+1);
+        &bpowershell($1, $args);
+    }
+}
+
+alias powerpick {
+    if (redrobin_gate($1, "powerpick", $0)) {
+        local('$args');
+        $args = substr($0, strlen("powerpick ")+1);
+        &bpowerpick($1, $args);
+    }
+}
+
+alias execute-assembly {
+    if (redrobin_gate($1, "execute-assembly", $0)) {
+        local('$args');
+        $args = substr($0, strlen("execute-assembly ")+1);
+        &bexecute_assembly($1, $args);
+    }
+}
+
+alias inline-execute {
+    if (redrobin_gate($1, "inline-execute", $0)) {
+        local('$args');
+        $args = substr($0, strlen("inline-execute ")+1);
+        &binline_execute($1, $args);
+    }
+}
+
+alias run {
+    if (redrobin_gate($1, "run", $0)) {
+        local('$args');
+        $args = substr($0, strlen("run ")+1);
+        &brun($1, $args);
+    }
+}
+
+alias execute {
+    if (redrobin_gate($1, "execute", $0)) {
+        local('$args');
+        $args = substr($0, strlen("execute ")+1);
+        &bexecute($1, $args);
+    }
+}

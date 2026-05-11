@@ -1,0 +1,26 @@
+# Popup beacon rebuild: GUI right-click items bypass the console parser, so
+# alias overrides don't cover them. Rebuild a minimal popup that mirrors the
+# Tier 1A gate for the most-clicked GUI actions (Make Token, Inject, Spawn).
+
+popup beacon {
+    menu "Access" {
+        item "Make Token (gated)" {
+            local('$verdict');
+            $verdict = redrobin_query_quick($1, "make_token", "make_token (via GUI dialog)");
+            if ($verdict['action'] eq "BLOCK") {
+                berror($1, "[Red Robin] DANGER: " . $verdict['reason']);
+            } else {
+                openMakeTokenDialog($1);
+            }
+        }
+        item "Run Mimikatz" {
+            local('$verdict');
+            $verdict = redrobin_query_quick($1, "mimikatz", "mimikatz (via GUI)");
+            if ($verdict['action'] eq "BLOCK") {
+                berror($1, "[Red Robin] DANGER: " . $verdict['reason']);
+            } else {
+                &bmimikatz($1, "sekurlsa::logonpasswords");
+            }
+        }
+    }
+}

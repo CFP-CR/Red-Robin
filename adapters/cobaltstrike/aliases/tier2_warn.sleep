@@ -1,0 +1,35 @@
+# Tier 2: daemon returns WARN at most; UI annotation but never blocks.
+
+alias screenshot {
+    if (redrobin_gate($1, "screenshot", $0)) {
+        &bscreenshot($1);
+    }
+}
+
+alias keylogger {
+    if (redrobin_gate($1, "keylogger", $0)) {
+        &bkeylogger($1);
+    }
+}
+
+alias screenwatch {
+    if (redrobin_gate($1, "screenwatch", $0)) {
+        &bscreenwatch($1);
+    }
+}
+
+alias browserpivot {
+    if (redrobin_gate($1, "browserpivot", $0)) {
+        local('$args');
+        $args = substr($0, strlen("browserpivot ")+1);
+        &bbrowserpivot($1, $args);
+    }
+}
+
+alias socks {
+    if (redrobin_gate($1, "socks", $0)) {
+        local('$args');
+        $args = substr($0, strlen("socks ")+1);
+        &bsocks($1, $args);
+    }
+}

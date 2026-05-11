@@ -1,0 +1,194 @@
+# adapters/cobaltstrike/redrobin.cna
+# Red Robin CS Adapter — Aggressor master script.
+#
+# Loaded in CS Client; intercepts operator input via alias overrides.
+# Talks to the Red Robin daemon on localhost:7777 via HTTP.
+#
+# Per spec §1.2.1 two-tier verdict protocol:
+#   - quick_query: hard timeout 150ms; Layer A sync, Layer B async retroactive
+#   - on PASS/WARN: call &b<cmd> Sleep function (forwards to teamserver)
+#   - on BLOCK: berror + return (command NEVER reaches teamserver)
+#
+# Per spec §4 Componente 1 / Closed Decision 14:
+#   - alias plane (console parser) is independent of Sleep function plane (&b*)
+#   - No recursion when alias body calls &b<cmd>()
+#   - bang-suffix (! e.g. &bmimikatz!) is the QUIET variant (suppress task ack)
+#     — orthogonal to gate, NOT a "call original" mechanism
+
+import java.net.*;
+import java.io.*;
+
+global('$REDROBIN_URL $REDROBIN_TOKEN $REDROBIN_SESSION_ID');
+$REDROBIN_URL = "http://localhost:7777";
+$REDROBIN_TOKEN = "";
+$REDROBIN_SESSION_ID = "";
+
+
+# ===== Token loading =====
+sub redrobin_load_token {
+    local('$path $reader $line');
+    $path = systemProperties()["user.home"] . "/.redrobin/transport.token";
+    $reader = [new java.io.BufferedReader: [new java.io.FileReader: $path]];
+    $line = [$reader readLine];
+    [$reader close];
+    return $line;
+}
+
+
+# ===== HTTP POST helper (blocking; ~150ms target on healthy daemon) =====
+sub redrobin_http_post {
+    local('$path $body $url $conn $reader $response $line $code $error_stream');
+    ($path, $body) = @_;
+    $url = [new URL: $REDROBIN_URL . $path];
+    $conn = [$url openConnection];
+    [$conn setRequestMethod: "POST"];
+    [$conn setRequestProperty: "Authorization": "Bearer " . $REDROBIN_TOKEN];
+    [$conn setRequestProperty: "Content-Type": "application/json"];
+    [$conn setDoOutput: true];
+    [$conn setConnectTimeout: 200];
+    [$conn setReadTimeout: 200];
+    [[$conn getOutputStream] write: [$body getBytes]];
+    $code = [$conn getResponseCode];
+    if ($code >= 200 && $code < 300) {
+        $reader = [new java.io.BufferedReader: [new java.io.InputStreamReader: [$conn getInputStream]]];
+    }
+    else {
+        $reader = [new java.io.BufferedReader: [new java.io.InputStreamReader: [$conn getErrorStream]]];
+    }
+    $response = "";
+    while ($line = [$reader readLine]) { $response .= $line; }
+    [$reader close];
+    [$conn disconnect];
+    return $response;
+}
+
+
+# ===== JSON helpers (Sleep has no native JSON; use String.replace tricks) =====
+sub redrobin_escape_json {
+    local('$s');
+    $s = $1;
+    $s = replace($s, '\\\\', '\\\\\\\\');
+    $s = replace($s, '"', '\\\\"');
+    $s = replace($s, "\n", '\\\\n');
+    $s = replace($s, "\r", '\\\\r');
+    $s = replace($s, "\t", '\\\\t');
+    return $s;
+}
+
+
+sub redrobin_query_quick {
+    local('$bid $cmd $raw $body $response');
+    ($bid, $cmd, $raw) = @_;
+    $body = '{"bid":"' . redrobin_escape_json($bid) .
+            '","command":"' . redrobin_escape_json($cmd) .
+            '","raw":"' . redrobin_escape_json($raw) . '"}';
+    $response = redrobin_http_post("/v1/verdict/quick", $body);
+
+    # Crude JSON parse — extract action field via regex
+    if ($response ismatch '"action":"BLOCK"') {
+        local('$reason');
+        if ($response ismatch '"reason":"([^"]+)"') { $reason = matched()[0]; }
+        else { $reason = "see daemon log"; }
+        return %(action => "BLOCK", reason => $reason);
+    } else if ($response ismatch '"action":"WARN"') {
+        local('$reason');
+        if ($response ismatch '"reason":"([^"]+)"') { $reason = matched()[0]; }
+        else { $reason = ""; }
+        return %(action => "WARN", reason => $reason);
+    } else if ($response ismatch '"action":"ESCALATE"') {
+        return %(action => "ESCALATE", reason => "Layer B reviewing");
+    } else {
+        return %(action => "PASS", reason => "");
+    }
+}
+
+
+# ===== Central gate sub (called by every alias body) =====
+sub redrobin_gate {
+    local('$bid $cmd $raw $verdict');
+    ($bid, $cmd, $raw) = @_;
+    $verdict = redrobin_query_quick($bid, $cmd, $raw);
+    if ($verdict['action'] eq "BLOCK") {
+        berror($bid, "[Red Robin] DANGER: " . $verdict['reason']);
+        return false;
+    }
+    if ($verdict['action'] eq "WARN") {
+        blog($bid, "[Red Robin] WARN: " . $verdict['reason']);
+    }
+    if ($verdict['action'] eq "ESCALATE") {
+        blog($bid, "[Red Robin] novel pattern — Layer B reviewing async");
+    }
+    return true;
+}
+
+
+# ===== Async event push (fire-and-forget, no blocking) =====
+sub redrobin_push_event_async {
+    local('$type $bid $payload $body');
+    ($type, $bid, $payload) = @_;
+    $body = '{"spec_version":"0.1.0","id":"evt_' . [java.util.UUID randomUUID] . '","ts":"' . dstamp(ticks()) . '"' .
+            ',"source":{"adapter":"cs-aggressor","version":"1.0.0","engagement_id":"unknown"' .
+            iff(strlen($REDROBIN_SESSION_ID) > 0, ',"adapter_session_id":"' . $REDROBIN_SESSION_ID . '"', "") . '}' .
+            ',"event":{"type":"' . $type . '","bid":"' . redrobin_escape_json($bid) . '","' .
+            iff($type eq "beacon.command_output", "output", "raw") . '":"' . redrobin_escape_json($payload) . '"}' .
+            '}';
+    fork({
+        try {
+            redrobin_http_post("/v1/events", $body);
+        } catch $e {
+            # silent — don't disrupt operator
+        }
+    }, \$body);
+}
+
+
+# ===== Adapter handshake (best-effort; if daemon down, alias gate fails open) =====
+sub redrobin_handshake {
+    local('$manifest_json $response');
+    $manifest_json = '{"manifest":{"manifest_version":"0.1.0","spec_versions_supported":">=0.1.0,<0.2.0",' .
+                     '"name":"cs-aggressor","version":"1.0.0","capabilities":{"preflight_block_console":true,' .
+                     '"preflight_block_tui":false,"tui_dispatch":true,"output_observe":true,' .
+                     '"console_annotation":true,"emergency_kill_switch":true,"gate_scope":"per_operator",' .
+                     '"command_modification":false},"events_emitted":["beacon.command_input","beacon.command_output",' .
+                     '"host.observation","credential.observed"],"events_consumed":["opsec.verdict"],' .
+                     '"requirements":{"cobalt_strike":">=4.12"}}}';
+    try {
+        $response = redrobin_http_post("/v1/adapters/connect", $manifest_json);
+        if ($response ismatch '"adapter_session_id":"(ses_[^"]+)"') {
+            $REDROBIN_SESSION_ID = matched()[0];
+            println("[Red Robin] handshake OK; session=" . $REDROBIN_SESSION_ID);
+        }
+        else {
+            println("[Red Robin] handshake response unexpected: " . $response);
+        }
+    } catch $e {
+        println("[Red Robin] handshake failed (daemon down?); gate will fail-open.");
+    }
+}
+
+
+# ===== Boot =====
+$REDROBIN_TOKEN = redrobin_load_token();
+redrobin_handshake();
+
+
+# ===== Load alias templates =====
+include(script_resource("aliases/tier1a_gate.sleep"));
+include(script_resource("aliases/tier1b_wrapper.sleep"));
+include(script_resource("aliases/tier2_warn.sleep"));
+include(script_resource("aliases/popup_beacon.sleep"));
+
+
+# ===== Path 3 — Output observation (passthrough-safe filter hook) =====
+set BEACON_OUTPUT {
+    redrobin_push_event_async("beacon.command_output", $1, $2);
+    return $2;
+}
+
+# Tasking observation event — fires when a task is encoded for the beacon
+on beacon_tasked {
+    redrobin_push_event_async("beacon.command_input", $1, $2);
+}
+
+
+println("[Red Robin] .cna loaded; gate active.");
