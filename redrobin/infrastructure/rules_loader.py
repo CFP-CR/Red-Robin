@@ -32,6 +32,10 @@ class RulesLoader:
         self._observer: Observer | None = None
         self._on_reload_callbacks: list[Callable[[list[Rule]], None]] = []
 
+    @property
+    def hot_reload_active(self) -> bool:
+        return self._observer is not None and self._observer.is_alive()
+
     def load_all(self) -> list[Rule]:
         """Load all YAML rules from rule_dir (recursive). Returns sorted by path."""
         rules: list[Rule] = []

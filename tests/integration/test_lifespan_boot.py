@@ -1,0 +1,26 @@
+"""Slice 1 integration: daemon lifespan boots rules loader with hot reload."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from redrobin.api.app import create_app
+
+
+@pytest.mark.asyncio
+async def test_lifespan_initializes_app_state(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
+    monkeypatch.setenv("REDROBIN_DB_URL", f"sqlite+aiosqlite:///{tmp_path / 'rr.db'}")
+    (tmp_path / "rules" / "shared" / "sigma").mkdir(parents=True)
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        async with app.router.lifespan_context(app):
+            assert app.state.rules_loader is not None
+            assert app.state.rules_loader.hot_reload_active is True
+            resp = await client.get("/v1/healthz")
+            assert resp.status_code == 200
