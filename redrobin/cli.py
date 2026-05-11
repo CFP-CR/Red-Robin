@@ -97,10 +97,23 @@ def cmd_daemon_stop(_args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_tui(_args: argparse.Namespace) -> int:
-    from redrobin.tui import app as tui_app
+def cmd_tui(args: argparse.Namespace) -> int:
+    from redrobin.tui.app import run_tui
 
-    tui_app.run()
+    # Default token = the locally-stored operator token. ``redrobin tui`` with
+    # no --token flag should Just Work against the local daemon.
+    token = args.token
+    if token is None:
+        try:
+            token = get_or_create_token()
+        except Exception:
+            token = None
+
+    run_tui(
+        connect_ws=args.connect_ws,
+        connect_http=args.connect_http,
+        token=token,
+    )
     return 0
 
 
@@ -236,7 +249,23 @@ def build_parser() -> argparse.ArgumentParser:
     daemon_start.set_defaults(func=cmd_daemon_start)
     daemon_sub.add_parser("stop").set_defaults(func=cmd_daemon_stop)
 
-    sub.add_parser("tui").set_defaults(func=cmd_tui)
+    tui_parser = sub.add_parser("tui")
+    tui_parser.add_argument(
+        "--connect-ws",
+        default="ws://127.0.0.1:7777/v1/tui",
+        help="WebSocket URL for the daemon TUI stream (default: ws://127.0.0.1:7777/v1/tui)",
+    )
+    tui_parser.add_argument(
+        "--connect-http",
+        default="http://127.0.0.1:7777",
+        help="HTTP base URL for the daemon API (default: http://127.0.0.1:7777)",
+    )
+    tui_parser.add_argument(
+        "--token",
+        default=None,
+        help="Bearer token (defaults to ~/.redrobin/transport.token)",
+    )
+    tui_parser.set_defaults(func=cmd_tui)
 
     eng = sub.add_parser("engagement")
     eng_sub = eng.add_subparsers(dest="eng_cmd", required=True)
