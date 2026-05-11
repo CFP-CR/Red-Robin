@@ -7,6 +7,7 @@ from fastapi import Depends, FastAPI
 from redrobin.api.adapters_router import router as adapters_router
 from redrobin.api.auth import require_bearer
 from redrobin.api.events_router import router as events_router
+from redrobin.api.tui_ws import router as tui_ws_router
 from redrobin.api.verdicts_router import router as verdicts_router
 
 
@@ -15,6 +16,7 @@ def create_app() -> FastAPI:
     app.include_router(adapters_router)
     app.include_router(verdicts_router)
     app.include_router(events_router)
+    app.include_router(tui_ws_router)
 
     @app.get("/v1/ping")
     async def ping() -> dict[str, bool]:
