@@ -3,23 +3,26 @@
 Lazily constructs the singleton pipeline at first request. Wires:
   - LayerAEngine — loaded with rules from ~/.redrobin/rules/ if dir exists, else empty
   - ScopeEnforcer — empty in_scope/out_of_scope (populated per-engagement in Task 28)
-  - LayerB placeholder (Null impl — replaced by real LayerBEngine in Task 27)
+  - LayerBEngine — Anthropic LLM + Voyage embeddings + KB service
 
-Tests can override the singleton via monkeypatch.
+The factory accepts overrides for testing (inject mock LLM/KB).
 """
-
 from __future__ import annotations
 
 from functools import lru_cache
 
+from redrobin.application.kb_service import KBService
 from redrobin.application.layer_a_engine import LayerAEngine
+from redrobin.application.layer_b_engine import LayerBEngine
 from redrobin.application.scope_enforcer import ScopeEnforcer
 from redrobin.application.verdict_pipeline import LayerBProvider, VerdictPipeline
 from redrobin.domain.opsec import Verdict, VerdictAction
 from redrobin.infrastructure.filesystem import REDROBIN_ROOT
+from redrobin.infrastructure.llm.anthropic_client import AnthropicClient
+from redrobin.infrastructure.llm.voyage_client import VoyageClient
 from redrobin.infrastructure.rules_loader import RulesLoader
+from redrobin.infrastructure.vector_store import VectorStore
 
-# Default passthrough whitelist per spec §1.2.1 + bootstrap pack (Task 38)
 DEFAULT_PASSTHROUGH = {
     "pwd",
     "cd",
@@ -35,15 +38,34 @@ DEFAULT_PASSTHROUGH = {
 }
 
 
-class _NullLayerB:
-    """Placeholder until Task 26+27 wire the real LayerBEngine."""
+class _DegradedLayerB:
+    """No-op Layer B used when API keys are missing.
+
+    Lets the daemon serve Layer A verdicts even without API keys
+    (development/CI workflows). Logged at startup; operator sees the banner in TUI.
+    """
 
     async def evaluate(self, *, command: str, raw: str) -> Verdict:
         return Verdict(
             action=VerdictAction.PASS,
-            reason="layer B not yet wired (Task 26)",
+            reason="Layer B degraded (API keys missing) — Path 3 observation only",
             rule_id=None,
         )
+
+
+def _build_layer_b() -> LayerBProvider:
+    """Build real LayerBEngine. Falls back to degraded no-op when API keys missing."""
+    try:
+        llm = AnthropicClient()
+        voyage = VoyageClient()
+        kb_index_path = REDROBIN_ROOT / "shared" / "kb-index" / "index.npz"
+        store = VectorStore.load(kb_index_path) if kb_index_path.exists() else VectorStore()
+        kb = KBService(voyage=voyage, store=store)
+        return LayerBEngine(llm=llm, kb=kb)
+    except RuntimeError:
+        # API keys missing — fall back to a no-op Layer B so daemon can still serve
+        # Layer A verdicts. Logged at startup; operator sees the banner in TUI.
+        return _DegradedLayerB()
 
 
 @lru_cache(maxsize=1)
@@ -56,7 +78,7 @@ def get_verdict_pipeline() -> VerdictPipeline:
         rules = []
     layer_a = LayerAEngine(rules=rules, passthrough=set(DEFAULT_PASSTHROUGH))
     scope = ScopeEnforcer(in_scope=[], out_of_scope=[])
-    layer_b: LayerBProvider = _NullLayerB()
+    layer_b = _build_layer_b()
     return VerdictPipeline(scope=scope, layer_a=layer_a, layer_b=layer_b)
 
 

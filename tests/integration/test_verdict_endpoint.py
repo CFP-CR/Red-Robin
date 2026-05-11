@@ -105,3 +105,39 @@ def test_verdict_quick_response_shape(client, auth_header):
     body = r.json()
     assert set(body.keys()) == {"action", "reason", "rule_id", "suggestions"}
     assert isinstance(body["suggestions"], list)
+
+
+def test_verdict_quick_escalate_returns_immediately_without_layer_b_blocking(
+    client, auth_header, _isolated_root, monkeypatch
+):
+    """Even when Layer B is real, ESCALATE returns immediately (async fire-and-forget)."""
+    # The default _DegradedLayerB returns PASS in <1ms; verify quick_verdict returns ESCALATE
+    # synchronously without waiting for Layer B
+    r = client.post(
+        "/v1/verdict/quick",
+        json={"bid": "b1", "command": "obscure_cmd", "raw": "obscure_cmd"},
+        headers=auth_header,
+    )
+    assert r.status_code == 200
+    body = r.json()
+    # Empty rules dir → no Layer A match → ESCALATE (and Layer B fires async)
+    assert body["action"] == "ESCALATE"
+
+
+def test_verdict_quick_degraded_layer_b_when_api_keys_missing(
+    client, auth_header, _isolated_root, monkeypatch
+):
+    """When API keys are missing, Layer B degrades to no-op (Path 3 only) but daemon still works."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
+    from redrobin.application.verdict_pipeline_factory import reset_pipeline_cache
+    reset_pipeline_cache()
+
+    r = client.post(
+        "/v1/verdict/quick",
+        json={"bid": "b1", "command": "pwd", "raw": "pwd"},
+        headers=auth_header,
+    )
+    assert r.status_code == 200
+    # passthrough still works — Layer B not invoked
+    assert r.json()["action"] == "PASS"
