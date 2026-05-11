@@ -33,8 +33,10 @@ def test_cli_doctor_does_not_crash(_isolated_root, monkeypatch):
     from redrobin.cli import main
 
     rc = main(["doctor"])
-    # Doctor never blocks (always exits 0 — degradation is documented)
-    assert rc == 0
+    # Slice 14: doctor now returns non-zero when required env vars are
+    # missing so CI smoke tests can gate on it. Old behaviour silently
+    # returned 0 even on failure.
+    assert rc == 1
 
 
 def test_cli_engagement_new_and_list(_isolated_root):

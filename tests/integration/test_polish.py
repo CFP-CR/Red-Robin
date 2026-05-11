@@ -89,3 +89,40 @@ def test_vector_store_metadata_persisted_as_json_not_repr(tmp_path):
     # JSON-loadable; repr() would emit single quotes and fail json.loads.
     parsed = json.loads(raw)
     assert parsed == {"k": "v", "n": 1}
+
+
+def test_doctor_exit_code_nonzero_on_failure(monkeypatch, tmp_path):
+    """Missing env vars → non-zero exit so CI smoke tests can gate on it.
+
+    Previously doctor always returned 0 even when ANTHROPIC_API_KEY was
+    unset — useless as a preflight in any automated context.
+    """
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
+    # Point REDROBIN_ROOT at a fresh tmp so the rules-dir check is the only
+    # other potential failure surface, and we control it.
+    monkeypatch.setattr(
+        "redrobin.infrastructure.filesystem.REDROBIN_ROOT", tmp_path / ".redrobin"
+    )
+    monkeypatch.setattr("redrobin.cli.REDROBIN_ROOT", tmp_path / ".redrobin")
+    from redrobin.cli import cmd_doctor
+
+    args = type("A", (), {"verbose": False})()
+    rc = cmd_doctor(args)
+    assert rc != 0
+
+
+def test_doctor_exit_code_zero_when_all_pass(monkeypatch, tmp_path):
+    """Sanity: all checks green → rc == 0 so a healthy daemon doesn't flag."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("VOYAGE_API_KEY", "test-key")
+    root = tmp_path / ".redrobin"
+    rules_dir = root / "rules"
+    rules_dir.mkdir(parents=True)
+    monkeypatch.setattr("redrobin.infrastructure.filesystem.REDROBIN_ROOT", root)
+    monkeypatch.setattr("redrobin.cli.REDROBIN_ROOT", root)
+    from redrobin.cli import cmd_doctor
+
+    args = type("A", (), {"verbose": False})()
+    rc = cmd_doctor(args)
+    assert rc == 0

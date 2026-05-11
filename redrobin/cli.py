@@ -49,7 +49,14 @@ def cmd_init(_args: argparse.Namespace) -> int:
 
 
 def cmd_doctor(_args: argparse.Namespace) -> int:
-    ok = True
+    """Preflight check; exits non-zero when any required check fails.
+
+    Prior behaviour was to print warnings and always return 0 — fine for
+    interactive use but useless in CI/CD where the operator wants to gate
+    a deploy on `redrobin doctor`. Now we collect failures and return 1
+    when any are present, while still printing the same diagnostic lines.
+    """
+    failures: list[str] = []
     print("[*] Red Robin doctor (preflight check)")
 
     # ANTHROPIC_API_KEY
@@ -57,23 +64,23 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
         print("  [OK] ANTHROPIC_API_KEY set")
     else:
         print("  [!!] ANTHROPIC_API_KEY not set - Layer B will degrade to no-op")
-        ok = False
+        failures.append("ANTHROPIC_API_KEY not set")
 
     # VOYAGE_API_KEY
     if os.environ.get("VOYAGE_API_KEY"):
         print("  [OK] VOYAGE_API_KEY set")
     else:
         print("  [!!] VOYAGE_API_KEY not set - KB retrieval will be empty")
-        ok = False
+        failures.append("VOYAGE_API_KEY not set")
 
     # ~/.redrobin/ layout
     if REDROBIN_ROOT.exists():
         print(f"  [OK] {REDROBIN_ROOT} exists")
     else:
         print(f"  [!!] {REDROBIN_ROOT} not initialized - run `redrobin init`")
-        ok = False
+        failures.append(f"{REDROBIN_ROOT} not initialized")
 
-    # rules dir
+    # rules dir — informational only; the daemon creates it on first start.
     rules_dir = REDROBIN_ROOT / "rules"
     if rules_dir.exists():
         rule_count = sum(1 for _ in rules_dir.rglob("*.yaml"))
@@ -81,8 +88,11 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
     else:
         print("  [!] no rules directory yet (will be created on first daemon start)")
 
-    print("[+] Doctor finished:", "OK" if ok else "DEGRADED (Layer A still works)")
-    return 0 if ok else 0  # never block daemon startup - degradation is documented
+    if failures:
+        print("[+] Doctor finished: DEGRADED (Layer A still works)")
+        return 1
+    print("[+] Doctor finished: OK")
+    return 0
 
 
 def cmd_daemon_start(args: argparse.Namespace) -> int:
