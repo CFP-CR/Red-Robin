@@ -1,9 +1,14 @@
-"""TUI panel rendering tests."""
+"""TUI panel rendering tests.
+
+Currently only ``panels/working_memory.py`` is integrated into the live TUI
+(``redrobin/tui/app.py``). The earlier ``panels/chat.py`` and
+``panels/event_stream.py`` modules were removed in Phase 2 condition 3 —
+they expected typed inputs the live WS stream does not produce, and the
+inline ``_render_events`` in ``app.py`` covers the live verdict stream.
+"""
 
 from redrobin.domain.memory import Account, Host, Objective, ToolUsage, WorkingMemory
 from redrobin.tui.i18n import Labels, load_labels
-from redrobin.tui.panels.chat import ChatTurn, render_chat
-from redrobin.tui.panels.event_stream import EventEntry, render_event_stream
 from redrobin.tui.panels.working_memory import render_working_memory
 
 
@@ -85,52 +90,3 @@ def test_render_working_memory_uses_spanish_labels():
     wm = WorkingMemory(engagement_id="x")
     out = render_working_memory(wm, _labels("es"))
     assert "FASE" in out
-
-
-def test_render_event_stream_empty():
-    assert render_event_stream([]) == "(no events yet)"
-
-
-def test_render_event_stream_formats_with_severity():
-    entries = [
-        EventEntry(timestamp="2026-05-10T14:32:01Z", severity="DANGER", text="mimikatz blocked"),
-        EventEntry(timestamp="2026-05-10T14:32:15Z", severity="WARN", text="AD recon"),
-    ]
-    out = render_event_stream(entries)
-    assert "[14:32:01]" in out
-    assert "[DANGER]" in out
-    assert "mimikatz blocked" in out
-
-
-def test_render_event_stream_handles_non_iso_timestamp():
-    entry = EventEntry(timestamp="14:32:01", severity="INFO", text="hi")
-    out = render_event_stream([entry])
-    assert "[14:32:01]" in out
-    assert "[INFO" in out
-
-
-def test_render_chat_empty():
-    assert "empty" in render_chat([])
-
-
-def test_render_chat_with_turns():
-    turns = [
-        ChatTurn(role="operator", text="What's safe for cred dump?"),
-        ChatTurn(role="red-robin", text="Use nanodump", citations=["vault/nanodump.md"]),
-    ]
-    out = render_chat(turns)
-    assert "What's safe" in out
-    assert "nanodump" in out
-    assert "vault/nanodump.md" in out
-
-
-def test_render_chat_operator_prefix():
-    out = render_chat([ChatTurn(role="operator", text="hello")])
-    assert out.startswith("> hello")
-
-
-def test_render_chat_red_robin_prefix():
-    out = render_chat([ChatTurn(role="red-robin", text="hi")])
-    # Should use the bird emoji prefix
-    assert "hi" in out
-    assert not out.startswith("> ")

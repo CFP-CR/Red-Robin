@@ -7,12 +7,45 @@ def test_parse_returns_none_for_non_slash():
     assert parse("mimikatz logonpasswords") is None
 
 
-def test_parse_returns_none_for_arbitrary_prefix():
-    assert parse("/rr alts") is None
+def test_parse_returns_none_for_no_prefix():
+    """Plain operator commands without a prefix are dispatcher input, not slash."""
+    assert parse("alts please") is None
 
 
 def test_parse_alts():
     assert parse(":rr alts") == SlashCommand(verb="alts", args=[])
+
+
+# -----------------------------------------------------------------------------
+# Slash short-form: ``/<verb> [args]`` is the TUI palette shorthand.
+# Added in Phase 2 condition 3 to wire the ``/`` keybinding to the parser.
+# -----------------------------------------------------------------------------
+
+
+def test_parse_slash_shorthand_alts():
+    assert parse("/alts") == SlashCommand(verb="alts", args=[])
+
+
+def test_parse_slash_shorthand_with_args():
+    cmd = parse('/override "client requested live demo"')
+    assert cmd == SlashCommand(verb="override", args=["client requested live demo"])
+
+
+def test_parse_slash_shorthand_exec():
+    cmd = parse("/exec mimikatz logonpasswords")
+    assert cmd == SlashCommand(verb="exec", args=["mimikatz", "logonpasswords"])
+
+
+def test_parse_slash_shorthand_empty_routes_to_help():
+    """Bare ``/`` opens the palette → routes to help so the operator sees verbs."""
+    assert parse("/") == SlashCommand(verb="help", args=[])
+
+
+def test_parse_slash_shorthand_unknown_verb_routes_to_help():
+    cmd = parse("/rr alts")
+    assert cmd is not None
+    assert cmd.verb == "help"
+    assert cmd.args == ["rr", "alts"]
 
 
 def test_parse_explain_with_args():

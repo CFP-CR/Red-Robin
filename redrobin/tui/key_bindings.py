@@ -1,12 +1,16 @@
-"""Key bindings: Enter dispatches input; Ctrl+O toggles inspector; '/' opens palette.
+"""Key bindings: Enter dispatches input; Ctrl+O toggles inspector; '/' enters slash mode.
 
 Binding semantics:
 
 - ``Enter`` — strip the input buffer; if non-empty, schedule the async dispatch
-  callback and clear the buffer for the next command.
+  callback and clear the buffer for the next command. ``on_submit`` routes
+  slash-prefixed input through ``slash_commands.parse``.
 - ``Ctrl+O`` — toggle the memory-inspector overlay. Pressed twice it closes.
-- ``/`` — open the slash-command palette and seed the buffer with ``/`` so the
-  operator can keep typing without losing the leading slash.
+- ``/`` — when pressed on an empty buffer, seed a leading ``/`` so the
+  operator types the verb directly (``/alts``, ``/inspector``, ...). When the
+  buffer already contains text, ``/`` is inserted as a literal so it doesn't
+  interrupt mid-typing. Prefix is intentionally NOT coupled to a palette
+  overlay; the slash text is recognised by ``parse_slash`` on submit.
 - ``Escape`` — close any active overlay.
 - ``Ctrl+C`` — clean Application.exit().
 
@@ -51,9 +55,15 @@ def build_key_bindings(
 
     @kb.add("/")
     def _(event) -> None:
-        state.focus_overlay = "palette"
-        input_buffer.text = "/"
-        input_buffer.cursor_position = len(input_buffer.text)
+        # When the buffer is empty, ``/`` is the slash-mode trigger: seed the
+        # leading slash so on_submit can dispatch through the slash parser.
+        # When mid-typing, fall back to inserting ``/`` as a literal so it
+        # doesn't disrupt the input flow.
+        if not input_buffer.text:
+            input_buffer.text = "/"
+            input_buffer.cursor_position = 1
+        else:
+            input_buffer.insert_text("/")
         invalidate()
 
     @kb.add("escape")

@@ -52,7 +52,12 @@ from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import Frame
 
 from redrobin.tui.dispatch import OperatorDispatcher
+from redrobin.tui.i18n import Labels, load_labels
+from redrobin.tui.inspector import render_inspector as render_inspector_full
 from redrobin.tui.key_bindings import build_key_bindings
+from redrobin.tui.panels.working_memory import render_working_memory
+from redrobin.tui.slash_commands import parse as parse_slash
+from redrobin.tui.snapshot_adapter import working_memory_from_snapshot
 from redrobin.tui.state import TUIState
 from redrobin.tui.ws_client import run_client
 
@@ -99,37 +104,40 @@ def _render_sessions(state: TUIState) -> str:
     return "\n".join(lines)
 
 
-def _render_memory(state: TUIState) -> str:
-    snap = state.snapshot
-    lines = []
-    lines.append(f"engagement: {snap.get('engagement_id') or '-'}")
-    lines.append(f"hosts:       {len(snap.get('hosts') or [])}")
-    lines.append(f"credentials: {len(snap.get('credentials') or [])}")
-    lines.append(f"findings:    {len(snap.get('findings') or [])}")
-    lines.append(f"sessions:    {len(snap.get('sessions') or [])}")
-    return "\n".join(lines)
+def _render_memory(state: TUIState, labels: Labels) -> str:
+    """Working-memory panel: rich rendering of hosts, accounts, kill chain,
+    objectives, tools and defenses via ``panels/working_memory.py``.
+
+    The daemon's WS snapshot is a dict; hydrate it into a typed
+    :class:`WorkingMemory` via the snapshot adapter so the panel renderer
+    stays decoupled from the wire shape.
+    """
+    wm = working_memory_from_snapshot(state.snapshot)
+    rendered = render_working_memory(wm, labels)
+    return rendered or "(snapshot empty — waiting for daemon)"
 
 
-def _render_inspector(state: TUIState) -> str:
+def _render_inspector(state: TUIState, labels: Labels) -> str:
+    """Inspector overlay: full engagement-state view per spec §5.9.6.
+
+    Wraps :func:`render_inspector` from ``tui/inspector.py``, hydrating the
+    WS snapshot into a typed :class:`WorkingMemory` and surfacing the latest
+    verdict's reason as a single Episodic lesson so operators get verdict
+    context even while the rich Episodic store isn't yet streamed to the TUI.
+    """
+    wm = working_memory_from_snapshot(state.snapshot)
     latest = state.latest_verdict()
-    if latest is None:
-        return "(no verdicts yet — press Esc to close)"
-    payload = latest.get("payload") or {}
-    lines = ["═══ MEMORY INSPECTOR — latest verdict ═══", ""]
-    lines.append(f"correlation_id: {payload.get('correlation_id', '-')}")
-    lines.append(f"verdict:        {payload.get('verdict', '-')}")
-    if payload.get("previous_verdict"):
-        lines.append(f"previous:       {payload['previous_verdict']}")
-    lines.append(f"source:         {payload.get('source', '-')}")
-    lines.append(f"command:        {payload.get('command', '-')}")
-    lines.append(f"rule_id:        {payload.get('rule_id', '-')}")
-    if payload.get("reason"):
-        lines.append("")
-        lines.append("reason:")
-        lines.append(f"  {payload['reason']}")
-    lines.append("")
-    lines.append("(Press Esc to close)")
-    return "\n".join(lines)
+    lessons: list[str] = []
+    if latest is not None:
+        payload = latest.get("payload") or {}
+        verdict = payload.get("verdict", "?")
+        command = payload.get("command", "?")
+        reason = payload.get("reason", "")
+        if reason:
+            lessons.append(f"[{verdict}] {command} — {reason}")
+        else:
+            lessons.append(f"[{verdict}] {command}")
+    return render_inspector_full(wm, episodic_lessons=lessons, labels=labels)
 
 
 def _panel(get_text, title: str, name: str, weight: int = 1):
@@ -160,13 +168,20 @@ def build_tui_app(
     dispatcher: OperatorDispatcher,
     input=None,  # noqa: A002 — prompt_toolkit uses this name
     output=None,
+    labels: Labels | None = None,
 ) -> Application:
     """Construct the prompt_toolkit Application. Pure builder — no I/O.
 
     The ``input``/``output`` parameters let tests inject ``create_pipe_input()``
     and ``DummyOutput`` so the Application can be instantiated in environments
     without a real terminal (CI, pytest on Windows under MINGW).
+
+    ``labels`` defaults to the i18n pack detected from ``$LANG``. Tests can
+    pass an explicit :class:`Labels` to force English regardless of the host
+    locale.
     """
+    if labels is None:
+        labels = Labels(load_labels())
     input_buffer = Buffer(multiline=False)
 
     sessions_pane = _panel(
@@ -174,7 +189,7 @@ def build_tui_app(
     )
     events_pane = _panel(lambda: _render_events(state), "Events", "events_panel", weight=4)
     memory_pane = _panel(
-        lambda: _render_memory(state), "Working Memory", "memory_panel", weight=2
+        lambda: _render_memory(state, labels), "Working Memory", "memory_panel", weight=2
     )
 
     main_row = VSplit([sessions_pane, events_pane, memory_pane])
@@ -211,7 +226,9 @@ def build_tui_app(
         ConditionalContainer(
             content=Frame(
                 Window(
-                    content=FormattedTextControl(text=lambda: _render_inspector(state)),
+                    content=FormattedTextControl(
+                        text=lambda: _render_inspector(state, labels)
+                    ),
                     wrap_lines=True,
                     style="class:inspector-body",
                 ),
@@ -228,11 +245,32 @@ def build_tui_app(
     )
 
     async def on_submit(text: str) -> None:
-        """Send the operator input to the daemon via the dispatcher.
+        """Route operator input.
 
-        Errors are caught and surfaced as synthetic events in the stream so the
-        TUI never crashes on a transient daemon disconnect.
+        ``:rr <verb>`` and ``/<verb>`` are parsed locally by
+        :func:`redrobin.tui.slash_commands.parse`. Verb-handling is surfaced
+        as a synthetic event in the TUI stream — slash dispatch is operator-
+        facing UI only; nothing crosses to the daemon. The bare ``inspector``
+        verb toggles the inspector overlay locally so the keybinding has a
+        textual alternative.
+
+        Plain text is forwarded to the daemon's verdict endpoint via the
+        dispatcher. Errors are caught and surfaced as synthetic events in the
+        stream so the TUI never crashes on a transient daemon disconnect.
         """
+        slash = parse_slash(text)
+        if slash is not None:
+            if slash.verb == "inspector":
+                state.focus_overlay = (
+                    "inspector" if state.focus_overlay != "inspector" else None
+                )
+            state.append_event(
+                {
+                    "type": "tui.slash_command",
+                    "payload": {"verb": slash.verb, "args": list(slash.args)},
+                }
+            )
+            return
         try:
             await dispatcher.submit(text)
         except Exception as exc:  # noqa: BLE001 — operator must see this

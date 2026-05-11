@@ -1,9 +1,19 @@
-"""redrobin/tui/slash_commands.py — `:rr <verb> [args]` parser.
+"""redrobin/tui/slash_commands.py — Slash command parser.
+
+Two surface forms parse to the same :class:`SlashCommand`:
+
+* Canonical, scriptable: ``:rr <verb> [args]`` — works in chat-style input.
+* TUI shorthand: ``/<verb> [args]`` — what the ``/`` keybinding seeds and
+  what the operator types interactively. A bare ``/`` opens help.
 
 Spec §4 Componente 5 canonical set:
   :rr alts | :rr explain | :rr skip | :rr override "<reason>"
   :rr exec <cmd> | :rr promote "<lesson>" | :rr milestone "<text>"
   :rr phase <name> | :rr objective <id> <pct> | :rr inspector | :rr help
+
+The parser returns ``None`` if the text is neither a ``:rr`` nor a ``/``
+form, signalling to the caller (``redrobin/tui/app.py:on_submit``) that
+the input should be dispatched to the daemon's verdict endpoint instead.
 """
 
 from __future__ import annotations
@@ -33,11 +43,19 @@ class SlashCommand:
 
 
 def parse(text: str) -> SlashCommand | None:
-    """Parse ':rr <verb> [args]'. Returns None if not a slash command."""
+    """Parse ``:rr <verb> [args]`` or ``/<verb> [args]``.
+
+    Returns ``None`` for input that is neither prefix; the caller treats
+    that as plain dispatcher input.
+    """
     text = text.strip()
-    if not text.startswith(":rr"):
+    if text.startswith(":rr"):
+        body = text[3:].strip()
+    elif text.startswith("/"):
+        body = text[1:].strip()
+    else:
         return None
-    body = text[3:].strip()
+
     if not body:
         return SlashCommand(verb="help", args=[])
     try:
