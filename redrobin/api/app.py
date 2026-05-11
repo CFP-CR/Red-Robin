@@ -1,17 +1,16 @@
-"""redrobin/api/app.py — FastAPI application factory.
-
-Sub-routers are registered as they come online (adapters, verdicts, events, tui_ws).
-"""
+"""redrobin/api/app.py — FastAPI application factory."""
 
 from __future__ import annotations
 
 from fastapi import Depends, FastAPI
 
+from redrobin.api.adapters_router import router as adapters_router
 from redrobin.api.auth import require_bearer
 
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Red Robin Daemon", version="0.1.0")
+    app.include_router(adapters_router)
 
     @app.get("/v1/ping")
     async def ping() -> dict[str, bool]:
