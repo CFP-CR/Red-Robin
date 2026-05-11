@@ -22,8 +22,10 @@ from redrobin.api.auth import require_bearer
 from redrobin.api.events_router import router as events_router
 from redrobin.api.tui_ws import router as tui_ws_router
 from redrobin.api.verdicts_router import router as verdicts_router
+from redrobin.application.engagement_loader import Engagement, EngagementLoader
 from redrobin.application.event_bus import EventBus
 from redrobin.application.rules_lifecycle import RulesLoader
+from redrobin.application.scope_enforcer import ScopeEnforcer
 from redrobin.application.verdict_pipeline_factory import (
     build_default_dependencies,
     build_pipeline,
@@ -70,6 +72,44 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     engagement_id = os.environ.get("REDROBIN_ENGAGEMENT_ID", "eng-default")
     app.state.engagement_id = engagement_id
 
+    # Slice 6 — engagement-aware scope. Read engagement.yaml from
+    # ``~/.redrobin/engagements/<slug>/`` (root configurable for tests) and
+    # build the pipeline's ScopeEnforcer from it. Missing slug falls back to
+    # wildcard scope so the dev workflow without a configured engagement
+    # still works.
+    engagements_dir = Path(
+        os.environ.get(
+            "REDROBIN_ENGAGEMENTS_DIR",
+            str(Path.home() / ".redrobin" / "engagements"),
+        )
+    )
+    engagement_slug = os.environ.get("REDROBIN_ENGAGEMENT_SLUG")
+    engagement: Engagement | None = None
+    if engagement_slug:
+        try:
+            engagement = EngagementLoader(engagements_dir).load(engagement_slug)
+        except FileNotFoundError:
+            logger.warning(
+                "engagement slug %s set but file not found under %s — "
+                "falling back to wildcard scope",
+                engagement_slug,
+                engagements_dir,
+            )
+            engagement = None
+
+    if engagement is None:
+        scope = ScopeEnforcer(in_scope=["*"], out_of_scope=[])
+        app.state.engagement = None
+    else:
+        scope = ScopeEnforcer(
+            in_scope=engagement.in_scope, out_of_scope=engagement.out_of_scope
+        )
+        app.state.engagement = engagement
+        # Keep app.state.engagement_id consistent with the loaded slug so the
+        # working-memory reducer + downstream consumers see a single ID.
+        app.state.engagement_id = engagement.slug
+        engagement_id = engagement.slug
+
     # Seed an empty working memory file if none exists so the reducer's
     # synchronous load → mutate → save cycle has something to read on the
     # first event.
@@ -89,11 +129,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Verdict pipeline — built once at startup with the bus wired so Layer A
     # verdicts publish to the same bus the reducer + TUI WS subscribe to.
     # Reuses the already-loaded rules to avoid double-reading the rules dir.
-    # Slice 6 will replace the wildcard scope with engagement-aware scope.
+    # Slice 6: ``scope`` is built from engagement.yaml above (or wildcard
+    # fallback). The factory still ships a default scope on ``deps.scope`` —
+    # we override it here with the engagement-aware enforcer.
     deps = build_default_dependencies(rules=initial_rules)
     verdict_pipeline = build_pipeline(
         event_bus=event_bus,
-        scope=deps.scope,
+        scope=scope,
         layer_a=deps.layer_a,
         layer_b=deps.layer_b,
     )

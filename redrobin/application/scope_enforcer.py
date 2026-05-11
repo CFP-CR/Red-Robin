@@ -59,6 +59,45 @@ class ScopeEnforcer:
                 return f"ROE violation: target {target!r} is out-of-scope"
         return None
 
+    def is_in_scope(self, target: str) -> bool:
+        """Return True iff ``target`` is in scope per engagement.yaml semantics.
+
+        Slice 6 — engagement-aware scope check used by the lifespan to validate
+        operator-supplied targets against the loaded engagement. Distinct from
+        :meth:`check` (which is glob-based and walks ``out_of_scope`` only):
+        ``is_in_scope`` enforces the full positive+negative ROE per spec.
+
+        Match rules (out_of_scope wins on conflict):
+          - ``"*"`` wildcard matches anything
+          - exact hostname match
+          - domain suffix match (``corp.local`` matches ``dc01.corp.local``)
+          - CIDR membership (``10.0.0.0/24`` matches ``10.0.0.5``)
+        """
+        if self._is_in_scope_match(target, self.out_of_scope):
+            return False
+        return self._is_in_scope_match(target, self.in_scope) or "*" in self.in_scope
+
+    @staticmethod
+    def _is_in_scope_match(target: str, patterns: list[str]) -> bool:
+        for pat in patterns:
+            if pat == "*":
+                return True
+            if pat == target:
+                return True
+            if "/" in pat:
+                try:
+                    net = ipaddress.ip_network(pat, strict=False)
+                    try:
+                        if ipaddress.ip_address(target) in net:
+                            return True
+                    except ValueError:
+                        continue
+                except ValueError:
+                    pass
+            if target.endswith("." + pat):
+                return True
+        return False
+
     @staticmethod
     def _matches_any(target: str, patterns: list[str]) -> bool:
         for p in patterns:
