@@ -219,3 +219,30 @@ async def test_unknown_event_type_is_ignored(tmp_path):
         assert wm.credentials == [] and wm.hosts == [] and wm.findings == []
     finally:
         await _drain(bus, task)
+
+
+@pytest.mark.asyncio
+async def test_lifespan_starts_reducer_task(tmp_path, monkeypatch):
+    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
+    monkeypatch.setenv("REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json"))
+    monkeypatch.setenv("REDROBIN_ENGAGEMENT_ID", "eng-test-001")
+
+    from redrobin.api.app import create_app
+
+    app = create_app()
+    async with app.router.lifespan_context(app):
+        assert app.state.reducer_task is not None
+        assert not app.state.reducer_task.done()
+        # Publish a beacon output with creds; reducer should write to working memory.
+        await app.state.event_bus.publish({
+            "type": "c2.beacon_output",
+            "payload": {
+                "beacon_id": "B-100",
+                "output": "Username: CORP\\alice\nNTLM: aad3b435b51404eeaad3b435b51404ee:11111111111111111111111111111111",
+            },
+        })
+        # Give reducer a tick to process; tighter pause is fine since the bus
+        # is local and the repo is sync.
+        await asyncio.sleep(0.3)
+        creds = app.state.working_memory_repo.list_credentials()
+        assert any(getattr(c, "username", None) == "alice" for c in creds)

@@ -44,15 +44,36 @@ async def tui_ws(websocket: WebSocket, token: str = Query(...)) -> None:
 
 
 async def _build_initial_snapshot(app) -> dict:
-    """Build a working_memory_snapshot payload.
+    """Build a working_memory_snapshot payload from the live repo.
 
-    Until Slice 4 wires the reducer, this returns an empty but valid shape.
-    Slice 4 replaces the body with a real query of WorkingMemoryRepo.
+    Tolerates missing repo / missing file by returning an empty shape, which
+    matters because some tests instantiate ``create_app()`` without setting
+    ``REDROBIN_WORKING_MEMORY_PATH``.
     """
+    repo = getattr(app.state, "working_memory_repo", None)
+    engagement_id = getattr(app.state, "engagement_id", None)
+    if repo is None or not repo.exists():
+        return {
+            "engagement_id": engagement_id,
+            "hosts": [],
+            "credentials": [],
+            "findings": [],
+            "sessions": [],
+        }
+    wm = repo.load()
     return {
-        "engagement_id": getattr(app.state, "engagement_id", None),
-        "hosts": [],
-        "credentials": [],
-        "findings": [],
-        "sessions": [],
+        "engagement_id": engagement_id,
+        "hosts": [_serialize(h) for h in wm.hosts],
+        "credentials": [_serialize(c) for c in wm.credentials],
+        "findings": [_serialize(f) for f in wm.findings],
+        "sessions": [_serialize(s) for s in wm.sessions],
     }
+
+
+def _serialize(obj):
+    """Render a domain dataclass/struct as a JSON-safe dict."""
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()
+    if hasattr(obj, "__dict__"):
+        return {k: v for k, v in obj.__dict__.items() if not k.startswith("_")}
+    return obj

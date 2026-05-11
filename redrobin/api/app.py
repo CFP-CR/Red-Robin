@@ -8,6 +8,7 @@ at daemon boot).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -23,6 +24,8 @@ from redrobin.api.tui_ws import router as tui_ws_router
 from redrobin.api.verdicts_router import router as verdicts_router
 from redrobin.application.event_bus import EventBus
 from redrobin.application.rules_lifecycle import RulesLoader
+from redrobin.application.working_memory_lifecycle import WorkingMemory, WorkingMemoryRepo
+from redrobin.application.working_memory_reducer import WorkingMemoryReducer
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +54,34 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     event_bus = EventBus()
     app.state.event_bus = event_bus
 
+    # Working memory persistence
+    wm_path = Path(os.environ.get(
+        "REDROBIN_WORKING_MEMORY_PATH",
+        str(Path.home() / ".redrobin" / "working_memory.json"),
+    ))
+    wm_path.parent.mkdir(parents=True, exist_ok=True)
+    working_memory_repo = WorkingMemoryRepo(wm_path)
+    app.state.working_memory_repo = working_memory_repo
+
+    engagement_id = os.environ.get("REDROBIN_ENGAGEMENT_ID", "eng-default")
+    app.state.engagement_id = engagement_id
+
+    # Seed an empty working memory file if none exists so the reducer's
+    # synchronous load → mutate → save cycle has something to read on the
+    # first event.
+    if not working_memory_repo.exists():
+        working_memory_repo.save(WorkingMemory(engagement_id=engagement_id))
+
+    # Reducer subscribes to the bus and mutates working memory.
+    reducer = WorkingMemoryReducer(
+        bus=event_bus, repo=working_memory_repo, engagement_id=engagement_id
+    )
+    started = asyncio.Event()
+    reducer.on_started = started.set  # type: ignore[attr-defined]
+    reducer_task = asyncio.create_task(reducer.run(), name="working_memory_reducer")
+    await started.wait()  # ensure subscription is active before yielding
+    app.state.reducer_task = reducer_task
+
     def _on_reload(rules: list) -> None:
         logger.debug("rules_loader: reloaded %d rules", len(rules))
 
@@ -64,7 +95,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        # 1. Close the bus first — this broadcasts the sentinel to all subscribers
+        #    including the reducer. The bus close is what signals reducer to exit.
         await event_bus.close()
+        # 2. Wait for the reducer to drain and exit cleanly.
+        try:
+            await asyncio.wait_for(reducer_task, timeout=2.0)
+        except asyncio.TimeoutError:
+            reducer_task.cancel()
         rules_loader.stop_hot_reload()
         logger.info("daemon lifespan shutdown complete")
 
