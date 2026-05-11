@@ -1,0 +1,24 @@
+[tui]
+working_memory = "MEMORIA DE TRABAJO"
+event_stream = "FLUJO DE EVENTOS"
+chat = "CHAT"
+engagement = "ENGAGEMENT"
+phase = "FASE"
+kill_chain = "KILL CHAIN"
+objectives = "OBJETIVOS"
+hosts = "HOSTS"
+accounts = "CUENTAS"
+defenses = "DEFENSAS OBSERVADAS"
+tools = "HERRAMIENTAS USADAS"
+lessons = "LECCIONES"
+
+[verdict]
+info = "INFO"
+warn = "AVISO"
+danger = "PELIGRO"
+escalate = "REVISANDO"
+
+[help]
+override_hint = "Override con ':rr override \"<razón>\"'"
+alts_hint = "Ver alternativas: ':rr alts'"
+explain_hint = "Explicar veredicto: ':rr explain'"
