@@ -1,0 +1,79 @@
+[
+  {
+    "delay_ms": 0,
+    "envelope": {
+      "spec_version": "0.1.0",
+      "id": "evt_01HZX9KMMCKKNXP001AAAAAAAA",
+      "ts": "2026-05-10T14:30:00.000Z",
+      "source": {"adapter": "sliver-mock", "version": "1.0.0", "engagement_id": "demo_linux"},
+      "event": {
+        "type": "beacon.initial",
+        "bid": "lnx_web01",
+        "host": "web01.acme.local",
+        "user": "www-data",
+        "integrity_level": "low",
+        "arch": "x64",
+        "pid": 1234,
+        "ppid": 1
+      }
+    }
+  },
+  {
+    "delay_ms": 2000,
+    "envelope": {
+      "spec_version": "0.1.0",
+      "id": "evt_01HZX9KMMCKKNXP002AAAAAAAA",
+      "ts": "2026-05-10T14:30:02.000Z",
+      "source": {"adapter": "sliver-mock", "version": "1.0.0", "engagement_id": "demo_linux"},
+      "event": {
+        "type": "beacon.command_input",
+        "bid": "lnx_web01",
+        "operator": "juan",
+        "command": "shell",
+        "raw": "shell id; uname -a"
+      }
+    }
+  },
+  {
+    "delay_ms": 1500,
+    "envelope": {
+      "spec_version": "0.1.0",
+      "id": "evt_01HZX9KMMCKKNXP003AAAAAAAA",
+      "ts": "2026-05-10T14:30:03.500Z",
+      "source": {"adapter": "sliver-mock", "version": "1.0.0", "engagement_id": "demo_linux"},
+      "event": {
+        "type": "beacon.command_output",
+        "bid": "lnx_web01",
+        "task_id": "task_001",
+        "output": "uid=33(www-data) gid=33(www-data)\nLinux web01 5.15.0-86-generic #96-Ubuntu",
+        "exit_status": 0
+      }
+    }
+  },
+  {
+    "delay_ms": 3000,
+    "envelope": {
+      "spec_version": "0.1.0",
+      "id": "evt_01HZX9KMMCKKNXP004AAAAAAAA",
+      "ts": "2026-05-10T14:30:06.500Z",
+      "source": {"adapter": "sliver-mock", "version": "1.0.0", "engagement_id": "demo_linux"},
+      "event": {
+        "type": "host.observation",
+        "bid": "lnx_web01",
+        "host_attr": {"os": "Ubuntu 22.04", "kernel": "5.15.0-86-generic"}
+      }
+    }
+  },
+  {
+    "delay_ms": 1000,
+    "envelope": {
+      "spec_version": "0.1.0",
+      "id": "evt_01HZX9KMMCKKNXP005AAAAAAAA",
+      "ts": "2026-05-10T14:30:07.500Z",
+      "source": {"adapter": "sliver-mock", "version": "1.0.0", "engagement_id": "demo_linux"},
+      "event": {
+        "type": "adapter.heartbeat"
+      }
+    }
+  }
+]
