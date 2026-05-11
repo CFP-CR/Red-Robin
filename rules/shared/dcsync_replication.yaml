@@ -1,0 +1,13 @@
+id: dcsync_replication
+match:
+  command: dcsync
+severity: DANGER
+reason: 'dcsync abuses DRSUAPI replication primitives to extract NT hashes from a DC without touching lsass on the target. T1003.006. The replication request requires DA-equivalent privileges and is a textbook high-signal SOC alert (4662 + 4624 type 3 on a DC).'
+suggestions:
+  - 'If DA already established, prefer a one-shot Rubeus asktgt + golden ticket to avoid an extra DC interaction'
+  - 'Or target a single account (dcsync user) instead of full replication — much smaller telemetry footprint'
+  - 'Verify the engagement has consented to credential-material extraction (legal scope)'
+sources:
+  - 'MITRE T1003.006 OS Credential Dumping: DCSync'
+  - 'Microsoft DRSUAPI / GetNCChanges'
+  - 'Windows EID 4662 (object access on DC with replication GUID)'

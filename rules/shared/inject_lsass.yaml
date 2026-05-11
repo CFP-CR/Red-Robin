@@ -1,0 +1,14 @@
+id: inject_lsass
+match:
+  command: inject
+  arg_pattern: '(?i)lsass'
+severity: DANGER
+reason: 'Process injection into lsass.exe is the highest-severity EDR trigger in the catalog: it combines T1055 (process injection) with the lsass-handle signature that Sysmon EID 10, CrowdStrike, Defender, SentinelOne, and Elastic all alert on with high confidence. Practically never proceeds unnoticed on a modern endpoint.'
+suggestions:
+  - 'If the goal is credential extraction, use a credential-only BOF (nanodump, mimikatz BOF without OpenProcess on lsass) — never inject'
+  - 'If the goal is masquerading, inject into a long-running benign process (svchost variants with reasonable parent) instead'
+  - 'Verify whether the EDR allows lsass handle requests at all — newer Defender for Endpoint blocks even read access from non-protected processes'
+sources:
+  - 'MITRE T1055 Process Injection'
+  - 'Sysmon EID 10 (Process accessed)'
+  - 'Microsoft Defender for Endpoint LSASS Protection (RunAsPPL)'

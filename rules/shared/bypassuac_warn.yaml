@@ -1,0 +1,12 @@
+id: bypassuac_warn
+match:
+  command: bypassuac
+severity: WARN
+reason: 'UAC bypass primitives (fodhelper, eventvwr, sdclt, wsreset, etc.) are mapped to T1548.002 and have well-known signatures: the parent-of-elevated-process telemetry plus known registry write patterns are flagged by Defender ATP, CrowdStrike, and SentinelOne. Useful, but expect detection if any EDR is present.'
+suggestions:
+  - 'Verify the bypass technique you are about to use is current — fodhelper has been patched in newer builds; check ms-settings / DelegateExecute angles'
+  - 'If the engagement allows, get a domain credential and use runas /netonly instead — far less noise'
+  - 'For HV environments, abuse a known auto-elevated COM object (token theft from a medium-IL process) — lower telemetry footprint'
+sources:
+  - 'MITRE T1548.002 Abuse Elevation Control Mechanism: Bypass User Account Control'
+  - 'hfiref0x/UACME (technique catalog)'

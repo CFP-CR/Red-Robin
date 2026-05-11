@@ -1,0 +1,18 @@
+# Commands that always PASS in Layer A — skip rule evaluation.
+# These are observe-only (Path 3 captures output for memory).
+allowed_commands:
+  - pwd
+  - cd
+  - ls
+  - ps
+  - getuid
+  - jobs
+  - sleep
+  - mode
+  - note
+  - clear
+  - help
+  - bjobs
+  - getprivs
+  - whoami
+  - cd

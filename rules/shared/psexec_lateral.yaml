@@ -1,0 +1,13 @@
+id: psexec_lateral
+match:
+  command: jump
+  arg_pattern: '(?i)psexec'
+severity: DANGER
+reason: 'psexec-style lateral movement leaves a textbook trail: 4624 Type 3 logon, 7045 service install (Service Name + Image Path), and a named pipe on the target. T1021.002. Even Defender for Endpoint flags PSEXESVC creation by default.'
+suggestions:
+  - 'Use wmi or winrm jumps — they avoid the service-creation 7045 signature entirely'
+  - 'Or jump via a custom service name using `jump psexec_psh` (less common signature, but still 7045-noisy)'
+  - 'Best: a BOF (e.g., bof_jump_ssh / bof_wmi) — no service install, no named pipe'
+sources:
+  - 'MITRE T1021.002 Remote Services: SMB/Windows Admin Shares'
+  - 'Windows EID 7045 (service install) + 4624 (logon)'

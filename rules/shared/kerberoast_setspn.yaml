@@ -1,0 +1,12 @@
+id: kerberoast_setspn
+match:
+  command: shell
+  arg_pattern: '(?i)setspn\s+-q'
+severity: WARN
+reason: 'setspn -q is the most common Kerberoasting precursor (T1558.003). It enumerates SPN-bearing accounts so the operator can request and crack TGS tickets offline. Detection is medium-noise (4769 with RC4 + unusual SPN), but the enumeration itself leaves an EID 4661 trace.'
+suggestions:
+  - 'Use a BloodHound query against an existing collection instead of touching AD live (zero on-host enumeration)'
+  - 'If you must query live, scope by OU (setspn -q -t <ou>) to reduce the result set and avoid the broad "*/*" pattern'
+  - 'Prefer Rubeus kerberoast over Invoke-Kerberoast.ps1 (no AMSI surface)'
+sources:
+  - 'MITRE T1558.003 Steal or Forge Kerberos Tickets: Kerberoasting'
