@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://red-robin.io/protocol/v0.1/envelope.schema.json",
+  "title": "Red Robin Wire Protocol Envelope v0.1",
+  "type": "object",
+  "required": ["spec_version", "id", "ts", "source", "event"],
+  "properties": {
+    "spec_version": {
+      "type": "string",
+      "pattern": "^0\\.1\\.\\d+$"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^evt_[0-9A-Z]{26}$",
+      "description": "ULID prefixed with evt_"
+    },
+    "ts": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "type": "object",
+      "required": ["adapter", "version", "engagement_id"],
+      "properties": {
+        "adapter": {"type": "string"},
+        "version": {"type": "string"},
+        "engagement_id": {"type": "string"},
+        "adapter_session_id": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "event": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "adapter.connected",
+            "beacon.initial",
+            "beacon.command_input",
+            "beacon.command_output",
+            "host.observation",
+            "credential.observed",
+            "opsec.verdict",
+            "operator.question",
+            "operator.answer",
+            "engagement.milestone",
+            "adapter.heartbeat"
+          ]
+        }
+      }
+    },
+    "extensions": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false
+}
