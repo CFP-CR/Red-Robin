@@ -24,11 +24,17 @@ import argparse
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from redrobin.application.engagement_service import EngagementError, EngagementService
 from redrobin.application.transport_auth import get_or_create_token
+from redrobin.cli_helpers.daemon_pidfile import PidFile, is_pid_alive, read_pid
 from redrobin.infrastructure.filesystem import REDROBIN_ROOT, ensure_layout
+
+_PID_PATH = Path(
+    os.environ.get("REDROBIN_PID_FILE", str(Path.home() / ".redrobin" / "daemon.pid"))
+)
 
 
 def cmd_init(_args: argparse.Namespace) -> int:
@@ -87,13 +93,51 @@ def cmd_daemon_start(args: argparse.Namespace) -> int:
     host = args.host or "127.0.0.1"
     port = args.port or 7777
     print(f"[*] Starting Red Robin daemon on {host}:{port}")
-    uvicorn.run("redrobin.api.app:create_app", host=host, port=port, factory=True, log_level="info")
+    with PidFile(_PID_PATH):
+        uvicorn.run(
+            "redrobin.api.app:create_app",
+            host=host,
+            port=port,
+            factory=True,
+            log_level="info",
+        )
     return 0
 
 
 def cmd_daemon_stop(_args: argparse.Namespace) -> int:
-    print("[!] `redrobin daemon stop` is a placeholder for v0.1.")
-    print("    Stop the daemon with Ctrl+C in the foreground terminal, or `kill <pid>`.")
+    pid = read_pid(_PID_PATH)
+    if pid is None:
+        print("no daemon running (no PID file)")
+        return 0
+    if not is_pid_alive(pid):
+        print(f"PID file references dead process {pid}; removing")
+        _PID_PATH.unlink(missing_ok=True)
+        return 0
+    if sys.platform == "win32":
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        PROCESS_TERMINATE = 0x0001
+        handle = kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
+        if not handle:
+            print(f"failed to open process {pid}")
+            return 1
+        try:
+            kernel32.TerminateProcess(handle, 0)
+        finally:
+            kernel32.CloseHandle(handle)
+        deadline = time.time() + 10
+        while is_pid_alive(pid) and time.time() < deadline:
+            time.sleep(0.1)
+    else:
+        import signal
+
+        os.kill(pid, signal.SIGTERM)
+        deadline = time.time() + 10
+        while is_pid_alive(pid) and time.time() < deadline:
+            time.sleep(0.1)
+    _PID_PATH.unlink(missing_ok=True)
+    print(f"daemon stopped (pid={pid})")
     return 0
 
 
