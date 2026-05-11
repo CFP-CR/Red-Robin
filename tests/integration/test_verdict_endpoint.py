@@ -131,6 +131,7 @@ def test_verdict_quick_degraded_layer_b_when_api_keys_missing(
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
     from redrobin.application.verdict_pipeline_factory import reset_pipeline_cache
+
     reset_pipeline_cache()
 
     r = client.post(

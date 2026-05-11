@@ -1,4 +1,5 @@
 """Layer B engine — LLM judge with RAG, JSON verdict parsing."""
+
 from unittest.mock import AsyncMock
 
 import pytest
@@ -68,7 +69,9 @@ async def test_layer_b_parses_block_verdict():
 @pytest.mark.asyncio
 async def test_layer_b_retrieves_kb_and_passes_to_llm():
     llm = _mock_llm('```json\n{"action": "PASS", "reason": "ok"}\n```')
-    kb = _mock_kb(hits=[("mimikatz info", "vault/mimikatz.md", 0.9), ("dcsync info", "vault/dcsync.md", 0.8)])
+    kb = _mock_kb(
+        hits=[("mimikatz info", "vault/mimikatz.md", 0.9), ("dcsync info", "vault/dcsync.md", 0.8)]
+    )
     engine = LayerBEngine(llm=llm, kb=kb, top_k_kb_chunks=2)
     await engine.evaluate(command="mimikatz", raw="mimikatz logonpasswords")
     kb.retrieve.assert_awaited_once_with("mimikatz logonpasswords", top_k=2)

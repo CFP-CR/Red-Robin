@@ -8,6 +8,7 @@ Per spec §1.2.1 Stage 3 + §4 Componente 4 + §13.3 cache_control:
 Returns a Verdict by parsing the LLM's JSON response. On parse failure,
 returns ESCALATE/PASS (fail-open per §1.2.1 safety net design).
 """
+
 from __future__ import annotations
 
 import json

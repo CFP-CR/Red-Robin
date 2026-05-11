@@ -64,7 +64,5 @@ class EpisodicRepo:
     async def mark_promoted(self, lesson_id: int) -> None:
         async with self._engine.begin() as conn:
             await conn.execute(
-                update(lessons)
-                .where(lessons.c.id == lesson_id)
-                .values(promoted_to_longterm=True)
+                update(lessons).where(lessons.c.id == lesson_id).values(promoted_to_longterm=True)
             )

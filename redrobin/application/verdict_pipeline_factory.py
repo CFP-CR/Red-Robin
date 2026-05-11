@@ -7,6 +7,7 @@ Lazily constructs the singleton pipeline at first request. Wires:
 
 The factory accepts overrides for testing (inject mock LLM/KB).
 """
+
 from __future__ import annotations
 
 from functools import lru_cache
