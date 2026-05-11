@@ -1,4 +1,9 @@
-"""TUI WebSocket bridge — auth + echo."""
+"""TUI WebSocket bridge — auth + initial snapshot.
+
+The echo loop tests were removed in Slice 3: the endpoint no longer echoes
+operator input. Bus-driven broadcasting is covered by
+``test_tui_ws_broadcast.py``.
+"""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,6 +15,7 @@ from redrobin.api.app import create_app
 def _isolated_root(tmp_path, monkeypatch):
     root = tmp_path / ".redrobin"
     root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     monkeypatch.setattr("redrobin.infrastructure.filesystem.REDROBIN_ROOT", root)
     monkeypatch.setattr("redrobin.application.verdict_pipeline_factory.REDROBIN_ROOT", root)
     monkeypatch.setattr("redrobin.application.event_ingestion.REDROBIN_ROOT", root)
@@ -22,7 +28,10 @@ def _isolated_root(tmp_path, monkeypatch):
 
 @pytest.fixture
 def client(_isolated_root):
-    return TestClient(create_app())
+    # Use the ``with`` context so FastAPI's lifespan runs and app.state.event_bus
+    # is populated — Slice 3 onwards the WS endpoint reads it on accept.
+    with TestClient(create_app()) as client:
+        yield client
 
 
 def test_ws_rejects_wrong_token(client):
@@ -42,27 +51,3 @@ def test_ws_accepts_correct_token_sends_initial_snapshot(client, _isolated_root)
     with client.websocket_connect(f"/v1/tui?token={token}") as ws:
         msg = ws.receive_json()
         assert msg["type"] == "working_memory_snapshot"
-
-
-def test_ws_echoes_json_messages(client, _isolated_root):
-    from redrobin.infrastructure.transport.bearer import get_or_create_token
-
-    token = get_or_create_token()
-    with client.websocket_connect(f"/v1/tui?token={token}") as ws:
-        ws.receive_json()  # discard initial snapshot
-        ws.send_json({"type": "operator_question", "text": "hello"})
-        ack = ws.receive_json()
-        assert ack["type"] == "ack"
-        assert ack["received"]["text"] == "hello"
-
-
-def test_ws_returns_error_on_invalid_json(client, _isolated_root):
-    from redrobin.infrastructure.transport.bearer import get_or_create_token
-
-    token = get_or_create_token()
-    with client.websocket_connect(f"/v1/tui?token={token}") as ws:
-        ws.receive_json()  # discard initial snapshot
-        ws.send_text("{not valid json")
-        err = ws.receive_json()
-        assert err["type"] == "error"
-        assert "invalid JSON" in err["message"]
