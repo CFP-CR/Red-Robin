@@ -29,11 +29,19 @@ class LLMProvider(ABC):
         *,
         stable_system_prompt: str,
         cacheable_kb_chunks: list[str],
+        cacheable_engagement_summary: str = "",
         dynamic_state: str,
         user_message: str,
         max_tokens: int = 1024,
     ) -> LLMResponse:
         """Send structured prompt with cache_control blocks.
 
-        Stable prompt → 1h cache. KB chunks → 5min cache. Dynamic state → uncached.
+        Block layout (Anthropic ``system`` array):
+          1. Stable prompt (persona + format spec) → 1h cache.
+          2. KB chunks (RAG retrieval, per-query) → 5min cache.
+          3. Engagement summary (stable per session, slice 7) → 5min cache.
+          4. Dynamic state (per-turn working memory) → uncached.
+
+        Empty strings / empty lists collapse their block away so the system
+        array stays minimal.
         """

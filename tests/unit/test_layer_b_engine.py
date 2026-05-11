@@ -80,15 +80,25 @@ async def test_layer_b_retrieves_kb_and_passes_to_llm():
 
 
 @pytest.mark.asyncio
-async def test_layer_b_includes_engagement_summary_in_dynamic_state():
+async def test_layer_b_includes_engagement_summary_in_cached_block():
+    """Slice 7: the engagement summary travels on the *cached* system block.
+
+    Previously the summary was injected into the per-turn ``dynamic_state``
+    (uncached). Slice 7 moved it to ``cacheable_engagement_summary`` so it
+    amortizes across all retroactive verdicts within a session (5min TTL).
+    """
     llm = _mock_llm('```json\n{"action": "WARN", "reason": "x"}\n```')
     kb = _mock_kb()
     engine = LayerBEngine(llm=llm, kb=kb)
     engine.set_engagement_summary("DC01: Win2022, CrowdStrike active, SYSTEM access")
     await engine.evaluate(command="mimikatz", raw="mimikatz")
     call = llm.complete_with_cache.await_args
-    assert "DC01" in call.kwargs["dynamic_state"]
-    assert "CrowdStrike" in call.kwargs["dynamic_state"]
+    cached = call.kwargs["cacheable_engagement_summary"]
+    assert "DC01" in cached
+    assert "CrowdStrike" in cached
+    # The dynamic_state slot is reserved for future per-turn working memory
+    # and must NOT carry the (stable) engagement summary.
+    assert call.kwargs["dynamic_state"] == ""
 
 
 @pytest.mark.asyncio

@@ -35,12 +35,44 @@ async def test_anthropic_client_uses_cache_control_blocks(monkeypatch):
     call_kwargs = mock_anthropic.messages.create.await_args.kwargs
     system = call_kwargs["system"]
     assert isinstance(system, list)
+    # No engagement summary supplied → block omitted: persona + KB + dynamic = 3.
     assert len(system) == 3
     assert system[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
     assert system[1]["cache_control"] == {"type": "ephemeral"}
     assert "cache_control" not in system[2]
     assert call_kwargs["model"] == "claude-sonnet-4-6"
     assert call_kwargs["max_tokens"] == 1024
+
+
+@pytest.mark.asyncio
+async def test_anthropic_client_emits_engagement_summary_as_cached_block(monkeypatch):
+    """Slice 7: ``cacheable_engagement_summary`` becomes an ephemeral cached block."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    client = AnthropicClient()
+    mock_anthropic = AsyncMock()
+    mock_response = MagicMock()
+    mock_response.content = [MagicMock(text="ok")]
+    mock_response.usage.cache_creation_input_tokens = 0
+    mock_response.usage.cache_read_input_tokens = 0
+    mock_response.usage.output_tokens = 1
+    mock_anthropic.messages.create = AsyncMock(return_value=mock_response)
+    client._client = mock_anthropic
+
+    await client.complete_with_cache(
+        stable_system_prompt="You are Red Robin.",
+        cacheable_kb_chunks=["chunk1"],
+        cacheable_engagement_summary="# Engagement Context\nop-redspark — low-detection",
+        dynamic_state="",
+        user_message="hi",
+    )
+
+    system = mock_anthropic.messages.create.await_args.kwargs["system"]
+    # persona (1h) + KB (5m default) + engagement summary (5m default) = 3
+    assert len(system) == 3
+    assert system[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+    assert system[1]["cache_control"] == {"type": "ephemeral"}
+    assert system[2]["cache_control"] == {"type": "ephemeral"}
+    assert "op-redspark" in system[2]["text"]
 
 
 @pytest.mark.asyncio

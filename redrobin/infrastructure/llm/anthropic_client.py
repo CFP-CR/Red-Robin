@@ -4,13 +4,21 @@ Per spec §13.3 caching strategy. Single retry layer (SDK only, max_retries=5);
 no custom backoff per Task 6-D5 audit finding.
 
 Structure of system blocks sent to Anthropic API:
-  [0] stable_system_prompt    → cache_control: ephemeral 1h (persona + format spec)
-  [1] cacheable_kb_chunks      → cache_control: ephemeral 5min (KB RAG retrieval)
-  [2] dynamic_state            → uncached (engagement state changes per turn)
+  [0] stable_system_prompt            → cache_control: ephemeral 1h
+                                        (persona + format spec)
+  [1] cacheable_kb_chunks              → cache_control: ephemeral 5min
+                                        (KB RAG retrieval, per-query)
+  [2] cacheable_engagement_summary     → cache_control: ephemeral 5min
+                                        (engagement.yaml summary, slice 7;
+                                        stable per session, swapped at boot)
+  [3] dynamic_state                    → uncached (per-turn working memory)
+
+Empty values collapse their block so the system array stays minimal.
 
 Cache invalidation rules:
   - System prompt: invalidated only on prompt version bump (~never per session)
   - KB chunks: invalidated on engagement switch or KB re-index
+  - Engagement summary: invalidated only on engagement switch (~once per boot)
   - Dynamic state: never cached
 """
 
@@ -44,6 +52,7 @@ class AnthropicClient(LLMProvider):
         *,
         stable_system_prompt: str,
         cacheable_kb_chunks: list[str],
+        cacheable_engagement_summary: str = "",
         dynamic_state: str,
         user_message: str,
         max_tokens: int = 1024,
@@ -62,6 +71,14 @@ class AnthropicClient(LLMProvider):
                 {
                     "type": "text",
                     "text": kb_text,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            )
+        if cacheable_engagement_summary:
+            system_blocks.append(
+                {
+                    "type": "text",
+                    "text": cacheable_engagement_summary,
                     "cache_control": {"type": "ephemeral"},
                 }
             )

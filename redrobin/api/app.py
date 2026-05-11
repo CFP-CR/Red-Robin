@@ -133,6 +133,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # fallback). The factory still ships a default scope on ``deps.scope`` —
     # we override it here with the engagement-aware enforcer.
     deps = build_default_dependencies(rules=initial_rules)
+    # Slice 7 — inject the engagement summary into Layer B's cached system
+    # prompt so retroactive verdicts incorporate engagement-specific OPSEC
+    # posture (low-detection priority, scope nuances, prior tradecraft
+    # constraints). Guarded by ``hasattr`` so the degraded Layer B stub —
+    # served when API keys are missing — silently no-ops.
+    if engagement is not None and hasattr(deps.layer_b, "set_engagement_summary"):
+        deps.layer_b.set_engagement_summary(engagement.summary)
     verdict_pipeline = build_pipeline(
         event_bus=event_bus,
         scope=scope,

@@ -3,7 +3,10 @@
 Per spec §1.2.1 Stage 3 + §4 Componente 4 + §13.3 cache_control:
 - System prompt: stable persona + JSON format spec (1h cache TTL)
 - KB chunks: RAG context retrieved per query (5min cache TTL, default ephemeral)
-- Dynamic state: engagement working memory (uncached)
+- Engagement summary: per-engagement OPSEC posture from engagement.yaml,
+  set once at boot via :meth:`LayerBEngine.set_engagement_summary` and surfaced
+  as a labeled ``# Engagement Context`` block (5min cache TTL — slice 7).
+- Dynamic state: per-turn working memory (uncached) — reserved for future use.
 
 Returns a Verdict by parsing the LLM's JSON response. On parse failure,
 returns ESCALATE/PASS (fail-open per §1.2.1 safety net design).
@@ -100,11 +103,21 @@ class LayerBEngine:
             kb_hits = []
 
         kb_chunks = [text for text, _source, _score in kb_hits]
-        dynamic_state = (
-            f"<engagement>{self._engagement_summary}</engagement>"
+        # Slice 7 — surface the engagement.yaml summary as a *cached* system
+        # block so every retroactive verdict in the session amortizes the
+        # engagement-specific OPSEC posture (low-detection priority, scope
+        # nuances, prior tradecraft constraints). The block is stable across
+        # the session — only invalidated on engagement switch — so the 5min
+        # ephemeral cache pays for itself across a single operator workflow.
+        engagement_block = (
+            f"# Engagement Context\n{self._engagement_summary}"
             if self._engagement_summary
             else ""
         )
+        # Reserved for future per-turn working memory (e.g., hosts seen this
+        # tick). Today the daemon does not feed working memory into Layer B,
+        # so dynamic_state stays empty and Anthropic skips the block entirely.
+        dynamic_state = ""
         user_message = (
             f"Proposed command: {command}\n"
             f"Raw input: {raw}\n\n"
@@ -115,6 +128,7 @@ class LayerBEngine:
             response = await self._llm.complete_with_cache(
                 stable_system_prompt=SYSTEM_PROMPT,
                 cacheable_kb_chunks=kb_chunks,
+                cacheable_engagement_summary=engagement_block,
                 dynamic_state=dynamic_state,
                 user_message=user_message,
             )
