@@ -40,6 +40,46 @@ class ToolUsage:
 
 
 @dataclass
+class Credential:
+    """Credential observed on the wire (parsed from beacon output).
+
+    Distinct from ``Account``: ``Account`` is operator-curated and may include
+    plaintext/ticket material captured by hand; ``Credential`` is reducer-derived
+    from event parsing and always carries a ``source_beacon_id`` so the operator
+    can trace provenance.
+    """
+
+    domain: str
+    username: str
+    ntlm_hash: str | None = None
+    source_beacon_id: str | None = None
+
+
+@dataclass
+class Finding:
+    """Append-only observation produced by the reducer.
+
+    ``kind`` is a short stable identifier (e.g., ``kerberos_ticket_observed``,
+    ``opsec_block``). ``summary`` is a human-readable one-liner. Findings are
+    never deduplicated or upserted — every occurrence is recorded.
+    """
+
+    kind: str
+    summary: str
+    source_beacon_id: str | None = None
+
+
+@dataclass
+class Session:
+    """Live beacon session observed via c2.beacon_checkin events."""
+
+    beacon_id: str
+    hostname: str | None = None
+    user: str | None = None
+    integrity: str | None = None
+
+
+@dataclass
 class Objective:
     id: str
     goal: str
@@ -64,6 +104,10 @@ class WorkingMemory:
     accounts: list[Account] = field(default_factory=list)
     defenses_observed: list[str] = field(default_factory=list)
     tools_used: list[ToolUsage] = field(default_factory=list)
+    # Slice 4: reducer-managed projections.
+    credentials: list[Credential] = field(default_factory=list)
+    findings: list[Finding] = field(default_factory=list)
+    sessions: list[Session] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

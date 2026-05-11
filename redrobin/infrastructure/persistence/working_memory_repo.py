@@ -2,6 +2,13 @@
 
 Per spec §5.2: working memory lives at `~/.redrobin/engagements/<slug>/working_memory.json`.
 Mutable (no immutable history); operator-curated + auto-updated from events.
+
+Slice 4 adds idempotent helpers (``upsert_*``, ``append_finding``,
+``list_credentials``) used by ``WorkingMemoryReducer``. Each helper is a
+synchronous load → mutate → save against the single-engagement JSON file; the
+reducer runs on the event loop but the I/O footprint is small enough that
+running it directly is acceptable for v0.1. If contention becomes an issue we
+will swap in an async write-behind layer here.
 """
 
 from __future__ import annotations
@@ -12,8 +19,11 @@ from pathlib import Path
 
 from redrobin.domain.memory import (
     Account,
+    Credential,
+    Finding,
     Host,
     Objective,
+    Session,
     ToolUsage,
     WorkingMemory,
 )
@@ -38,6 +48,57 @@ class WorkingMemoryRepo:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(asdict(wm), indent=2, default=str))
 
+    # --- Slice 4 reducer helpers ----------------------------------------- #
+
+    def upsert_credential(self, cred: Credential) -> None:
+        """Insert or replace a credential keyed by (domain, username)."""
+        wm = self.load()
+        key = (cred.domain.lower(), cred.username.lower())
+        wm.credentials = [
+            c for c in wm.credentials if (c.domain.lower(), c.username.lower()) != key
+        ]
+        wm.credentials.append(cred)
+        self.save(wm)
+
+    def list_credentials(self) -> list[Credential]:
+        return list(self.load().credentials)
+
+    def upsert_host(self, host: Host) -> None:
+        """Insert or merge a host keyed by uppercase name.
+
+        Non-empty fields on the incoming host overwrite existing values; existing
+        values are preserved when the incoming field is ``None``/empty so that
+        successive observations enrich the record without erasing prior data.
+        """
+        wm = self.load()
+        normalized_name = host.name.upper()
+        host.name = normalized_name
+        for existing in wm.hosts:
+            if existing.name.upper() == normalized_name:
+                existing.os = host.os or existing.os
+                existing.integrity_level = host.integrity_level or existing.integrity_level
+                existing.edr_detected = host.edr_detected or existing.edr_detected
+                existing.access_level = host.access_level or existing.access_level
+                self.save(wm)
+                return
+        wm.hosts.append(host)
+        self.save(wm)
+
+    def upsert_session(self, session: Session) -> None:
+        """Insert or replace a session keyed by beacon_id."""
+        wm = self.load()
+        wm.sessions = [s for s in wm.sessions if s.beacon_id != session.beacon_id]
+        wm.sessions.append(session)
+        self.save(wm)
+
+    def append_finding(self, finding: Finding) -> None:
+        """Append a finding (no dedup — findings are an audit stream)."""
+        wm = self.load()
+        wm.findings.append(finding)
+        self.save(wm)
+
+    # --- (de)serialization ---------------------------------------------- #
+
     @staticmethod
     def _from_dict(data: dict) -> WorkingMemory:
         return WorkingMemory(
@@ -53,4 +114,7 @@ class WorkingMemoryRepo:
             accounts=[Account(**a) for a in data.get("accounts", [])],
             defenses_observed=data.get("defenses_observed", []),
             tools_used=[ToolUsage(**t) for t in data.get("tools_used", [])],
+            credentials=[Credential(**c) for c in data.get("credentials", [])],
+            findings=[Finding(**f) for f in data.get("findings", [])],
+            sessions=[Session(**s) for s in data.get("sessions", [])],
         )
