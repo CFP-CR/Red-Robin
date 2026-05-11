@@ -32,6 +32,3 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
-
-# Red Robin local state
-~/.redrobin/
