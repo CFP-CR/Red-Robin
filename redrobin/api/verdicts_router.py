@@ -8,9 +8,19 @@ Slice 5 — the pipeline is built once in the lifespan and stored on
 ``app.state.verdict_pipeline``. The route reads it from the request rather
 than rebuilding per-request, so the bus wiring (Layer A emission + retroactive
 hook) is shared with the rest of the daemon.
+
+Slice 9 — on PASS, when the request carries an ``adapter`` field naming a
+loaded CS adapter, the daemon POSTs the command to that team server's
+``/api/v1/beacons/{bid}/consoleCommand`` endpoint. The dispatch is
+fire-and-forget; failures are logged but never propagated as 5xx — the
+operator's verdict response is the source of truth, the CS POST is a side
+effect of an already-approved command.
 """
 
 from __future__ import annotations
+
+import asyncio
+import logging
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
@@ -22,6 +32,9 @@ from redrobin.application.verdict_pipeline_factory import (
     build_default_dependencies,
     build_pipeline,
 )
+from redrobin.domain.opsec import VerdictAction
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/verdict", dependencies=[Depends(require_bearer)])
 
@@ -31,6 +44,10 @@ class QuickVerdictRequest(BaseModel):
     command: str
     raw: str
     source_event_id: str = ""
+    # Slice 9 — when set, the daemon dispatches the command to the named
+    # CS adapter on PASS. Defaults to None so the TUI's direct submission
+    # path (no team-server side effect required) keeps working unchanged.
+    adapter: str | None = None
 
 
 class QuickVerdictResponse(BaseModel):
@@ -65,9 +82,40 @@ def _pipeline_dep(request: Request) -> VerdictPipeline:
     return pipeline
 
 
+async def _dispatch_to_cs_adapter(
+    request: Request, adapter_name: str, bid: str, command: str
+) -> None:
+    """Fire-and-forget dispatch to the named CS adapter's REST API.
+
+    Errors are logged and swallowed — the verdict response has already
+    travelled back to the alias body, so a failed dispatch must not become
+    a 500. An unknown adapter name is a misconfiguration, not a runtime
+    failure, so it's logged at warning level rather than error.
+    """
+    adapters = getattr(request.app.state, "cs_adapters", {}) or {}
+    client = adapters.get(adapter_name)
+    if client is None:
+        logger.warning(
+            "verdict dispatch requested for unknown adapter %r (loaded: %s)",
+            adapter_name,
+            sorted(adapters.keys()),
+        )
+        return
+    try:
+        await client.dispatch_console_command(bid, command)
+    except Exception:
+        logger.exception(
+            "cs_adapter dispatch failed: adapter=%s bid=%s command=%s",
+            adapter_name,
+            bid,
+            command,
+        )
+
+
 @router.post("/quick", response_model=QuickVerdictResponse)
 async def quick(
     req: QuickVerdictRequest,
+    request: Request,
     pipeline: VerdictPipeline = Depends(_pipeline_dep),
 ) -> QuickVerdictResponse:
     verdict = await pipeline.quick_verdict(
@@ -76,6 +124,20 @@ async def quick(
         source_event_id=req.source_event_id,
         beacon_id=req.bid,
     )
+
+    # Slice 9 — only PASS verdicts dispatch. WARN/BLOCK/ESCALATE never reach
+    # the team server from this path; WARN is operator-soft-warned and the
+    # caller (alias body) decides whether to send. We fire-and-forget so the
+    # HTTP response is not blocked on the CS side-channel.
+    if (
+        verdict.action == VerdictAction.PASS
+        and req.adapter
+        and req.bid
+    ):
+        asyncio.create_task(
+            _dispatch_to_cs_adapter(request, req.adapter, req.bid, req.command)
+        )
+
     return QuickVerdictResponse(
         action=verdict.action.value,
         reason=verdict.reason,

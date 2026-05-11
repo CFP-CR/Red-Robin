@@ -22,6 +22,7 @@ from redrobin.api.auth import require_bearer
 from redrobin.api.events_router import router as events_router
 from redrobin.api.tui_ws import router as tui_ws_router
 from redrobin.api.verdicts_router import router as verdicts_router
+from redrobin.application.cs_adapter_lifecycle import build_adapter, load_adapter_configs
 from redrobin.application.engagement_loader import Engagement, EngagementLoader
 from redrobin.application.event_bus import EventBus
 from redrobin.application.rules_lifecycle import RulesLoader
@@ -155,15 +156,47 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         deps.layer_a.update_rules(rules)
 
     rules_loader.start_hot_reload(_on_reload)
+
+    # Slice 9 — load CS adapter YAML configs from REDROBIN_ADAPTERS_DIR and
+    # build a logged-in CSRestClient per config. Closes gap #8: Phase 1
+    # shipped the REST client but the daemon never instantiated it. Failures
+    # are logged but do not abort startup; the daemon is still useful
+    # without a live team server (Path 1 alias gate still answers, Path 2
+    # dispatch becomes a no-op when the adapter is missing).
+    adapters_dir = Path(
+        os.environ.get(
+            "REDROBIN_ADAPTERS_DIR",
+            str(Path.home() / ".redrobin" / "adapters"),
+        )
+    )
+    app.state.cs_adapters = {}
+    for cfg in load_adapter_configs(adapters_dir):
+        try:
+            client = await build_adapter(cfg)
+            app.state.cs_adapters[cfg.name] = client
+            logger.info("cs_adapter loaded: name=%s url=%s", cfg.name, cfg.teamserver_url)
+        except Exception:
+            logger.exception("Failed to load CS adapter %s", cfg.name)
+
     logger.info(
-        "daemon lifespan startup complete: rules_dir=%s rules=%d",
+        "daemon lifespan startup complete: rules_dir=%s rules=%d adapters=%d",
         rules_dir,
         len(initial_rules),
+        len(app.state.cs_adapters),
     )
 
     try:
         yield
     finally:
+        # Close adapter REST clients first so any in-flight dispatch sees a
+        # live event loop. Failures during shutdown are swallowed — we'd
+        # rather get to event_bus.close() cleanly than crash on a half-open
+        # httpx socket.
+        for name, client in app.state.cs_adapters.items():
+            try:
+                await client.aclose()
+            except Exception:
+                logger.exception("error closing cs_adapter %s", name)
         # 1. Close the bus first — this broadcasts the sentinel to all subscribers
         #    including the reducer. The bus close is what signals reducer to exit.
         await event_bus.close()
