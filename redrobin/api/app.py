@@ -21,6 +21,7 @@ from redrobin.api.auth import require_bearer
 from redrobin.api.events_router import router as events_router
 from redrobin.api.tui_ws import router as tui_ws_router
 from redrobin.api.verdicts_router import router as verdicts_router
+from redrobin.application.event_bus import EventBus
 from redrobin.application.rules_lifecycle import RulesLoader
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     initial_rules = rules_loader.load_all()
     app.state.rules_loader = rules_loader
 
+    event_bus = EventBus()
+    app.state.event_bus = event_bus
+
     def _on_reload(rules: list) -> None:
         logger.debug("rules_loader: reloaded %d rules", len(rules))
 
@@ -60,6 +64,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await event_bus.close()
         rules_loader.stop_hot_reload()
         logger.info("daemon lifespan shutdown complete")
 

@@ -54,3 +54,17 @@ async def test_close_unblocks_subscribers():
     sentinel = await asyncio.wait_for(sub.get(), timeout=0.5)
     assert sentinel == {"_type": "_close"}
     await close_task
+
+
+@pytest.mark.asyncio
+async def test_app_state_has_event_bus(tmp_path, monkeypatch):
+    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
+    from redrobin.api.app import create_app
+
+    app = create_app()
+    async with app.router.lifespan_context(app):
+        assert isinstance(app.state.event_bus, EventBus)
+        sub = await app.state.event_bus.subscribe()
+        await app.state.event_bus.publish({"type": "boot.test"})
+        e = await asyncio.wait_for(sub.get(), timeout=0.5)
+        assert e["type"] == "boot.test"
