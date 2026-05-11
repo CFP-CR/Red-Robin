@@ -1,4 +1,5 @@
 """Integration: load bootstrap rules from rules/shared/ + verify matching."""
+
 from pathlib import Path
 
 import pytest

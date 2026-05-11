@@ -8,6 +8,7 @@ Usage:
     redrobin-sliver-mock --scenario linux_demo
     redrobin-sliver-mock --scenario acme_corp --speed 2x
 """
+
 from __future__ import annotations
 
 import argparse
@@ -25,6 +26,7 @@ SCENARIOS_DIR = ADAPTER_PACKAGE / "scenarios"
 
 def _load_manifest() -> dict:
     import tomllib
+
     return tomllib.loads((ADAPTER_PACKAGE / "manifest.toml").read_text())
 
 
@@ -53,7 +55,9 @@ def _load_scenario(name: str) -> list[dict]:
 
 
 async def _replay(scenario: list[dict], daemon_url: str, token: str, speed: float) -> None:
-    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=3.0, read=30.0, write=5.0, pool=3.0)) as client:
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(connect=3.0, read=30.0, write=5.0, pool=3.0)
+    ) as client:
         headers = {"Authorization": f"Bearer {token}"}
 
         # 1. Connect
@@ -77,9 +81,7 @@ async def _replay(scenario: list[dict], daemon_url: str, token: str, speed: floa
             if delay_ms > 0 and speed > 0:
                 await asyncio.sleep(delay_ms / 1000.0 / speed)
 
-            r = await client.post(
-                f"{daemon_url}/v1/events", json=envelope, headers=headers
-            )
+            r = await client.post(f"{daemon_url}/v1/events", json=envelope, headers=headers)
             r.raise_for_status()
             event_type = envelope["event"]["type"]
             print(f"[sliver-mock] sent {event_type}", file=sys.stderr)
@@ -96,11 +98,12 @@ async def _replay(scenario: list[dict], daemon_url: str, token: str, speed: floa
 def main() -> None:
     parser = argparse.ArgumentParser(prog="redrobin-sliver-mock")
     parser.add_argument("--scenario", required=True, help="scenario name (without .json)")
+    parser.add_argument("--daemon", default="http://127.0.0.1:7777", help="daemon URL")
     parser.add_argument(
-        "--daemon", default="http://127.0.0.1:7777", help="daemon URL"
-    )
-    parser.add_argument(
-        "--speed", type=float, default=1.0, help="replay speed multiplier (1.0 = real-time, 2.0 = 2x)"
+        "--speed",
+        type=float,
+        default=1.0,
+        help="replay speed multiplier (1.0 = real-time, 2.0 = 2x)",
     )
     args = parser.parse_args()
 
