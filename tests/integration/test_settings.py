@@ -64,3 +64,18 @@ def test_settings_explicit_path_overrides_root_derivation(monkeypatch, tmp_path)
     assert s.working_memory_path == tmp_path / "custom_wm.json"
     # Other paths still root-derived
     assert s.episodic_path == tmp_path / "rr" / "episodic.db"
+
+
+@pytest.mark.asyncio
+async def test_app_state_has_settings(monkeypatch, tmp_path):
+    monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path))
+    from redrobin.api.app import create_app
+    from redrobin.infrastructure.config import Settings
+
+    app = create_app()
+    async with app.router.lifespan_context(app):
+        assert isinstance(app.state.settings, Settings)
+        assert app.state.settings.root == tmp_path
+        # Existing app.state attributes still work
+        assert app.state.event_bus is not None
+        assert app.state.rules_loader is not None

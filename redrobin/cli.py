@@ -30,11 +30,8 @@ from pathlib import Path
 from redrobin.application.engagement_service import EngagementError, EngagementService
 from redrobin.application.transport_auth import get_or_create_token
 from redrobin.cli_helpers.daemon_pidfile import PidFile, is_pid_alive, read_pid
+from redrobin.infrastructure.config import Settings
 from redrobin.infrastructure.filesystem import REDROBIN_ROOT, ensure_layout
-
-_PID_PATH = Path(
-    os.environ.get("REDROBIN_PID_FILE", str(Path.home() / ".redrobin" / "daemon.pid"))
-)
 
 
 def cmd_init(_args: argparse.Namespace) -> int:
@@ -56,18 +53,19 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
     a deploy on `redrobin doctor`. Now we collect failures and return 1
     when any are present, while still printing the same diagnostic lines.
     """
+    settings = Settings()
     failures: list[str] = []
     print("[*] Red Robin doctor (preflight check)")
 
     # ANTHROPIC_API_KEY
-    if os.environ.get("ANTHROPIC_API_KEY"):
+    if settings.anthropic_api_key:
         print("  [OK] ANTHROPIC_API_KEY set")
     else:
         print("  [!!] ANTHROPIC_API_KEY not set - Layer B will degrade to no-op")
         failures.append("ANTHROPIC_API_KEY not set")
 
     # VOYAGE_API_KEY
-    if os.environ.get("VOYAGE_API_KEY"):
+    if settings.voyage_api_key:
         print("  [OK] VOYAGE_API_KEY set")
     else:
         print("  [!!] VOYAGE_API_KEY not set - KB retrieval will be empty")
@@ -98,12 +96,15 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
 def cmd_daemon_start(args: argparse.Namespace) -> int:
     import uvicorn
 
+    settings = Settings()
+    pid_path = settings.pid_file
+    assert pid_path is not None  # Settings._derive_paths guarantees this
     ensure_layout()
     get_or_create_token()
     host = args.host or "127.0.0.1"
     port = args.port or 7777
     print(f"[*] Starting Red Robin daemon on {host}:{port}")
-    with PidFile(_PID_PATH):
+    with PidFile(pid_path):
         uvicorn.run(
             "redrobin.api.app:create_app",
             host=host,
@@ -115,13 +116,16 @@ def cmd_daemon_start(args: argparse.Namespace) -> int:
 
 
 def cmd_daemon_stop(_args: argparse.Namespace) -> int:
-    pid = read_pid(_PID_PATH)
+    settings = Settings()
+    pid_path = settings.pid_file
+    assert pid_path is not None  # Settings._derive_paths guarantees this
+    pid = read_pid(pid_path)
     if pid is None:
         print("no daemon running (no PID file)")
         return 0
     if not is_pid_alive(pid):
         print(f"PID file references dead process {pid}; removing")
-        _PID_PATH.unlink(missing_ok=True)
+        pid_path.unlink(missing_ok=True)
         return 0
     if sys.platform == "win32":
         import ctypes
@@ -146,7 +150,7 @@ def cmd_daemon_stop(_args: argparse.Namespace) -> int:
         deadline = time.time() + 10
         while is_pid_alive(pid) and time.time() < deadline:
             time.sleep(0.1)
-    _PID_PATH.unlink(missing_ok=True)
+    pid_path.unlink(missing_ok=True)
     print(f"daemon stopped (pid={pid})")
     return 0
 

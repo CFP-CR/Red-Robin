@@ -12,7 +12,6 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any, AsyncIterator, Coroutine
 
 from fastapi import Depends, FastAPI, Request
@@ -22,6 +21,7 @@ from redrobin.api.auth import require_bearer
 from redrobin.api.events_router import router as events_router
 from redrobin.api.tui_ws import router as tui_ws_router
 from redrobin.api.verdicts_router import router as verdicts_router
+from redrobin.application.config import Settings
 from redrobin.application.cs_adapter_lifecycle import build_adapter, load_adapter_configs
 from redrobin.application.engagement_loader import Engagement, EngagementLoader
 from redrobin.application.event_bus import EventBus
@@ -45,16 +45,13 @@ from redrobin.application.working_memory_reducer import WorkingMemoryReducer
 logger = logging.getLogger(__name__)
 
 
-def _default_rules_dir() -> Path:
-    env = os.environ.get("REDROBIN_RULES_DIR")
-    if env:
-        return Path(env)
-    return Path.home() / ".redrobin" / "rules"
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    rules_dir = _default_rules_dir()
+    settings = Settings()
+    app.state.settings = settings
+
+    rules_dir = settings.rules_dir
+    assert rules_dir is not None  # Settings._derive_paths guarantees this
     if "REDROBIN_RULES_DIR" not in os.environ:
         logger.warning(
             "REDROBIN_RULES_DIR not set; defaulting to %s — set explicitly in tests/CI to avoid home pollution.",
@@ -88,15 +85,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.event_bus = event_bus
 
     # Working memory persistence
-    wm_path = Path(os.environ.get(
-        "REDROBIN_WORKING_MEMORY_PATH",
-        str(Path.home() / ".redrobin" / "working_memory.json"),
-    ))
+    wm_path = settings.working_memory_path
+    assert wm_path is not None  # Settings._derive_paths guarantees this
     wm_path.parent.mkdir(parents=True, exist_ok=True)
     working_memory_repo = WorkingMemoryRepo(wm_path)
     app.state.working_memory_repo = working_memory_repo
 
-    engagement_id = os.environ.get("REDROBIN_ENGAGEMENT_ID", "eng-default")
+    engagement_id = settings.engagement_id
     app.state.engagement_id = engagement_id
 
     # Slice 6 — engagement-aware scope. Read engagement.yaml from
@@ -104,13 +99,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # build the pipeline's ScopeEnforcer from it. Missing slug falls back to
     # wildcard scope so the dev workflow without a configured engagement
     # still works.
-    engagements_dir = Path(
-        os.environ.get(
-            "REDROBIN_ENGAGEMENTS_DIR",
-            str(Path.home() / ".redrobin" / "engagements"),
-        )
-    )
-    engagement_slug = os.environ.get("REDROBIN_ENGAGEMENT_SLUG")
+    engagements_dir = settings.engagements_dir
+    assert engagements_dir is not None  # Settings._derive_paths guarantees this
+    engagement_slug = settings.engagement_slug
     engagement: Engagement | None = None
     if engagement_slug:
         try:
@@ -148,18 +139,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # recurring patterns into structured PromotedLessons stored long-term.
     # Closes gap #15: Phase 1 wired both repos but nothing wrote to them, so
     # L1 retrieval was permanently empty.
-    ep_path = Path(
-        os.environ.get(
-            "REDROBIN_EPISODIC_PATH",
-            str(Path.home() / ".redrobin" / "episodic.db"),
-        )
-    )
-    lt_path = Path(
-        os.environ.get(
-            "REDROBIN_LONGTERM_PATH",
-            str(Path.home() / ".redrobin" / "longterm.db"),
-        )
-    )
+    ep_path = settings.episodic_path
+    lt_path = settings.longterm_path
+    assert ep_path is not None and lt_path is not None  # _derive_paths guarantees
     episodic_repo = EpisodicRepo(ep_path)
     longterm_repo = LongtermRepo(lt_path)
     app.state.episodic_repo = episodic_repo
@@ -168,12 +150,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Slice 13 — L5 sliding-window summary store. Persists periodic
     # compressions of recent episodes so long engagements stay coherent
     # after the most recent verdicts roll off the in-memory window.
-    summary_path = Path(
-        os.environ.get(
-            "REDROBIN_SUMMARY_PATH",
-            str(Path.home() / ".redrobin" / "context_summaries.db"),
-        )
-    )
+    summary_path = settings.summary_path
+    assert summary_path is not None  # _derive_paths guarantees
     summary_repo = ContextSummaryRepo(summary_path)
     app.state.summary_repo = summary_repo
 
@@ -238,12 +216,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # are logged but do not abort startup; the daemon is still useful
     # without a live team server (Path 1 alias gate still answers, Path 2
     # dispatch becomes a no-op when the adapter is missing).
-    adapters_dir = Path(
-        os.environ.get(
-            "REDROBIN_ADAPTERS_DIR",
-            str(Path.home() / ".redrobin" / "adapters"),
-        )
-    )
+    adapters_dir = settings.adapters_dir
+    assert adapters_dir is not None  # _derive_paths guarantees
     app.state.cs_adapters = {}
     for cfg in load_adapter_configs(adapters_dir):
         try:
@@ -258,15 +232,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # operator intervention. Interval default of 60s keeps daemon overhead
     # negligible while still surfacing patterns within a normal engagement
     # session.
-    promoter_min = int(os.environ.get("REDROBIN_PROMOTER_MIN_OCCURRENCES", "3"))
+    promoter_min = settings.promoter_min_occurrences
     promoter = LessonPromoter(
         episodic_repo=episodic_repo,
         longterm_repo=longterm_repo,
         min_occurrences=promoter_min,
     )
-    promoter_interval = float(
-        os.environ.get("REDROBIN_PROMOTER_INTERVAL_SEC", "60")
-    )
+    promoter_interval = settings.promoter_interval_sec
 
     async def _promoter_loop() -> None:
         try:
@@ -293,12 +265,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         summary_repo=summary_repo,
         llm=build_summarizer_llm(),
         engagement_id=engagement_id,
-        window_size=int(os.environ.get("REDROBIN_L5_WINDOW", "25")),
+        window_size=settings.l5_window,
     )
     app.state.summarizer = summarizer
-    summarizer_interval = float(
-        os.environ.get("REDROBIN_L5_INTERVAL_SEC", "30")
-    )
+    summarizer_interval = settings.l5_interval_sec
 
     async def _summarizer_loop() -> None:
         try:
