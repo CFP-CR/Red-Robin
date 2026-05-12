@@ -19,9 +19,13 @@ def _isolated_root(tmp_path, monkeypatch):
 def test_cli_init_creates_layout_and_token(_isolated_root):
     from redrobin.cli import main
 
-    rc = main(["init"])
+    # Slice 5: `redrobin init` is interactive by default. In pytest stdin is
+    # not a TTY, so we MUST pass --non-interactive (the same flag CI uses).
+    rc = main(["init", "--non-interactive"])
     assert rc == 0
     assert _isolated_root.exists()
+    # cmd_init still calls get_or_create_token() after run_init so the daemon
+    # auth surface is ready on first boot.
     assert (_isolated_root / "transport.token").exists()
 
 
@@ -40,7 +44,7 @@ def test_cli_doctor_does_not_crash(_isolated_root, monkeypatch):
 def test_cli_engagement_new_and_list(_isolated_root):
     from redrobin.cli import main
 
-    assert main(["init"]) == 0
+    assert main(["init", "--non-interactive"]) == 0
     assert main(["engagement", "new", "acme-q2", "--client", "Acme"]) == 0
     assert main(["engagement", "list"]) == 0
 
@@ -48,7 +52,7 @@ def test_cli_engagement_new_and_list(_isolated_root):
 def test_cli_engagement_use_and_current(_isolated_root, capsys):
     from redrobin.cli import main
 
-    main(["init"])
+    main(["init", "--non-interactive"])
     main(["engagement", "new", "acme-q2"])
     main(["engagement", "use", "acme-q2"])
     capsys.readouterr()  # reset
@@ -60,7 +64,7 @@ def test_cli_engagement_use_and_current(_isolated_root, capsys):
 def test_cli_engagement_delete_requires_confirm(_isolated_root):
     from redrobin.cli import main
 
-    main(["init"])
+    main(["init", "--non-interactive"])
     main(["engagement", "new", "acme-q2"])
     rc = main(["engagement", "delete", "acme-q2"])
     assert rc == 2  # refused without --confirm
@@ -69,7 +73,7 @@ def test_cli_engagement_delete_requires_confirm(_isolated_root):
 def test_cli_engagement_delete_with_confirm(_isolated_root):
     from redrobin.cli import main
 
-    main(["init"])
+    main(["init", "--non-interactive"])
     main(["engagement", "new", "acme-q2"])
     rc = main(["engagement", "delete", "acme-q2", "--confirm"])
     assert rc == 0

@@ -49,16 +49,27 @@ def _load_env_for_cli() -> None:
     load_dotenv(dotenv_path=Path.cwd() / ".env", override=False)
 
 
-def cmd_init(_args: argparse.Namespace) -> int:
+def cmd_init(args: argparse.Namespace) -> int:
     _load_env_for_cli()
+    from redrobin.cli_helpers.init_cmd import run_init
+
+    settings = Settings()
+    root = Path(args.root) if args.root else settings.root
+    rc = run_init(
+        root=root,
+        anthropic_key=args.anthropic_key,
+        voyage_key=args.voyage_key,
+        engagement_slug=args.engagement_slug,
+        interactive=not args.non_interactive,
+    )
+    if rc != 0:
+        return rc
+    # Preserve load-bearing behaviour of the previous cmd_init: ensure the
+    # ~/.redrobin layout (chmod 700 dirs etc) and generate the bearer token
+    # so the daemon's auth surface is ready on first boot. Running these
+    # AFTER run_init is fine because both are idempotent.
     ensure_layout()
-    # Trigger token generation on init
     get_or_create_token()
-    root = redrobin_root()
-    print(f"[+] Initialized {root}/")
-    print(f"[+] Bearer token created (chmod 600): {root / 'transport.token'}")
-    print("[+] Edit ~/.redrobin/config.toml to configure (optional)")
-    print("[+] Next: `redrobin doctor` to verify dependencies, then `redrobin daemon start`")
     return 0
 
 
@@ -430,7 +441,26 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="redrobin")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("init").set_defaults(func=cmd_init)
+    init_p = sub.add_parser("init", help="First-time setup")
+    init_p.add_argument(
+        "--root",
+        default=None,
+        help="Root path (default: $REDROBIN_ROOT or ~/.redrobin)",
+    )
+    init_p.add_argument(
+        "--non-interactive",
+        action="store_true",
+        dest="non_interactive",
+        help="Skip prompts; use --anthropic-key and --voyage-key",
+    )
+    init_p.add_argument("--anthropic-key", default=None, dest="anthropic_key")
+    init_p.add_argument("--voyage-key", default=None, dest="voyage_key")
+    init_p.add_argument(
+        "--engagement-slug",
+        default="op-default",
+        dest="engagement_slug",
+    )
+    init_p.set_defaults(func=cmd_init)
     sub.add_parser("doctor").set_defaults(func=cmd_doctor)
 
     daemon = sub.add_parser("daemon")
