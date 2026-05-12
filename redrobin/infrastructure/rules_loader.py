@@ -9,30 +9,41 @@ the filesystem.
 The `passthrough.yaml` file is handled separately (whitelist of commands that
 skip Layer B escalation). RulesLoader skips it.
 
-Sigma support is intentionally minimal — enough to match real-world tradecraft
-detection rules without depending on the upstream pySigma engine:
+Sigma support — Slice 11 (v0.1.x hardening) extends the original minimal
+subset to cover SigmaHQ's ``windows/process_creation/`` rule set:
 
-* ``CommandLine`` (and the alias ``cmd``) maps to the ``args`` predicate field.
-* ``Image`` maps to the ``command`` predicate field via the executable basename
-  (``\\mimikatz.exe`` → ``mimikatz``).
-* Modifiers ``|contains``, ``|startswith``, ``|endswith`` map to the obvious
-  operators; a bare field (no modifier) is an equality check.
-* List values are OR within a single predicate (Sigma's documented semantics).
-* Multiple selection fields AND together (also Sigma's default).
-* Detection blocks beyond ``selection`` (named selections, ``condition``
-  expressions) are ignored — only the ``selection`` block is interpreted.
-* Other modifiers (``|all``, ``|re``, ``|cidr``, ``|base64``, etc.) are
-  ignored with a warning; the rule still loads as a degraded stub.
+* Fields supported: ``CommandLine`` (alias ``cmd``) → ``args``; ``Image`` →
+  ``command`` (basename after stripping path and ``.exe``);
+  ``IntegrityLevel``, ``OriginalFileName``, ``User``, ``CurrentDirectory``,
+  ``Description`` → identically named :class:`EventContext` fields.
+* Modifiers: ``|contains``/``|startswith``/``|endswith`` keep Sigma's
+  default case-insensitive comparison; ``|re`` compiles to a ``regex``
+  predicate evaluated via :func:`re.search` (substring, case-sensitive
+  per Sigma spec); ``|base64offset|contains`` expands at parse time into
+  three OR-combined ``contains`` predicates using pySigma's verbatim
+  algorithm (audit pass 2 #E — SPACE padding, ``start=(0,2,3)``,
+  ``end=(None,-3,-2)``).
+* Unsupported fields (``ParentImage`` — deferred to v0.2 since Aggressor
+  ``&binfo`` does not canonically expose a parent process image —
+  ``EventID``, ``ProcessId``, etc.) and unsupported modifier chains
+  (``|cidr``, ``|wide``, ``|fieldref``, ``|re|i``) emit a WARN log at
+  load time and produce a :class:`_NeverMatchPredicate`. The rule still
+  loads as a valid :class:`Rule` so ``list_rules()`` reflects its
+  presence, but it can never match — better than a silent false-PASS.
+* List values are OR within a single predicate (Sigma's documented
+  semantics). Multiple selection fields AND together (also Sigma's
+  default). Detection blocks beyond ``selection`` (named selections,
+  ``condition`` expressions) are ignored — only ``selection`` is
+  interpreted.
 
-This covers the substring/prefix/suffix cases that operator-facing tradecraft
-rules actually use today. The full pySigma engine can land in a later slice if
-heavier expressivity (regex, CIDR matching, named-selection conditions)
-becomes a requirement.
+Full pySigma can land in a later slice when CIDR / named-selection
+condition expressions become a requirement.
 """
 
 from __future__ import annotations
 
 import logging
+from base64 import b64encode
 from pathlib import Path
 from typing import Any, Callable
 
@@ -40,7 +51,13 @@ import yaml
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
-from redrobin.domain.rules import MatchPredicate, Rule, RuleMatch, RuleSeverity
+from redrobin.domain.rules import (
+    MatchPredicate,
+    Rule,
+    RuleMatch,
+    RuleSeverity,
+    _NeverMatchPredicate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,14 +75,19 @@ _SIGMA_LEVEL_TO_SEVERITY = {
     "critical": RuleSeverity.DANGER,
 }
 
-# Sigma field name → predicate field on the rule.
-# ``Image`` is the full process image path on Sysmon/Windows; the predicate
-# treats it as ``command`` (basename) since Red Robin's verdict path receives
+# Sigma field name (lowercased) → predicate field on the rule. ``Image`` is
+# the full process image path on Sysmon/Windows; the predicate treats it as
+# ``command`` (basename) since Red Robin's verdict path receives
 # operator-typed commands, not full image paths.
 _SIGMA_FIELD_TO_PREDICATE: dict[str, str] = {
     "commandline": "args",
     "cmd": "args",
     "image": "command",
+    "integritylevel": "integrity_level",
+    "originalfilename": "original_filename",
+    "user": "user",
+    "currentdirectory": "current_directory",
+    "description": "description",
 }
 
 # Sigma modifier → predicate operator. A field without a modifier is "equals".
@@ -73,6 +95,7 @@ _SIGMA_MODIFIER_TO_OP: dict[str, str] = {
     "contains": "contains",
     "startswith": "startswith",
     "endswith": "endswith",
+    "re": "regex",
 }
 
 
@@ -91,15 +114,39 @@ def _coerce_image_value_to_basename(value: str) -> str:
     return cleaned
 
 
+def _expand_base64offset(value: str) -> tuple[str, str, str]:
+    """Port of pySigma ``SigmaBase64OffsetModifier.modify`` (audit pass 2 #E).
+
+    Returns three OR-combined static-middle base64 strings — one per byte
+    shift — that survive being embedded into a longer base64-encoded
+    command line. Constants are verbatim from pySigma:
+
+    * ``start_offsets = (0, 2, 3)``
+    * ``end_offsets   = (None, -3, -2)``
+    * padding byte is **SPACE** ``b" "``, NOT NUL. Wrong padding silently
+      mis-fires on real-world traffic because the surviving middle bytes
+      differ.
+    """
+    value_bytes = value.encode()
+    start_offsets = (0, 2, 3)
+    end_offsets: tuple[int | None, int, int] = (None, -3, -2)
+    return tuple(  # type: ignore[return-value]
+        b64encode(i * b" " + value_bytes)[
+            start_offsets[i] : end_offsets[(len(value_bytes) + i) % 3]
+        ].decode()
+        for i in range(3)
+    )
+
+
 def _parse_sigma_detection(
     path: Path, detection: Any
-) -> tuple[MatchPredicate, ...]:
+) -> tuple[MatchPredicate | _NeverMatchPredicate, ...]:
     """Translate a Sigma ``detection`` block into a tuple of predicates.
 
-    Only the ``selection`` block is interpreted. Unknown field names and
-    unknown modifiers are skipped with a debug log; the resulting rule loads
-    as a degraded stub (empty predicates → ``Rule.matches`` is always False)
-    so the operator can still see it in ``list_rules`` without being misled.
+    Only the ``selection`` block is interpreted. Unknown fields and
+    unknown modifier chains produce a :class:`_NeverMatchPredicate` and
+    emit a WARN — the rule still loads (and is visible in ``list_rules``)
+    but never matches. Better than a silent false-PASS.
     """
     if not isinstance(detection, dict):
         return ()
@@ -107,35 +154,23 @@ def _parse_sigma_detection(
     if not isinstance(selection, dict):
         return ()
 
-    predicates: list[MatchPredicate] = []
+    predicates: list[MatchPredicate | _NeverMatchPredicate] = []
     for sigma_key, raw_value in selection.items():
-        # Split "Field|modifier" — Sigma allows multiple chained modifiers
-        # but the common case is a single one. We support the first modifier
-        # and ignore extras.
-        parts = str(sigma_key).split("|")
-        field_name = parts[0].strip().lower()
-        modifier = parts[1].strip().lower() if len(parts) > 1 else None
+        # Split "Field|modifier|modifier..." — Sigma allows chained modifiers.
+        parts = [p.strip() for p in str(sigma_key).split("|")]
+        field_name_raw = parts[0]
+        field_name = field_name_raw.lower()
+        modifiers = [m.lower() for m in parts[1:]]
 
         predicate_field = _SIGMA_FIELD_TO_PREDICATE.get(field_name)
         if predicate_field is None:
-            logger.debug(
-                "%s: sigma field %r not supported by Red Robin minimal sigma engine, "
-                "skipping predicate",
+            logger.warning(
+                "%s: unsupported Sigma field %r — rule loaded but will never match",
                 path,
-                sigma_key,
+                field_name_raw,
             )
-            continue
-
-        if modifier is None:
-            op = "equals"
-        elif modifier in _SIGMA_MODIFIER_TO_OP:
-            op = _SIGMA_MODIFIER_TO_OP[modifier]
-        else:
-            logger.debug(
-                "%s: sigma modifier %r on %r not supported, skipping predicate",
-                path,
-                modifier,
-                sigma_key,
+            predicates.append(
+                _NeverMatchPredicate(reason=f"unsupported field {field_name_raw}")
             )
             continue
 
@@ -144,6 +179,44 @@ def _parse_sigma_detection(
             raw_values = [str(v) for v in raw_value]
         else:
             raw_values = [str(raw_value)]
+
+        # Special-case the |base64offset|contains chain BEFORE the generic
+        # single-modifier path. The modifier chain expands one source value
+        # into THREE OR-combined `contains` predicates per pySigma.
+        if modifiers == ["base64offset", "contains"]:
+            expanded: list[str] = []
+            for v in raw_values:
+                expanded.extend(_expand_base64offset(v))
+            predicates.append(
+                MatchPredicate(
+                    field=predicate_field,  # type: ignore[arg-type]
+                    op="contains",
+                    values=tuple(expanded),
+                )
+            )
+            continue
+
+        # Single-modifier path (the common case). Chains beyond a single
+        # modifier are not supported in v0.1.x (the |all/|wide/|cidr/|re|i
+        # combinations all live behind a never-match sentinel).
+        if len(modifiers) == 0:
+            op = "equals"
+        elif len(modifiers) == 1 and modifiers[0] in _SIGMA_MODIFIER_TO_OP:
+            op = _SIGMA_MODIFIER_TO_OP[modifiers[0]]
+        else:
+            logger.warning(
+                "%s: unsupported Sigma modifier chain %r on field %r — rule "
+                "loaded but will never match",
+                path,
+                "|".join(modifiers),
+                field_name_raw,
+            )
+            predicates.append(
+                _NeverMatchPredicate(
+                    reason=f"unsupported modifier chain |{'|'.join(modifiers)} on {field_name_raw}"
+                )
+            )
+            continue
 
         # Image fields contain a path; collapse to bare executable name and
         # demote the operator from endswith → equals on ``command``.

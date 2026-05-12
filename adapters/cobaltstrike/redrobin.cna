@@ -76,12 +76,36 @@ sub redrobin_escape_json {
 }
 
 
+# ===== Integrity level (Slice 11) =====
+# Canonical CS elevated-context detection: &binfo($bid, "user") returns the
+# same string CS displays in the beacon table — e.g. "CORP\\admin *" with a
+# trailing " *" when the beacon runs in high-integrity context. Community
+# prior art: readloud/CobaltStrike-ToolKit Initial-LAdminCheck.cna and
+# S1ckB0y1337/Cobalt-Strike-CheatSheet. Audit pass 2 #2.4: &binfo("integrity")
+# is NOT a documented Aggressor key, so we MUST derive from the user string.
+# If a future CS release drops the " *" separator this check returns $null
+# (safe-fail — Sigma rules with IntegrityLevel: High simply don't fire).
+# Distinguishing Medium/Low/System requires a beacon-side BOF (deferred to v0.2).
+sub redrobin_integrity_level {
+    local('$u');
+    $u = binfo($1, "user");
+    if ($u is $null) { return $null; }
+    if (right($u, 2) eq " *") { return "High"; }
+    return $null;
+}
+
+
 sub redrobin_query_quick {
-    local('$bid $cmd $raw $body $response');
+    local('$bid $cmd $raw $body $response $il');
     ($bid, $cmd, $raw) = @_;
     $body = '{"bid":"' . redrobin_escape_json($bid) .
             '","command":"' . redrobin_escape_json($cmd) .
-            '","raw":"' . redrobin_escape_json($raw) . '"}';
+            '","raw":"' . redrobin_escape_json($raw) . '"';
+    $il = redrobin_integrity_level($bid);
+    if ($il !is $null) {
+        $body .= ',"integrity_level":"' . $il . '"';
+    }
+    $body .= '}';
     $response = redrobin_http_post("/v1/verdict/quick", $body);
 
     # Crude JSON parse — extract action field via regex

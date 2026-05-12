@@ -81,6 +81,11 @@ class VerdictPipeline:
         raw: str,
         source_event_id: str = "",
         beacon_id: str = "",
+        integrity_level: str | None = None,
+        original_filename: str | None = None,
+        user: str | None = None,
+        current_directory: str | None = None,
+        description: str | None = None,
     ) -> Verdict:
         """Sync stages 0-2. Returns within <100ms p95.
 
@@ -91,6 +96,11 @@ class VerdictPipeline:
         On ESCALATE: schedules Layer B async; caller proceeds with the ESCALATE
         verdict (fail-open per spec §1.2.1). The retroactive verdict is surfaced
         through ``_on_retroactive`` (bus emission) and the legacy callback.
+
+        Slice 11 — optional Windows process metadata threads through to
+        Layer A so Sigma rules can constrain on integrity level / image /
+        user / cwd / description. Existing callers that only pass the
+        legacy fields keep working (all extras default to ``None``).
         """
         # Stage 1: ROE scope check
         targets = self._scope.extract_targets(command=command, raw=raw)
@@ -100,7 +110,15 @@ class VerdictPipeline:
         else:
             # Stage 0 (passthrough inside Layer A) + Stage 2 (rules)
             args = self._strip_command(command, raw)
-            verdict = self._layer_a.evaluate(command=command, args=args)
+            verdict = self._layer_a.evaluate(
+                command=command,
+                args=args,
+                integrity_level=integrity_level,
+                original_filename=original_filename,
+                user=user,
+                current_directory=current_directory,
+                description=description,
+            )
 
         # Emit the Layer A / scope verdict to the bus BEFORE we return to the
         # alias body. The route handler awaits this method, so the bus publish

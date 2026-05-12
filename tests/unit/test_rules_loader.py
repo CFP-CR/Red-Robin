@@ -2,6 +2,7 @@
 
 import pytest
 
+from redrobin.domain.rules import EventContext
 from redrobin.infrastructure.rules_loader import RulesLoadError, RulesLoader
 
 
@@ -24,7 +25,7 @@ sources:
     rules = loader.load_all()
     assert len(rules) == 1
     assert rules[0].id == "mimikatz_logonpasswords"
-    assert rules[0].matches("mimikatz", "sekurlsa::logonpasswords")
+    assert rules[0].matches(EventContext(command="mimikatz", args="sekurlsa::logonpasswords"))
 
 
 def test_load_multiple_yaml_rules_sorted(tmp_path):
@@ -137,9 +138,9 @@ def test_sigma_contains_matches_substring(tmp_path):
     assert len(rules) == 1
     rule = rules[0]
     # The arg string ``sekurlsa::logonpasswords`` contains ``logonpasswords``.
-    assert rule.matches("mimikatz", "sekurlsa::logonpasswords")
+    assert rule.matches(EventContext(command="mimikatz", args="sekurlsa::logonpasswords"))
     # The arg string ``whoami /priv`` does not contain ``logonpasswords``.
-    assert not rule.matches("whoami", "whoami /priv")
+    assert not rule.matches(EventContext(command="whoami", args="whoami /priv"))
 
 
 def test_sigma_contains_list_is_or(tmp_path):
@@ -161,9 +162,9 @@ def test_sigma_contains_list_is_or(tmp_path):
     loader = RulesLoader(rule_dir=tmp_path)
     rules = loader.load_all()
     rule = rules[0]
-    assert rule.matches("mimikatz", "sekurlsa::logonpasswords /patch")
-    assert rule.matches("mimikatz", "lsadump::lsa /domain")
-    assert not rule.matches("mimikatz", "standard::coffee")
+    assert rule.matches(EventContext(command="mimikatz", args="sekurlsa::logonpasswords /patch"))
+    assert rule.matches(EventContext(command="mimikatz", args="lsadump::lsa /domain"))
+    assert not rule.matches(EventContext(command="mimikatz", args="standard::coffee"))
 
 
 def test_sigma_startswith_and_endswith(tmp_path):
@@ -185,9 +186,9 @@ def test_sigma_startswith_and_endswith(tmp_path):
     rules = loader.load_all()
     rule = rules[0]
     # Both predicates must hold.
-    assert rule.matches("powershell", "Invoke-Mimikatz dump.ps1")
-    assert not rule.matches("powershell", "Get-Process dump.ps1")  # startswith fails
-    assert not rule.matches("powershell", "Invoke-Mimikatz dump.exe")  # endswith fails
+    assert rule.matches(EventContext(command="powershell", args="Invoke-Mimikatz dump.ps1"))
+    assert not rule.matches(EventContext(command="powershell", args="Get-Process dump.ps1"))  # startswith fails
+    assert not rule.matches(EventContext(command="powershell", args="Invoke-Mimikatz dump.exe"))  # endswith fails
 
 
 def test_sigma_exact_command_equality(tmp_path):
@@ -207,8 +208,8 @@ def test_sigma_exact_command_equality(tmp_path):
     loader = RulesLoader(rule_dir=tmp_path)
     rules = loader.load_all()
     rule = rules[0]
-    assert rule.matches("whoami", "whoami /all")
-    assert not rule.matches("whoami", "whoami /priv")
+    assert rule.matches(EventContext(command="whoami", args="whoami /all"))
+    assert not rule.matches(EventContext(command="whoami", args="whoami /priv"))
 
 
 def test_sigma_image_endswith_filters_command(tmp_path):
@@ -230,10 +231,10 @@ def test_sigma_image_endswith_filters_command(tmp_path):
     loader = RulesLoader(rule_dir=tmp_path)
     rules = loader.load_all()
     rule = rules[0]
-    assert rule.matches("mimikatz", "sekurlsa::logonpasswords")
+    assert rule.matches(EventContext(command="mimikatz", args="sekurlsa::logonpasswords"))
     # An ``Image|endswith`` constraint that fails should block the match
     # even if the CommandLine contains check passes.
-    assert not rule.matches("nanodump", "sekurlsa::logonpasswords")
+    assert not rule.matches(EventContext(command="nanodump", args="sekurlsa::logonpasswords"))
 
 
 def test_sigma_level_high_maps_to_danger(tmp_path):
@@ -296,5 +297,5 @@ def test_sigma_missing_detection_block_falls_back_to_stub(tmp_path):
     assert len(rules) == 1
     rule = rules[0]
     # No predicates → no match for any command.
-    assert not rule.matches("anything", "any args")
-    assert not rule.matches("", "")
+    assert not rule.matches(EventContext(command="anything", args="any args"))
+    assert not rule.matches(EventContext(command="", args=""))

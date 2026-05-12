@@ -48,6 +48,17 @@ class QuickVerdictRequest(BaseModel):
     # CS adapter on PASS. Defaults to None so the TUI's direct submission
     # path (no team-server side effect required) keeps working unchanged.
     adapter: str | None = None
+    # Slice 11 — Windows process metadata threads through to Layer A so
+    # extended Sigma rules can constrain on integrity level / image / user /
+    # cwd / description. All optional; the .cna only emits ``integrity_level``
+    # in v0.1.x (derived from binfo "user" trailing " *"). Distinguishing
+    # Medium/Low/System and surfacing OriginalFileName/CurrentDirectory etc.
+    # requires a beacon-side BOF and is deferred to v0.2.
+    integrity_level: str | None = None
+    original_filename: str | None = None
+    user: str | None = None
+    current_directory: str | None = None
+    description: str | None = None
 
 
 class QuickVerdictResponse(BaseModel):
@@ -123,6 +134,11 @@ async def quick(
         raw=req.raw,
         source_event_id=req.source_event_id,
         beacon_id=req.bid,
+        integrity_level=req.integrity_level,
+        original_filename=req.original_filename,
+        user=req.user,
+        current_directory=req.current_directory,
+        description=req.description,
     )
 
     # Slice 9 — only PASS verdicts dispatch. WARN/BLOCK/ESCALATE never reach

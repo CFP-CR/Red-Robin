@@ -1,6 +1,6 @@
 """Domain Rule schema — Layer A YAML rule matching (spec §4 Componente 4)."""
 
-from redrobin.domain.rules import Rule, RuleMatch, RuleSeverity
+from redrobin.domain.rules import EventContext, Rule, RuleMatch, RuleSeverity
 
 
 def test_rule_matches_command_with_arg_pattern():
@@ -10,9 +10,9 @@ def test_rule_matches_command_with_arg_pattern():
         severity=RuleSeverity.DANGER,
         reason="lsass touch + cred extraction",
     )
-    assert rule.matches("mimikatz", "sekurlsa::logonpasswords")
-    assert not rule.matches("mimikatz", "standard::coffee")
-    assert not rule.matches("shell", "sekurlsa::logonpasswords")
+    assert rule.matches(EventContext(command="mimikatz", args="sekurlsa::logonpasswords"))
+    assert not rule.matches(EventContext(command="mimikatz", args="standard::coffee"))
+    assert not rule.matches(EventContext(command="shell", args="sekurlsa::logonpasswords"))
 
 
 def test_rule_passthrough_no_arg_pattern():
@@ -22,8 +22,8 @@ def test_rule_passthrough_no_arg_pattern():
         severity=RuleSeverity.WARN,
         reason="screenshot is medium-risk telemetry",
     )
-    assert rule.matches("screenshot", "")
-    assert rule.matches("screenshot", "any args at all")
+    assert rule.matches(EventContext(command="screenshot", args=""))
+    assert rule.matches(EventContext(command="screenshot", args="any args at all"))
 
 
 def test_rule_arg_pattern_is_case_insensitive():
@@ -33,8 +33,8 @@ def test_rule_arg_pattern_is_case_insensitive():
         severity=RuleSeverity.DANGER,
         reason="Empire-era cmdlet",
     )
-    assert rule.matches("powershell", "Invoke-Mimikatz -DumpCreds")
-    assert rule.matches("powershell", "invoke-mimikatz -dumpcreds")  # lowercase still matches
+    assert rule.matches(EventContext(command="powershell", args="Invoke-Mimikatz -DumpCreds"))
+    assert rule.matches(EventContext(command="powershell", args="invoke-mimikatz -dumpcreds"))  # lowercase still matches
 
 
 def test_rule_severity_enum_3_values():
