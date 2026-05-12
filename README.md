@@ -39,6 +39,12 @@ context across operations.
 
 ## Quick start
 
+`redrobin init` is the front door. It scaffolds `~/.redrobin/`, prompts for
+your API keys (hidden input), drops a sample engagement, and writes a
+bearer token for the TUI. Full walkthrough — including non-interactive use,
+the CS adapter, and smoke-test — in
+[`docs/operator-setup.md`](docs/operator-setup.md).
+
 ### Install
 
 ```bash
@@ -47,14 +53,21 @@ cd Red-Robin
 uv sync --all-extras
 ```
 
-### Configure
+### Init + verify
 
 ```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
-export VOYAGE_API_KEY="pa-..."
+uv run redrobin init      # interactive: prompts for keys + engagement slug
+uv run redrobin doctor    # preflight: env keys + dependencies + connectivity
+```
 
-uv run redrobin init      # creates ~/.redrobin/ tree + bearer token
-uv run redrobin doctor    # verifies env keys + dependencies
+Non-interactive (CI, Git Bash):
+
+```bash
+uv run redrobin init \
+  --non-interactive \
+  --anthropic-key "sk-ant-..." \
+  --voyage-key "pa-..." \
+  --engagement-slug op-smoke
 ```
 
 ### Run
@@ -107,12 +120,26 @@ only — it doesn't know about REST API endpoints, JWT, beacon IDs, etc.
   adapter, Mythic adapter (native `opsec_pre` integration), Tradecraft Graph
   expansions.
 
-## Resources
+## Documentation
+
+Operator-facing:
+
+- [`docs/operator-setup.md`](docs/operator-setup.md) — first-time daemon
+  setup walkthrough (clone → init → doctor → daemon → TUI → smoke test).
+- [`docs/secrets-handling.md`](docs/secrets-handling.md) — rotation, leak
+  response, file perms (incl. Windows ACL, Git Bash, dotenv path caveats).
+- [`docs/sigma-support.md`](docs/sigma-support.md) — what works in v0.1.x
+  Layer A, what's deferred to v0.2, example SigmaHQ rules.
+- [`docs/operator-cli-conventions.md`](docs/operator-cli-conventions.md) —
+  ADR for interactive vs non-interactive subcommands.
+- [`docs/demo-runbook.md`](docs/demo-runbook.md) — DEF CON RTV / La Villa
+  live-demo checklist + script.
+
+Project / dev:
 
 - Project status: `Projects/red-robin-copilot.md`
 - Architecture: `docs/architecture-design.md`
-- Demo runbook: `docs/demo-runbook.md`
-- Developer onboarding: `docs/developer-onboarding.md`
+- Developer onboarding: [`docs/developer-onboarding.md`](docs/developer-onboarding.md)
 - Security model: `SECURITY.md`
 - Contributing: `CONTRIBUTING.md`
 
