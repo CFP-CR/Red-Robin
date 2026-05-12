@@ -8,11 +8,13 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _isolated_redrobin_root(tmp_path, monkeypatch):
-    """Point REDROBIN_ROOT at a temp dir per test for isolation."""
-    monkeypatch.setattr(
-        "redrobin.infrastructure.filesystem.REDROBIN_ROOT",
-        tmp_path / ".redrobin",
-    )
+    """Point REDROBIN_ROOT at a temp dir per test for isolation.
+
+    Slice 1 Task 1.3: ``filesystem.redrobin_root()`` reads :class:`Settings`
+    lazily, so test isolation now flows through the env var rather than
+    monkey-patching a module-level constant.
+    """
+    monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path / ".redrobin"))
     yield tmp_path / ".redrobin"
 
 

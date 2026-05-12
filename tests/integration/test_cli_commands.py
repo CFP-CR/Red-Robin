@@ -238,11 +238,8 @@ def test_replay_endpoint_publishes_to_event_bus(tmp_path, monkeypatch):
 
     root = tmp_path / ".redrobin"
     root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("REDROBIN_ROOT", str(root))
     monkeypatch.setenv("REDROBIN_RULES_DIR", str(root / "rules"))
-    monkeypatch.setattr("redrobin.infrastructure.filesystem.REDROBIN_ROOT", root)
-    monkeypatch.setattr("redrobin.application.verdict_pipeline_factory.REDROBIN_ROOT", root)
-    monkeypatch.setattr("redrobin.api.events_router.REDROBIN_ROOT", root)
-    monkeypatch.setattr("redrobin.application.engagement_service.REDROBIN_ROOT", root)
     from redrobin.application.verdict_pipeline_factory import reset_pipeline_cache
 
     reset_pipeline_cache()
@@ -280,11 +277,8 @@ def test_replay_endpoint_requires_auth(tmp_path, monkeypatch):
 
     root = tmp_path / ".redrobin"
     root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("REDROBIN_ROOT", str(root))
     monkeypatch.setenv("REDROBIN_RULES_DIR", str(root / "rules"))
-    monkeypatch.setattr("redrobin.infrastructure.filesystem.REDROBIN_ROOT", root)
-    monkeypatch.setattr("redrobin.application.verdict_pipeline_factory.REDROBIN_ROOT", root)
-    monkeypatch.setattr("redrobin.api.events_router.REDROBIN_ROOT", root)
-    monkeypatch.setattr("redrobin.application.engagement_service.REDROBIN_ROOT", root)
     from redrobin.application.verdict_pipeline_factory import reset_pipeline_cache
 
     reset_pipeline_cache()

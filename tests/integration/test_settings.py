@@ -79,3 +79,24 @@ async def test_app_state_has_settings(monkeypatch, tmp_path):
         # Existing app.state attributes still work
         assert app.state.event_bus is not None
         assert app.state.rules_loader is not None
+
+
+def test_filesystem_root_reads_from_settings(monkeypatch, tmp_path):
+    """Audit pass 2 #C2: filesystem.py must not hardcode Path.home() / '.redrobin'."""
+    monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path / "custom"))
+    # Reload to ensure no cached module-level constant
+    import importlib
+    from redrobin.infrastructure import filesystem
+    importlib.reload(filesystem)
+    # Whatever accessor we expose (function or property), it must reflect env
+    resolved = filesystem.redrobin_root()
+    assert resolved == tmp_path / "custom"
+
+
+def test_bearer_token_path_reads_from_settings(monkeypatch, tmp_path):
+    monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path / "custom"))
+    import importlib
+    from redrobin.infrastructure.transport import bearer
+    importlib.reload(bearer)
+    path = bearer._token_path()
+    assert path == tmp_path / "custom" / "transport.token"

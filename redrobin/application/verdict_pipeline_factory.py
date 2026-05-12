@@ -34,7 +34,7 @@ from redrobin.application.verdict_pipeline import (
 )
 from redrobin.domain.opsec import Verdict, VerdictAction
 from redrobin.domain.rules import Rule
-from redrobin.infrastructure.filesystem import REDROBIN_ROOT
+from redrobin.infrastructure.filesystem import redrobin_root
 from redrobin.infrastructure.llm.anthropic_client import AnthropicClient
 from redrobin.infrastructure.llm.voyage_client import VoyageClient
 from redrobin.infrastructure.persistence.context_summary_repo import (
@@ -95,7 +95,7 @@ def _build_layer_b(
     try:
         llm = AnthropicClient()
         voyage = VoyageClient()
-        kb_index_path = REDROBIN_ROOT / "shared" / "kb-index" / "index.npz"
+        kb_index_path = redrobin_root() / "shared" / "kb-index" / "index.npz"
         store = VectorStore.load(kb_index_path) if kb_index_path.exists() else VectorStore()
         kb = KBService(voyage=voyage, store=store)
         return LayerBEngine(
@@ -135,7 +135,7 @@ def build_default_dependencies(
     loaded the YAML rules from ``REDROBIN_RULES_DIR`` (the lifespan does this
     so the hot-reload watcher has a handle on the loader), it should pass them
     in to avoid double-loading. When ``None``, the factory falls back to
-    ``REDROBIN_ROOT/rules`` for backward compatibility.
+    ``redrobin_root() / "rules"`` for backward compatibility.
 
     Slice 13 adds ``summary_repo`` + ``engagement_id_provider`` so the
     lifespan can thread the L5 sliding-window summary repo into Layer B at
@@ -146,7 +146,7 @@ def build_default_dependencies(
     wiring lands in Slice 6.
     """
     if rules is None:
-        rules_dir = REDROBIN_ROOT / "rules"
+        rules_dir = redrobin_root() / "rules"
         if rules_dir.exists():
             loader = RulesLoader(rule_dir=rules_dir)
             rules = loader.load_all()
@@ -200,8 +200,9 @@ def reset_pipeline_cache() -> None:
 
     The factory no longer caches the pipeline — :func:`build_pipeline` is the
     sole entry point and is called once per FastAPI app from the lifespan. Test
-    isolation is achieved by patching ``REDROBIN_ROOT`` and entering the
-    TestClient as a context manager so the lifespan re-runs for every test.
+    isolation is achieved by setting ``REDROBIN_ROOT`` via ``monkeypatch.setenv``
+    and entering the TestClient as a context manager so the lifespan re-runs for
+    every test.
     """
     return None
 

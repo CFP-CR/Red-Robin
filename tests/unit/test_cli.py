@@ -5,16 +5,14 @@ import pytest
 
 @pytest.fixture
 def _isolated_root(tmp_path, monkeypatch):
+    """Isolate tests from the real ~/.redrobin/ via REDROBIN_ROOT env var.
+
+    Slice 1 Task 1.3: filesystem.redrobin_root() and bearer._token_path() now
+    read :class:`Settings` lazily, so isolation flows through the env var. No
+    more monkey-patching module-level constants across multiple modules.
+    """
     root = tmp_path / ".redrobin"
-    monkeypatch.setattr("redrobin.infrastructure.filesystem.REDROBIN_ROOT", root)
-    monkeypatch.setattr("redrobin.cli.REDROBIN_ROOT", root)
-    monkeypatch.setattr("redrobin.application.engagement_service.REDROBIN_ROOT", root)
-    # bearer.py captures REDROBIN_ROOT at import time — patch it directly
-    # so tokens get created under the test tmp_path, not the real ~/.redrobin/.
-    monkeypatch.setattr("redrobin.infrastructure.transport.bearer.REDROBIN_ROOT", root)
-    monkeypatch.setattr("redrobin.application.transport_auth.REDROBIN_ROOT", root) if hasattr(
-        __import__("redrobin.application.transport_auth", fromlist=["x"]), "REDROBIN_ROOT"
-    ) else None
+    monkeypatch.setenv("REDROBIN_ROOT", str(root))
     yield root
 
 

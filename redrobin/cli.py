@@ -31,15 +31,16 @@ from redrobin.application.engagement_service import EngagementError, EngagementS
 from redrobin.application.transport_auth import get_or_create_token
 from redrobin.cli_helpers.daemon_pidfile import PidFile, is_pid_alive, read_pid
 from redrobin.infrastructure.config import Settings
-from redrobin.infrastructure.filesystem import REDROBIN_ROOT, ensure_layout
+from redrobin.infrastructure.filesystem import ensure_layout, redrobin_root
 
 
 def cmd_init(_args: argparse.Namespace) -> int:
     ensure_layout()
     # Trigger token generation on init
     get_or_create_token()
-    print(f"[+] Initialized {REDROBIN_ROOT}/")
-    print(f"[+] Bearer token created (chmod 600): {REDROBIN_ROOT / 'transport.token'}")
+    root = redrobin_root()
+    print(f"[+] Initialized {root}/")
+    print(f"[+] Bearer token created (chmod 600): {root / 'transport.token'}")
     print("[+] Edit ~/.redrobin/config.toml to configure (optional)")
     print("[+] Next: `redrobin doctor` to verify dependencies, then `redrobin daemon start`")
     return 0
@@ -72,14 +73,15 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
         failures.append("VOYAGE_API_KEY not set")
 
     # ~/.redrobin/ layout
-    if REDROBIN_ROOT.exists():
-        print(f"  [OK] {REDROBIN_ROOT} exists")
+    root = redrobin_root()
+    if root.exists():
+        print(f"  [OK] {root} exists")
     else:
-        print(f"  [!!] {REDROBIN_ROOT} not initialized - run `redrobin init`")
-        failures.append(f"{REDROBIN_ROOT} not initialized")
+        print(f"  [!!] {root} not initialized - run `redrobin init`")
+        failures.append(f"{root} not initialized")
 
     # rules dir — informational only; the daemon creates it on first start.
-    rules_dir = REDROBIN_ROOT / "rules"
+    rules_dir = root / "rules"
     if rules_dir.exists():
         rule_count = sum(1 for _ in rules_dir.rglob("*.yaml"))
         print(f"  [OK] rules loaded: {rule_count}")
@@ -188,7 +190,7 @@ def cmd_engagement_new(args: argparse.Namespace) -> int:
         print(f"[!] {e}", file=sys.stderr)
         return 1
     print(f"[+] Created engagement {eng.id}")
-    print(f"[+] Edit {REDROBIN_ROOT}/engagements/{eng.id}/engagement.yaml")
+    print(f"[+] Edit {redrobin_root()}/engagements/{eng.id}/engagement.yaml")
     return 0
 
 
@@ -278,7 +280,7 @@ def cmd_kb_add(args: argparse.Namespace) -> int:
         return 1
 
     ensure_layout()
-    kb_index_path = REDROBIN_ROOT / "shared" / "kb-index" / "index.npz"
+    kb_index_path = redrobin_root() / "shared" / "kb-index" / "index.npz"
     store = VectorStore.load(kb_index_path) if kb_index_path.exists() else VectorStore()
 
     class _VoyageAdapter:

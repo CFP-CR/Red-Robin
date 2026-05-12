@@ -8,7 +8,7 @@ from redrobin.api.app import create_app
 
 @pytest.fixture
 def _isolated_root(tmp_path, monkeypatch):
-    monkeypatch.setattr("redrobin.infrastructure.filesystem.REDROBIN_ROOT", tmp_path / ".redrobin")
+    monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path / ".redrobin"))
     (tmp_path / ".redrobin").mkdir(parents=True, exist_ok=True)
     # Reset the session registry singleton between tests for isolation
     from redrobin.application.adapter_sessions import AdapterSessionRegistry

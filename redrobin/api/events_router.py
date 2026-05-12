@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from redrobin.api.auth import require_bearer
 from redrobin.application.engagement_service import EngagementService
 from redrobin.application.event_ingestion import (
-    REDROBIN_ROOT,
+    redrobin_root,
     validate_envelope,
     validate_event,
 )
@@ -76,7 +76,7 @@ async def ingest(
     active = svc.current()
     stored = False
     if active is not None:
-        engagement_path = REDROBIN_ROOT / "engagements" / active
+        engagement_path = redrobin_root() / "engagements" / active
         if engagement_path.exists():
             events_jsonl = engagement_path / "events.jsonl"
             with events_jsonl.open("a", encoding="utf-8") as f:

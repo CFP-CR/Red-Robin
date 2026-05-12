@@ -24,7 +24,7 @@ import yaml  # type: ignore[import-untyped]
 
 from redrobin.domain.engagement import Engagement, validate_slug
 from redrobin.domain.memory import WorkingMemory
-from redrobin.infrastructure.filesystem import REDROBIN_ROOT
+from redrobin.infrastructure.filesystem import redrobin_root
 from redrobin.infrastructure.persistence.working_memory_repo import WorkingMemoryRepo
 
 ACTIVE_FILE = ".active_engagement"
@@ -37,7 +37,7 @@ class EngagementError(Exception):
 
 class EngagementService:
     def __init__(self, root: Path | None = None):
-        self._root = root or REDROBIN_ROOT
+        self._root = root or redrobin_root()
 
     def _engagements_dir(self) -> Path:
         return self._root / "engagements"

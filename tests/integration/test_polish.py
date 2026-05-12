@@ -14,9 +14,7 @@ from redrobin.infrastructure.vector_store import VectorStore
 @pytest.fixture
 def _isolated_root(tmp_path, monkeypatch):
     """Same isolation pattern as test_http_auth — points REDROBIN_ROOT at tmp."""
-    monkeypatch.setattr(
-        "redrobin.infrastructure.filesystem.REDROBIN_ROOT", tmp_path / ".redrobin"
-    )
+    monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path / ".redrobin"))
     (tmp_path / ".redrobin").mkdir(parents=True, exist_ok=True)
     yield tmp_path / ".redrobin"
 
@@ -101,10 +99,7 @@ def test_doctor_exit_code_nonzero_on_failure(monkeypatch, tmp_path):
     monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
     # Point REDROBIN_ROOT at a fresh tmp so the rules-dir check is the only
     # other potential failure surface, and we control it.
-    monkeypatch.setattr(
-        "redrobin.infrastructure.filesystem.REDROBIN_ROOT", tmp_path / ".redrobin"
-    )
-    monkeypatch.setattr("redrobin.cli.REDROBIN_ROOT", tmp_path / ".redrobin")
+    monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path / ".redrobin"))
     from redrobin.cli import cmd_doctor
 
     args = type("A", (), {"verbose": False})()
@@ -119,8 +114,7 @@ def test_doctor_exit_code_zero_when_all_pass(monkeypatch, tmp_path):
     root = tmp_path / ".redrobin"
     rules_dir = root / "rules"
     rules_dir.mkdir(parents=True)
-    monkeypatch.setattr("redrobin.infrastructure.filesystem.REDROBIN_ROOT", root)
-    monkeypatch.setattr("redrobin.cli.REDROBIN_ROOT", root)
+    monkeypatch.setenv("REDROBIN_ROOT", str(root))
     from redrobin.cli import cmd_doctor
 
     args = type("A", (), {"verbose": False})()

@@ -10,8 +10,7 @@ from redrobin.api.app import create_app
 def _isolated_root(tmp_path, monkeypatch):
     root = tmp_path / ".redrobin"
     root.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr("redrobin.infrastructure.filesystem.REDROBIN_ROOT", root)
-    monkeypatch.setattr("redrobin.application.verdict_pipeline_factory.REDROBIN_ROOT", root)
+    monkeypatch.setenv("REDROBIN_ROOT", str(root))
     # Reset the pipeline cache for test isolation
     from redrobin.application.verdict_pipeline_factory import reset_pipeline_cache
 

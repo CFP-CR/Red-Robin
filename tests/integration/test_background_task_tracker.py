@@ -26,18 +26,12 @@ from redrobin.api.app import create_app
 def _setup_env(tmp_path: Path, monkeypatch) -> Path:
     root = tmp_path / ".redrobin"
     root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("REDROBIN_ROOT", str(root))
     monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     monkeypatch.setenv("REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json"))
     monkeypatch.setenv("REDROBIN_EPISODIC_PATH", str(tmp_path / "ep.db"))
     monkeypatch.setenv("REDROBIN_LONGTERM_PATH", str(tmp_path / "lt.db"))
     monkeypatch.setenv("REDROBIN_SUMMARY_PATH", str(tmp_path / "cs.db"))
-    monkeypatch.setattr("redrobin.infrastructure.filesystem.REDROBIN_ROOT", root)
-    monkeypatch.setattr(
-        "redrobin.application.verdict_pipeline_factory.REDROBIN_ROOT", root
-    )
-    monkeypatch.setattr("redrobin.application.event_ingestion.REDROBIN_ROOT", root)
-    monkeypatch.setattr("redrobin.application.engagement_service.REDROBIN_ROOT", root)
-    monkeypatch.setattr("redrobin.infrastructure.transport.bearer.REDROBIN_ROOT", root)
     return root
 
 
