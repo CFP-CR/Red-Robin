@@ -35,3 +35,10 @@ Thumbs.db
 
 # Alembic dev-time DB (not for production state)
 .redrobin-dev.db
+
+# Local secrets / env files
+.env
+.env.local
+
+# Stray commit message scratch file
+.commitmsg.tmp

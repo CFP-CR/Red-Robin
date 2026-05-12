@@ -27,6 +27,8 @@ import sys
 import time
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from redrobin.application.engagement_service import EngagementError, EngagementService
 from redrobin.application.transport_auth import get_or_create_token
 from redrobin.cli_helpers.daemon_pidfile import PidFile, is_pid_alive, read_pid
@@ -34,7 +36,21 @@ from redrobin.infrastructure.config import Settings
 from redrobin.infrastructure.filesystem import ensure_layout, redrobin_root
 
 
+def _load_env_for_cli() -> None:
+    """Load .env (if present) from CWD only with safe precedence.
+
+    SECURITY: Pin to Path.cwd() / ".env" — python-dotenv's default behavior
+    walks PARENT directories looking for .env, which can silently pick up an
+    operator's home-directory .env when run from a customer subdirectory
+    (cross-engagement secret leak). Always anchor to the current working dir.
+
+    Precedence: explicit env vars (export FOO=bar) WIN over .env values.
+    """
+    load_dotenv(dotenv_path=Path.cwd() / ".env", override=False)
+
+
 def cmd_init(_args: argparse.Namespace) -> int:
+    _load_env_for_cli()
     ensure_layout()
     # Trigger token generation on init
     get_or_create_token()
@@ -54,6 +70,7 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
     a deploy on `redrobin doctor`. Now we collect failures and return 1
     when any are present, while still printing the same diagnostic lines.
     """
+    _load_env_for_cli()
     settings = Settings()
     failures: list[str] = []
     print("[*] Red Robin doctor (preflight check)")
@@ -96,6 +113,7 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
 
 
 def cmd_daemon_start(args: argparse.Namespace) -> int:
+    _load_env_for_cli()
     import uvicorn
 
     settings = Settings()
@@ -118,6 +136,7 @@ def cmd_daemon_start(args: argparse.Namespace) -> int:
 
 
 def cmd_daemon_stop(_args: argparse.Namespace) -> int:
+    _load_env_for_cli()
     settings = Settings()
     pid_path = settings.pid_file
     assert pid_path is not None  # Settings._derive_paths guarantees this
@@ -158,6 +177,7 @@ def cmd_daemon_stop(_args: argparse.Namespace) -> int:
 
 
 def cmd_tui(args: argparse.Namespace) -> int:
+    _load_env_for_cli()
     from redrobin.tui.app import run_tui
 
     # Default token = the locally-stored operator token. ``redrobin tui`` with
@@ -183,6 +203,7 @@ def _engagement_service() -> EngagementService:
 
 
 def cmd_engagement_new(args: argparse.Namespace) -> int:
+    _load_env_for_cli()
     svc = _engagement_service()
     try:
         eng = svc.new(args.slug, client=args.client or "")
@@ -195,6 +216,7 @@ def cmd_engagement_new(args: argparse.Namespace) -> int:
 
 
 def cmd_engagement_use(args: argparse.Namespace) -> int:
+    _load_env_for_cli()
     svc = _engagement_service()
     try:
         svc.use(args.slug)
@@ -206,6 +228,7 @@ def cmd_engagement_use(args: argparse.Namespace) -> int:
 
 
 def cmd_engagement_list(_args: argparse.Namespace) -> int:
+    _load_env_for_cli()
     svc = _engagement_service()
     items = svc.list_all()
     if not items:
@@ -218,6 +241,7 @@ def cmd_engagement_list(_args: argparse.Namespace) -> int:
 
 
 def cmd_engagement_current(_args: argparse.Namespace) -> int:
+    _load_env_for_cli()
     svc = _engagement_service()
     active = svc.current()
     if active is None:
@@ -228,6 +252,7 @@ def cmd_engagement_current(_args: argparse.Namespace) -> int:
 
 
 def cmd_engagement_close(args: argparse.Namespace) -> int:
+    _load_env_for_cli()
     svc = _engagement_service()
     try:
         svc.close(args.slug)
@@ -239,6 +264,7 @@ def cmd_engagement_close(args: argparse.Namespace) -> int:
 
 
 def cmd_engagement_archive(args: argparse.Namespace) -> int:
+    _load_env_for_cli()
     svc = _engagement_service()
     try:
         tarball = svc.archive(args.slug)
@@ -250,6 +276,7 @@ def cmd_engagement_archive(args: argparse.Namespace) -> int:
 
 
 def cmd_engagement_delete(args: argparse.Namespace) -> int:
+    _load_env_for_cli()
     if not args.confirm:
         print(f"[!] Refusing to delete {args.slug} without --confirm")
         return 2
@@ -264,6 +291,7 @@ def cmd_engagement_delete(args: argparse.Namespace) -> int:
 
 
 def cmd_kb_add(args: argparse.Namespace) -> int:
+    _load_env_for_cli()
     import asyncio
     from typing import Any
 
@@ -337,6 +365,7 @@ def cmd_kb_add(args: argparse.Namespace) -> int:
 
 
 def cmd_memory_edit(args: argparse.Namespace) -> int:
+    _load_env_for_cli()
     target = Path(args.file).expanduser().resolve()
     if not target.exists():
         print(f"[!] {target} does not exist", file=sys.stderr)
@@ -347,6 +376,7 @@ def cmd_memory_edit(args: argparse.Namespace) -> int:
 
 
 def cmd_replay(args: argparse.Namespace) -> int:
+    _load_env_for_cli()
     import asyncio
 
     import httpx
