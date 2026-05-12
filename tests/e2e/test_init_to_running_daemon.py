@@ -113,7 +113,7 @@ def test_init_to_verdict_e2e(operator_setup):
             → LayerAEngine evaluates it
             → POST /v1/verdict/quick returns BLOCK with rule_id
 
-    The sample rule has ``severity: HIGH`` (mapped to DANGER → BLOCK in
+    The sample rule has ``severity: DANGER`` (mapped to BLOCK in
     :data:`SEVERITY_TO_ACTION`) and ``match.command: lazagne``, so a
     submission whose command field is exactly ``lazagne`` MUST be blocked.
     """

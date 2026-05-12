@@ -145,9 +145,10 @@ class Episode:
 class PromotedLesson:
     """L1 long-term record synthesised from recurring episodes.
 
-    Distinct from ``Lesson`` (free-form engagement-specific learning stored in
-    L3 Episodic): a ``PromotedLesson`` is a structured pattern record keyed by
-    ``(command, verdict)`` and surfaced cross-engagement for future judgments.
+    Structured pattern record keyed by ``(command, verdict)`` and surfaced
+    cross-engagement for future judgments. Produced by ``LessonPromoter``
+    when ``EpisodicRepo`` shows a verdict pattern recurring at or above the
+    configured ``REDROBIN_PROMOTER_MIN_OCCURRENCES`` threshold.
     """
 
     id: int | None  # None until persisted
