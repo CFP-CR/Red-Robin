@@ -73,48 +73,97 @@ def cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_doctor(_args: argparse.Namespace) -> int:
+def cmd_doctor(args: argparse.Namespace) -> int:
     """Preflight check; exits non-zero when any required check fails.
 
-    Prior behaviour was to print warnings and always return 0 — fine for
-    interactive use but useless in CI/CD where the operator wants to gate
-    a deploy on `redrobin doctor`. Now we collect failures and return 1
-    when any are present, while still printing the same diagnostic lines.
+    Slice 6 (v0.1.x hardening): doctor now runs REAL connectivity probes
+    against the Anthropic API, Voyage API, and any configured CS adapter
+    so the operator catches network/credential failures during preflight
+    instead of at first dispatch. ``--quick`` skips network probes for
+    fast CI smoke tests; the env-var presence checks always run.
     """
+    import asyncio
+
+    from redrobin.cli_helpers.doctor_probes import (
+        probe_anthropic,
+        probe_voyage,
+        probe_cs_adapter,
+    )
+    from redrobin.infrastructure.cs_adapter_loader import load_adapter_configs
+
     _load_env_for_cli()
     settings = Settings()
     failures: list[str] = []
     print("[*] Red Robin doctor (preflight check)")
+    print("Configuration:")
+    print(f"  ROOT:               {settings.root}")
+    print(f"  ENGAGEMENT:         {settings.engagement_slug or '(none)'}")
 
     # ANTHROPIC_API_KEY
     if settings.anthropic_api_key:
-        print("  [OK] ANTHROPIC_API_KEY set")
+        print("  ANTHROPIC_API_KEY:  set")
     else:
-        print("  [!!] ANTHROPIC_API_KEY not set - Layer B will degrade to no-op")
+        print("  ANTHROPIC_API_KEY:  MISSING - Layer B will degrade to no-op")
         failures.append("ANTHROPIC_API_KEY not set")
 
     # VOYAGE_API_KEY
     if settings.voyage_api_key:
-        print("  [OK] VOYAGE_API_KEY set")
+        print("  VOYAGE_API_KEY:     set")
     else:
-        print("  [!!] VOYAGE_API_KEY not set - KB retrieval will be empty")
+        print("  VOYAGE_API_KEY:     MISSING - KB retrieval will be empty")
         failures.append("VOYAGE_API_KEY not set")
 
     # ~/.redrobin/ layout
     root = redrobin_root()
     if root.exists():
-        print(f"  [OK] {root} exists")
+        print(f"  ROOT_EXISTS:        yes ({root})")
     else:
-        print(f"  [!!] {root} not initialized - run `redrobin init`")
+        print("  ROOT_EXISTS:        NO - run `redrobin init`")
         failures.append(f"{root} not initialized")
 
     # rules dir — informational only; the daemon creates it on first start.
     rules_dir = root / "rules"
     if rules_dir.exists():
         rule_count = sum(1 for _ in rules_dir.rglob("*.yaml"))
-        print(f"  [OK] rules loaded: {rule_count}")
+        print(f"  RULES:              {rule_count} loaded")
     else:
-        print("  [!] no rules directory yet (will be created on first daemon start)")
+        print("  RULES:              (will be created on first daemon start)")
+
+    # --quick: env-var presence check only, skip network.
+    if getattr(args, "quick", False):
+        if failures:
+            print("[+] Doctor finished: DEGRADED (quick mode - skipped network probes)")
+            return 1
+        print("[+] Doctor finished: OK (quick mode - skipped network probes)")
+        return 0
+
+    async def run_probes() -> list:
+        results = []
+        if settings.anthropic_api_key:
+            results.append(await probe_anthropic(api_key=settings.anthropic_api_key))
+        if settings.voyage_api_key:
+            results.append(await probe_voyage(api_key=settings.voyage_api_key))
+        if settings.adapters_dir is not None and settings.adapters_dir.is_dir():
+            for cfg in load_adapter_configs(settings.adapters_dir):
+                results.append(
+                    await probe_cs_adapter(
+                        teamserver_url=cfg.teamserver_url,
+                        operator_user=cfg.operator_user,
+                        operator_password=cfg.operator_password,
+                        verify_ssl=cfg.verify_ssl,
+                    )
+                )
+        return results
+
+    results = asyncio.run(run_probes())
+    if results:
+        print("\nConnectivity:")
+        for r in results:
+            status = "OK " if r.ok else "FAIL"
+            reason = f"  {r.reason}" if r.reason else ""
+            print(f"  [{status}] {r.name:30s} {r.latency_ms:6.0f}ms{reason}")
+            if not r.ok:
+                failures.append(f"{r.name}: {r.reason}")
 
     if failures:
         print("[+] Doctor finished: DEGRADED (Layer A still works)")
@@ -461,7 +510,13 @@ def build_parser() -> argparse.ArgumentParser:
         dest="engagement_slug",
     )
     init_p.set_defaults(func=cmd_init)
-    sub.add_parser("doctor").set_defaults(func=cmd_doctor)
+    doctor_p = sub.add_parser("doctor", help="Check setup + connectivity")
+    doctor_p.add_argument(
+        "--quick",
+        action="store_true",
+        help="Skip network probes (env-var presence check only)",
+    )
+    doctor_p.set_defaults(func=cmd_doctor)
 
     daemon = sub.add_parser("daemon")
     daemon_sub = daemon.add_subparsers(dest="daemon_cmd", required=True)

@@ -34,10 +34,11 @@ def test_dotenv_loaded_when_doctor_invoked(monkeypatch, tmp_path):
     monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
 
     from redrobin.cli import cmd_doctor
-    # Call positionally — cmd_doctor's parameter is named `_args` (unused),
-    # so a keyword would mismatch. The intent here is verifying dotenv-loaded
-    # secrets reach Settings, not the parameter name.
-    rc = cmd_doctor(type("A", (), {"verbose": False})())
+    # Call positionally — the intent here is verifying dotenv-loaded
+    # secrets reach Settings, not real network connectivity. Use quick=True
+    # so Slice 6's network probes don't try to dial Anthropic/Voyage with
+    # the fake `from-dotenv` value.
+    rc = cmd_doctor(type("A", (), {"verbose": False, "quick": True})())
     assert rc == 0
 
 

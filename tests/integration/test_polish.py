@@ -102,13 +102,20 @@ def test_doctor_exit_code_nonzero_on_failure(monkeypatch, tmp_path):
     monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path / ".redrobin"))
     from redrobin.cli import cmd_doctor
 
-    args = type("A", (), {"verbose": False})()
+    # quick=True keeps Slice 6's network probes off; we only care about
+    # the env-var-presence path returning non-zero here.
+    args = type("A", (), {"verbose": False, "quick": True})()
     rc = cmd_doctor(args)
     assert rc != 0
 
 
 def test_doctor_exit_code_zero_when_all_pass(monkeypatch, tmp_path):
-    """Sanity: all checks green → rc == 0 so a healthy daemon doesn't flag."""
+    """Sanity: all checks green → rc == 0 so a healthy daemon doesn't flag.
+
+    Slice 6: API keys set + --quick → no network probes, so test-key values
+    don't try to hit api.anthropic.com / api.voyageai.com. Real connectivity
+    is exercised via tests/integration/test_doctor_probes.py with MockTransport.
+    """
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("VOYAGE_API_KEY", "test-key")
     root = tmp_path / ".redrobin"
@@ -117,6 +124,6 @@ def test_doctor_exit_code_zero_when_all_pass(monkeypatch, tmp_path):
     monkeypatch.setenv("REDROBIN_ROOT", str(root))
     from redrobin.cli import cmd_doctor
 
-    args = type("A", (), {"verbose": False})()
+    args = type("A", (), {"verbose": False, "quick": True})()
     rc = cmd_doctor(args)
     assert rc == 0
