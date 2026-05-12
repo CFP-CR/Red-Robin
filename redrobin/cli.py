@@ -114,9 +114,20 @@ def cmd_doctor(_args: argparse.Namespace) -> int:
 
 def cmd_daemon_start(args: argparse.Namespace) -> int:
     _load_env_for_cli()
+    # Slice 3 (v0.1.x hardening): --allow-degraded flips REDROBIN_ALLOW_DEGRADED
+    # BEFORE Settings() reads it. Equivalent to exporting REDROBIN_ALLOW_DEGRADED=1
+    # at the shell, but discoverable via `redrobin daemon start --help`.
+    if getattr(args, "allow_degraded", False):
+        os.environ["REDROBIN_ALLOW_DEGRADED"] = "1"
     import uvicorn
 
+    from redrobin.infrastructure.boot_validation import validate_for_boot
+
     settings = Settings()
+    # Validate BEFORE binding the port so missing secrets crash the CLI with
+    # a clear error instead of an apparently-running daemon that swallows
+    # the silent _DegradedLayerB fallback.
+    validate_for_boot(settings, require_root_exists=True)
     pid_path = settings.pid_file
     assert pid_path is not None  # Settings._derive_paths guarantees this
     ensure_layout()
@@ -427,6 +438,15 @@ def build_parser() -> argparse.ArgumentParser:
     daemon_start = daemon_sub.add_parser("start")
     daemon_start.add_argument("--host", default=None)
     daemon_start.add_argument("--port", type=int, default=None)
+    daemon_start.add_argument(
+        "--allow-degraded",
+        action="store_true",
+        dest="allow_degraded",
+        help=(
+            "Allow daemon to start without LLM keys (Layer B disabled). "
+            "Equivalent to REDROBIN_ALLOW_DEGRADED=1."
+        ),
+    )
     daemon_start.set_defaults(func=cmd_daemon_start)
     daemon_sub.add_parser("stop").set_defaults(func=cmd_daemon_stop)
 

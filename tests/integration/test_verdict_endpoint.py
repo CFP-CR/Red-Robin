@@ -11,6 +11,9 @@ def _isolated_root(tmp_path, monkeypatch):
     root = tmp_path / ".redrobin"
     root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("REDROBIN_ROOT", str(root))
+    # Slice 3: opt into degraded Layer B explicitly. This fixture previously
+    # relied on the silent fallback in _build_layer_b when no API keys are set.
+    monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
     # Reset the pipeline cache for test isolation
     from redrobin.application.verdict_pipeline_factory import reset_pipeline_cache
 

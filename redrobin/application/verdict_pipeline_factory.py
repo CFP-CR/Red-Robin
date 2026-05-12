@@ -22,6 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
+from redrobin.application.config import Settings
 from redrobin.application.event_bus import EventBus
 from redrobin.application.kb_service import KBService
 from redrobin.application.layer_a_engine import LayerAEngine
@@ -91,6 +92,14 @@ def _build_layer_b(
     latest summary and inject it as a cached system block. Both are optional
     so callers that don't wire the summariser (older tests, the degraded
     path) keep working unchanged.
+
+    Slice 3 (v0.1.x hardening): the degraded fallback is now gated behind
+    ``settings.allow_degraded_layer_b``. If a ``RuntimeError`` bubbles up from
+    the API clients (missing keys) AND the operator did NOT opt into
+    degraded mode, the error propagates — boot validation should have caught
+    this at daemon start; if we got here, fail loud rather than silently
+    serve PASS-only verdicts. ``Settings()`` is read lazily here so callers
+    don't have to thread it through every callsite.
     """
     try:
         llm = AnthropicClient()
@@ -105,9 +114,13 @@ def _build_layer_b(
             engagement_id_provider=engagement_id_provider,
         )
     except RuntimeError:
-        # API keys missing — fall back to a no-op Layer B so daemon can still serve
-        # Layer A verdicts. Logged at startup; operator sees the banner in TUI.
-        return _DegradedLayerB()
+        # API keys missing. Only degrade if the operator explicitly opted in.
+        # Otherwise re-raise so the failure is loud — boot validation should
+        # have caught this at daemon start, and any test that bypasses boot
+        # validation needs to know it's not getting a real Layer B.
+        if Settings().allow_degraded_layer_b:
+            return _DegradedLayerB()
+        raise
 
 
 @dataclass(frozen=True)

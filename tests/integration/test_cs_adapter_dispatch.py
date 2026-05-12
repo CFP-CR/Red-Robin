@@ -109,6 +109,8 @@ async def test_lifespan_loads_adapters(tmp_path, monkeypatch):
     monkeypatch.setenv(
         "REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json")
     )
+    # Slice 3: opt into degraded Layer B explicitly. No API keys here.
+    monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
 
     from redrobin.api.app import create_app
     # Patch the infrastructure module (not the facade) — the facade re-exports
@@ -143,6 +145,8 @@ async def test_lifespan_starts_clean_without_adapter_dir(tmp_path, monkeypatch):
     monkeypatch.setenv(
         "REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json")
     )
+    # Slice 3: opt into degraded Layer B explicitly. No API keys here.
+    monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
 
     from redrobin.api.app import create_app
 
@@ -171,6 +175,8 @@ async def test_allow_verdict_dispatches_through_adapter(tmp_path, monkeypatch):
     monkeypatch.setenv(
         "REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json")
     )
+    # Slice 3: opt into degraded Layer B explicitly. No API keys here.
+    monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
 
     # Patch the infrastructure module (not the facade) — the facade re-exports
     # the function by reference at import time, but ``build_adapter`` resolves
@@ -251,6 +257,8 @@ async def test_allow_verdict_without_adapter_field_does_not_dispatch(
     monkeypatch.setenv(
         "REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json")
     )
+    # Slice 3: opt into degraded Layer B explicitly. No API keys here.
+    monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
 
     # Patch the infrastructure module (not the facade) — the facade re-exports
     # the function by reference at import time, but ``build_adapter`` resolves

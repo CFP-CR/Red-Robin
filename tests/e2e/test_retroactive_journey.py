@@ -31,6 +31,8 @@ def daemon(tmp_path, monkeypatch):
     monkeypatch.setenv("REDROBIN_EPISODIC_PATH", str(tmp_path / "ep.db"))
     monkeypatch.setenv("REDROBIN_LONGTERM_PATH", str(tmp_path / "lt.db"))
     monkeypatch.setenv("REDROBIN_SUMMARY_PATH", str(tmp_path / "cs.db"))
+    # Slice 3: opt into degraded Layer B explicitly. No API keys here.
+    monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
 
     app = create_app()
     with TestClient(app) as client:

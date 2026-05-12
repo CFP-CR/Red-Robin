@@ -21,7 +21,7 @@ from redrobin.api.auth import require_bearer
 from redrobin.api.events_router import router as events_router
 from redrobin.api.tui_ws import router as tui_ws_router
 from redrobin.api.verdicts_router import router as verdicts_router
-from redrobin.application.config import Settings
+from redrobin.application.config import Settings, validate_for_boot
 from redrobin.application.cs_adapter_lifecycle import build_adapter, load_adapter_configs
 from redrobin.application.engagement_loader import Engagement, EngagementLoader
 from redrobin.application.event_bus import EventBus
@@ -49,6 +49,11 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = Settings()
     app.state.settings = settings
+    # Slice 3 (v0.1.x hardening): fail-fast on missing secrets unless the
+    # operator opted into degraded mode. ``require_root_exists=False`` keeps
+    # TestClient happy — pytest fixtures point REDROBIN_ROOT at a tmp_path
+    # that may not yet exist when the lifespan runs.
+    validate_for_boot(settings)
 
     rules_dir = settings.rules_dir
     assert rules_dir is not None  # Settings._derive_paths guarantees this

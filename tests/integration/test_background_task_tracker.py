@@ -32,6 +32,9 @@ def _setup_env(tmp_path: Path, monkeypatch) -> Path:
     monkeypatch.setenv("REDROBIN_EPISODIC_PATH", str(tmp_path / "ep.db"))
     monkeypatch.setenv("REDROBIN_LONGTERM_PATH", str(tmp_path / "lt.db"))
     monkeypatch.setenv("REDROBIN_SUMMARY_PATH", str(tmp_path / "cs.db"))
+    # Slice 3: opt into degraded Layer B explicitly. This test fixture
+    # previously relied on the silent fallback in _build_layer_b.
+    monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
     return root
 
 
