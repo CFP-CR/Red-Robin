@@ -1,12 +1,17 @@
-"""redrobin/infrastructure/persistence/db.py — SQLAlchemy Core 2.0 metadata + async engine factory.
+"""redrobin/infrastructure/persistence/db.py — SQLAlchemy Core 2.0 metadata.
 
 Per spec §13.3: SQLAlchemy Core (no ORM ceremony for 6-8 simple tables).
-Async engines per database (longterm.db shared, episodic.db per-engagement).
+Tables are registered on the shared :data:`metadata` so Alembic's autogen
+machinery in ``migrations/env.py`` can diff the live schema against the
+declared one.
+
+Note: Slice 12 removed ``make_engine``. The async engine factory lived here
+in v0.0 when ``LessonsRepo`` used SQLAlchemy Core directly; today every
+repo (longterm/episodic/context_summary) drives ``aiosqlite`` directly with
+hand-rolled DDL so the engine factory had no callers.
 """
 
 from __future__ import annotations
-
-from pathlib import Path
 
 from sqlalchemy import (
     Boolean,
@@ -19,7 +24,6 @@ from sqlalchemy import (
     Table,
     Text,
 )
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 metadata = MetaData()
 
@@ -78,9 +82,3 @@ promoted_lessons = Table(
 )
 
 
-def make_engine(db_path: Path | str) -> AsyncEngine:
-    """Construct an async aiosqlite engine for the given path."""
-    path = Path(db_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    url = f"sqlite+aiosqlite:///{path.absolute()}"
-    return create_async_engine(url, future=True)

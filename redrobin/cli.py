@@ -1,4 +1,4 @@
-"""redrobin/cli.py — Operator-facing CLI.
+"""redrobin/cli.py — Operator-facing CLI (argparse + dispatch only).
 
 Commands:
     redrobin init                    — first-run setup
@@ -16,24 +16,23 @@ Commands:
     redrobin kb add <path> [--watch] — register KB source dir
     redrobin memory edit <file>      — open in $EDITOR
     redrobin replay <archive>        — replay archived engagement
+
+Slice 12 of v0.1.x hardening decomposed every ``cmd_*`` body into
+``redrobin/cli_helpers/<name>.py``; this module is now argparse + dispatch
+only (≤400 LOC). Each ``cmd_<name>`` wrapper:
+
+  1. Calls :func:`_load_env_for_cli` (anchored ``.env`` load).
+  2. Resolves any plain-string args from the argparse ``Namespace``.
+  3. Delegates to ``run_<name>(...)`` in the matching helper module.
 """
 
 from __future__ import annotations
 
 import argparse
-import os
-import subprocess
 import sys
-import time
 from pathlib import Path
 
 from dotenv import load_dotenv
-
-from redrobin.application.engagement_service import EngagementError, EngagementService
-from redrobin.application.transport_auth import get_or_create_token
-from redrobin.cli_helpers.daemon_pidfile import PidFile, is_pid_alive, read_pid
-from redrobin.infrastructure.config import Settings
-from redrobin.infrastructure.filesystem import ensure_layout, redrobin_root
 
 
 def _load_env_for_cli() -> None:
@@ -51,7 +50,10 @@ def _load_env_for_cli() -> None:
 
 def cmd_init(args: argparse.Namespace) -> int:
     _load_env_for_cli()
+    from redrobin.application.transport_auth import get_or_create_token
     from redrobin.cli_helpers.init_cmd import run_init
+    from redrobin.infrastructure.config import Settings
+    from redrobin.infrastructure.filesystem import ensure_layout
 
     settings = Settings()
     root = Path(args.root) if args.root else settings.root
@@ -74,416 +76,119 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
-    """Preflight check; exits non-zero when any required check fails.
-
-    Slice 6 (v0.1.x hardening): doctor now runs REAL connectivity probes
-    against the Anthropic API, Voyage API, and any configured CS adapter
-    so the operator catches network/credential failures during preflight
-    instead of at first dispatch. ``--quick`` skips network probes for
-    fast CI smoke tests; the env-var presence checks always run.
-    """
-    import asyncio
-
-    from redrobin.cli_helpers.doctor_probes import (
-        probe_anthropic,
-        probe_voyage,
-        probe_cs_adapter,
-    )
-    from redrobin.infrastructure.cs_adapter_loader import load_adapter_configs
-
     _load_env_for_cli()
-    settings = Settings()
-    failures: list[str] = []
-    print("[*] Red Robin doctor (preflight check)")
-    print("Configuration:")
-    print(f"  ROOT:               {settings.root}")
-    print(f"  ENGAGEMENT:         {settings.engagement_slug or '(none)'}")
+    from redrobin.cli_helpers.doctor_cmd import run_doctor
+    from redrobin.infrastructure.config import Settings
 
-    # ANTHROPIC_API_KEY
-    if settings.anthropic_api_key:
-        print("  ANTHROPIC_API_KEY:  set")
-    else:
-        print("  ANTHROPIC_API_KEY:  MISSING - Layer B will degrade to no-op")
-        failures.append("ANTHROPIC_API_KEY not set")
-
-    # VOYAGE_API_KEY
-    if settings.voyage_api_key:
-        print("  VOYAGE_API_KEY:     set")
-    else:
-        print("  VOYAGE_API_KEY:     MISSING - KB retrieval will be empty")
-        failures.append("VOYAGE_API_KEY not set")
-
-    # ~/.redrobin/ layout
-    root = redrobin_root()
-    if root.exists():
-        print(f"  ROOT_EXISTS:        yes ({root})")
-    else:
-        print("  ROOT_EXISTS:        NO - run `redrobin init`")
-        failures.append(f"{root} not initialized")
-
-    # rules dir — informational only; the daemon creates it on first start.
-    rules_dir = root / "rules"
-    if rules_dir.exists():
-        rule_count = sum(1 for _ in rules_dir.rglob("*.yaml"))
-        print(f"  RULES:              {rule_count} loaded")
-    else:
-        print("  RULES:              (will be created on first daemon start)")
-
-    # --quick: env-var presence check only, skip network.
-    if getattr(args, "quick", False):
-        if failures:
-            print("[+] Doctor finished: DEGRADED (quick mode - skipped network probes)")
-            return 1
-        print("[+] Doctor finished: OK (quick mode - skipped network probes)")
-        return 0
-
-    async def run_probes() -> list:
-        results = []
-        if settings.anthropic_api_key:
-            results.append(await probe_anthropic(api_key=settings.anthropic_api_key))
-        if settings.voyage_api_key:
-            results.append(await probe_voyage(api_key=settings.voyage_api_key))
-        if settings.adapters_dir is not None and settings.adapters_dir.is_dir():
-            for cfg in load_adapter_configs(settings.adapters_dir):
-                results.append(
-                    await probe_cs_adapter(
-                        teamserver_url=cfg.teamserver_url,
-                        operator_user=cfg.operator_user,
-                        operator_password=cfg.operator_password,
-                        verify_ssl=cfg.verify_ssl,
-                    )
-                )
-        return results
-
-    results = asyncio.run(run_probes())
-    if results:
-        print("\nConnectivity:")
-        for r in results:
-            status = "OK " if r.ok else "FAIL"
-            reason = f"  {r.reason}" if r.reason else ""
-            print(f"  [{status}] {r.name:30s} {r.latency_ms:6.0f}ms{reason}")
-            if not r.ok:
-                failures.append(f"{r.name}: {r.reason}")
-
-    if failures:
-        print("[+] Doctor finished: DEGRADED (Layer A still works)")
-        return 1
-    print("[+] Doctor finished: OK")
-    return 0
+    return run_doctor(settings=Settings(), quick=bool(getattr(args, "quick", False)))
 
 
 def cmd_daemon_start(args: argparse.Namespace) -> int:
     _load_env_for_cli()
-    # Slice 3 (v0.1.x hardening): --allow-degraded flips REDROBIN_ALLOW_DEGRADED
-    # BEFORE Settings() reads it. Equivalent to exporting REDROBIN_ALLOW_DEGRADED=1
-    # at the shell, but discoverable via `redrobin daemon start --help`.
-    if getattr(args, "allow_degraded", False):
-        os.environ["REDROBIN_ALLOW_DEGRADED"] = "1"
-    import uvicorn
+    from redrobin.cli_helpers.daemon_cmd import run_daemon_start
 
-    from redrobin.infrastructure.boot_validation import validate_for_boot
-
-    settings = Settings()
-    # Validate BEFORE binding the port so missing secrets crash the CLI with
-    # a clear error instead of an apparently-running daemon that swallows
-    # the silent _DegradedLayerB fallback.
-    validate_for_boot(settings, require_root_exists=True)
-    pid_path = settings.pid_file
-    assert pid_path is not None  # Settings._derive_paths guarantees this
-    ensure_layout()
-    get_or_create_token()
-    host = args.host or "127.0.0.1"
-    port = args.port or 7777
-    print(f"[*] Starting Red Robin daemon on {host}:{port}")
-    with PidFile(pid_path):
-        uvicorn.run(
-            "redrobin.api.app:create_app",
-            host=host,
-            port=port,
-            factory=True,
-            log_level="info",
-        )
-    return 0
+    return run_daemon_start(
+        host=args.host,
+        port=args.port,
+        allow_degraded=bool(getattr(args, "allow_degraded", False)),
+    )
 
 
 def cmd_daemon_stop(_args: argparse.Namespace) -> int:
     _load_env_for_cli()
-    settings = Settings()
-    pid_path = settings.pid_file
-    assert pid_path is not None  # Settings._derive_paths guarantees this
-    pid = read_pid(pid_path)
-    if pid is None:
-        print("no daemon running (no PID file)")
-        return 0
-    if not is_pid_alive(pid):
-        print(f"PID file references dead process {pid}; removing")
-        pid_path.unlink(missing_ok=True)
-        return 0
-    if sys.platform == "win32":
-        import ctypes
+    from redrobin.cli_helpers.daemon_cmd import run_daemon_stop
 
-        kernel32 = ctypes.windll.kernel32
-        PROCESS_TERMINATE = 0x0001
-        handle = kernel32.OpenProcess(PROCESS_TERMINATE, False, pid)
-        if not handle:
-            print(f"failed to open process {pid}")
-            return 1
-        try:
-            kernel32.TerminateProcess(handle, 0)
-        finally:
-            kernel32.CloseHandle(handle)
-        deadline = time.time() + 10
-        while is_pid_alive(pid) and time.time() < deadline:
-            time.sleep(0.1)
-    else:
-        import signal
-
-        os.kill(pid, signal.SIGTERM)
-        deadline = time.time() + 10
-        while is_pid_alive(pid) and time.time() < deadline:
-            time.sleep(0.1)
-    pid_path.unlink(missing_ok=True)
-    print(f"daemon stopped (pid={pid})")
-    return 0
+    return run_daemon_stop()
 
 
 def cmd_tui(args: argparse.Namespace) -> int:
     _load_env_for_cli()
-    from redrobin.tui.app import run_tui
+    from redrobin.cli_helpers.tui_cmd import resolve_token, run_tui
 
-    # Default token = the locally-stored operator token. ``redrobin tui`` with
-    # no --token flag should Just Work against the local daemon.
-    token = args.token
-    if token is None:
-        try:
-            token = get_or_create_token()
-        except Exception:
-            token = None
-
-    run_tui(
+    return run_tui(
         connect_ws=args.connect_ws,
         connect_http=args.connect_http,
-        token=token,
+        token=resolve_token(args.token),
     )
-    return 0
-
-
-def _engagement_service() -> EngagementService:
-    ensure_layout()
-    return EngagementService()
 
 
 def cmd_engagement_new(args: argparse.Namespace) -> int:
     _load_env_for_cli()
-    svc = _engagement_service()
-    try:
-        eng = svc.new(args.slug, client=args.client or "")
-    except EngagementError as e:
-        print(f"[!] {e}", file=sys.stderr)
-        return 1
-    print(f"[+] Created engagement {eng.id}")
-    print(f"[+] Edit {redrobin_root()}/engagements/{eng.id}/engagement.yaml")
-    return 0
+    from redrobin.cli_helpers.engagement_cmd import make_service, run_new
+
+    return run_new(svc=make_service(), slug=args.slug, client=args.client)
 
 
 def cmd_engagement_use(args: argparse.Namespace) -> int:
     _load_env_for_cli()
-    svc = _engagement_service()
-    try:
-        svc.use(args.slug)
-    except EngagementError as e:
-        print(f"[!] {e}", file=sys.stderr)
-        return 1
-    print(f"[+] Active engagement: {args.slug}")
-    return 0
+    from redrobin.cli_helpers.engagement_cmd import make_service, run_use
+
+    return run_use(svc=make_service(), slug=args.slug)
 
 
 def cmd_engagement_list(_args: argparse.Namespace) -> int:
     _load_env_for_cli()
-    svc = _engagement_service()
-    items = svc.list_all()
-    if not items:
-        print("(no engagements)")
-        return 0
-    for slug in items:
-        marker = " (active)" if slug == svc.current() else ""
-        print(f"  {slug}{marker}")
-    return 0
+    from redrobin.cli_helpers.engagement_cmd import make_service, run_list
+
+    return run_list(svc=make_service())
 
 
 def cmd_engagement_current(_args: argparse.Namespace) -> int:
     _load_env_for_cli()
-    svc = _engagement_service()
-    active = svc.current()
-    if active is None:
-        print("(no active engagement)")
-        return 1
-    print(active)
-    return 0
+    from redrobin.cli_helpers.engagement_cmd import make_service, run_current
+
+    return run_current(svc=make_service())
 
 
 def cmd_engagement_close(args: argparse.Namespace) -> int:
     _load_env_for_cli()
-    svc = _engagement_service()
-    try:
-        svc.close(args.slug)
-    except EngagementError as e:
-        print(f"[!] {e}", file=sys.stderr)
-        return 1
-    print(f"[+] Closed engagement {args.slug or '(active)'}")
-    return 0
+    from redrobin.cli_helpers.engagement_cmd import make_service, run_close
+
+    return run_close(svc=make_service(), slug=args.slug)
 
 
 def cmd_engagement_archive(args: argparse.Namespace) -> int:
     _load_env_for_cli()
-    svc = _engagement_service()
-    try:
-        tarball = svc.archive(args.slug)
-    except EngagementError as e:
-        print(f"[!] {e}", file=sys.stderr)
-        return 1
-    print(f"[+] Archived to {tarball}")
-    return 0
+    from redrobin.cli_helpers.engagement_cmd import make_service, run_archive
+
+    return run_archive(svc=make_service(), slug=args.slug)
 
 
 def cmd_engagement_delete(args: argparse.Namespace) -> int:
     _load_env_for_cli()
-    if not args.confirm:
-        print(f"[!] Refusing to delete {args.slug} without --confirm")
-        return 2
-    svc = _engagement_service()
-    try:
-        svc.delete(args.slug)
-    except EngagementError as e:
-        print(f"[!] {e}", file=sys.stderr)
-        return 1
-    print(f"[+] Deleted engagement {args.slug}")
-    return 0
+    from redrobin.cli_helpers.engagement_cmd import make_service, run_delete
+
+    return run_delete(svc=make_service(), slug=args.slug, confirm=bool(args.confirm))
 
 
 def cmd_kb_add(args: argparse.Namespace) -> int:
     _load_env_for_cli()
-    import asyncio
-    from typing import Any
+    from redrobin.cli_helpers.kb_add_cmd import run_kb_add
 
-    from redrobin.cli_helpers.kb_ingest import ingest_file
-    from redrobin.infrastructure.llm.voyage_client import VoyageClient
-    from redrobin.infrastructure.vector_store import VectorStore
-
-    path = Path(args.path).expanduser().resolve()
-    if not path.exists():
-        print(f"[!] {path} does not exist", file=sys.stderr)
-        return 1
-    if not path.is_file():
-        print(f"[!] {path} is not a regular file (kb add expects a single file)", file=sys.stderr)
-        return 1
-
-    ensure_layout()
-    kb_index_path = redrobin_root() / "shared" / "kb-index" / "index.npz"
-    store = VectorStore.load(kb_index_path) if kb_index_path.exists() else VectorStore()
-
-    class _VoyageAdapter:
-        def __init__(self) -> None:
-            self._client = VoyageClient()
-
-        async def embed_documents(self, texts: list[str]) -> list[list[float]]:
-            result = await self._client.embed_documents(texts)
-            return list(result.vectors)
-
-    class _StoreAdapter:
-        def __init__(self, vs: VectorStore) -> None:
-            self._vs = vs
-
-        async def upsert(
-            self,
-            *,
-            doc_id: str,
-            chunk_id: str,
-            text: str,
-            vector: list[float],
-            metadata: dict[str, Any],
-        ) -> None:
-            self._vs.add(
-                ids=[chunk_id],
-                texts=[text],
-                vectors=[vector],
-                metadatas=[metadata],
-            )
-
-    tags: list[str] = list(args.tag or [])
-    print(f"[*] KB indexing {path} (tags={tags})")
-
-    try:
-        embedder = _VoyageAdapter()
-    except RuntimeError as e:
-        print(f"[!] {e}", file=sys.stderr)
-        print("[!] VOYAGE_API_KEY must be set to index KB content", file=sys.stderr)
-        return 1
-
-    n = asyncio.run(
-        ingest_file(
-            path=path,
-            tags=tags,
-            embedder=embedder,
-            store=_StoreAdapter(store),
-            chunk_size=args.chunk_size,
-            chunk_overlap=args.chunk_overlap,
-        )
+    return run_kb_add(
+        path=Path(args.path).expanduser().resolve(),
+        tags=list(args.tag or []),
+        chunk_size=args.chunk_size,
+        chunk_overlap=args.chunk_overlap,
     )
-    store.save(kb_index_path)
-    print(f"[+] Indexed {n} chunk(s) into {kb_index_path}")
-    return 0
 
 
 def cmd_memory_edit(args: argparse.Namespace) -> int:
     _load_env_for_cli()
-    target = Path(args.file).expanduser().resolve()
-    if not target.exists():
-        print(f"[!] {target} does not exist", file=sys.stderr)
-        return 1
-    editor = os.environ.get("EDITOR") or ("notepad" if os.name == "nt" else "vi")
-    subprocess.call([editor, str(target)])
-    return 0
+    from redrobin.cli_helpers.memory_cmd import run_memory_edit
+
+    return run_memory_edit(target=Path(args.file).expanduser().resolve())
 
 
 def cmd_replay(args: argparse.Namespace) -> int:
     _load_env_for_cli()
-    import asyncio
+    from redrobin.cli_helpers.replay_cmd import resolve_token, run_replay
 
-    import httpx
-
-    from redrobin.cli_helpers.replay import replay_to_daemon
-
-    archive = Path(args.archive).expanduser().resolve()
-    if not archive.exists():
-        print(f"[!] {archive} does not exist", file=sys.stderr)
-        return 1
-    if not archive.is_file():
-        print(f"[!] {archive} is not a regular file", file=sys.stderr)
-        return 1
-
-    token: str | None = args.token
-    if token is None:
-        try:
-            token = get_or_create_token()
-        except Exception:
-            token = None
-
-    base_url = args.base_url
-
-    async def _run() -> int:
-        async with httpx.AsyncClient() as client:
-            return await replay_to_daemon(
-                file=archive, client=client, base_url=base_url, token=token
-            )
-
-    try:
-        n = asyncio.run(_run())
-    except httpx.HTTPError as e:
-        print(f"[!] replay failed: {e}", file=sys.stderr)
-        return 1
-    print(f"[+] Replayed {n} event(s) to {base_url}")
-    return 0
+    return run_replay(
+        archive=Path(args.archive).expanduser().resolve(),
+        base_url=args.base_url,
+        token=resolve_token(args.token),
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:

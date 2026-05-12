@@ -1,11 +1,17 @@
 """redrobin/domain/memory.py — Memory schemas per spec §4 Componente 3.
 
 5 memory layers:
-  L1 Long-term:    Fact (durable, cross-engagement)
+  L1 Long-term:    PromotedLesson (durable, cross-engagement, structured)
   L2 Working:      WorkingMemory (hosts, accounts, defenses, tools, kill_chain) — per-engagement JSON
-  L3 Episodic:     Lesson (engagement-specific) — SQLite
+  L3 Episodic:     Episode (raw verdict log, per-engagement) — SQLite
   L4 Tradecraft:   technique → bypass → detection graph — SQLite (deferred to v0.2 in v0.1)
-  L5 Context:      sliding-window summary — in-memory + summary.txt
+  L5 Context:      sliding-window ContextSummary — in-memory + summary.txt
+
+Slice 12 removed the never-used ``Lesson`` (free-form L3 episodic record) and
+``Fact`` (free-form L1 long-term record) dataclasses. The promotion path
+described in spec §4 always emits structured ``PromotedLesson`` rows in v0.1;
+free-form variants will return in v0.2 if/when the LessonPromoter grows a
+free-text branch.
 """
 
 from __future__ import annotations
@@ -114,29 +120,6 @@ class WorkingMemory:
     credentials: list[Credential] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
     sessions: list[Session] = field(default_factory=list)
-
-
-@dataclass(frozen=True)
-class Lesson:
-    """Episodic memory record — engagement-specific learning."""
-
-    id: int | None  # None until persisted
-    engagement_id: str
-    text: str
-    source: str  # "operator-tagged" | "auto-detected"
-    created_at: datetime
-    promoted_to_longterm: bool = False
-
-
-@dataclass(frozen=True)
-class Fact:
-    """Long-term durable cross-engagement fact."""
-
-    id: int | None  # None until persisted
-    text: str
-    source_engagement_id: str | None
-    created_at: datetime
-    embedding: list[float] | None = None
 
 
 @dataclass(frozen=True)
