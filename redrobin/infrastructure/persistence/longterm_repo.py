@@ -1,15 +1,12 @@
-"""redrobin/infrastructure/persistence/longterm_repo.py — Cross-engagement durable store.
+"""redrobin/infrastructure/persistence/longterm_repo.py — Cross-engagement durable store (L1).
 
-Phase 1 shipped this repo as an async SQLAlchemy facade over the ``facts``
-table (L1 long-term per spec §4). Slice 10 adds a parallel sync API over a
-new ``promoted_lessons`` table that the ``LessonPromoter`` writes into when
-a ``(command, verdict)`` pattern recurs at or above threshold. Storing
-promoted lessons here makes them retrievable from L1 alongside ``Fact`` rows
-for future LLM judgments.
+Single-mode store backed by a filesystem ``Path`` and a sync ``sqlite3``
+connection. Persists structured ``PromotedLesson`` records keyed by
+``(command, verdict)`` so future LLM judgments can retrieve them from L1.
 
-Both APIs share the same database file when the repo is built from a
-``Path``. Phase 1 callers using an ``AsyncEngine`` constructor see only the
-original ``add``/``list_all`` methods (unchanged).
+Phase 1's async SQLAlchemy API (``add``/``list_all`` over the ``facts``
+table) was removed in Slice 9 — production never used it; the lesson
+promoter and Layer B retrieval only call the sync API below.
 """
 
 from __future__ import annotations
@@ -18,11 +15,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import insert, select
-from sqlalchemy.ext.asyncio import AsyncEngine
-
-from redrobin.domain.memory import Fact, PromotedLesson
-from redrobin.infrastructure.persistence.db import facts
+from redrobin.domain.memory import PromotedLesson
 
 
 _SCHEMA_SQL = """
@@ -59,23 +52,14 @@ def _parse_iso(value: str | datetime) -> datetime:
 class LongtermRepo:
     """L1 Long-term store — facts (curated) + promoted lessons (pattern records)."""
 
-    def __init__(self, engine_or_path: AsyncEngine | Path | str):
-        if isinstance(engine_or_path, AsyncEngine):
-            self._engine: AsyncEngine | None = engine_or_path
-            self._path: Path | None = None
-        else:
-            self._engine = None
-            self._path = Path(engine_or_path)
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._ensure_schema()
+    def __init__(self, path: Path) -> None:
+        self._path = Path(path)
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._ensure_schema()
 
-    # --- Sync sqlite3 helpers (Slice 10) -------------------------------- #
+    # --- Sync sqlite3 helpers ------------------------------------------- #
 
     def _connect(self) -> sqlite3.Connection:
-        if self._path is None:
-            raise RuntimeError(
-                "sync LongtermRepo methods require a Path-based constructor"
-            )
         # ISO timestamp strings handled in code — bypasses the deprecated
         # default sqlite3 datetime adapter on Python 3.12+.
         conn = sqlite3.connect(self._path)
@@ -172,54 +156,3 @@ class LongtermRepo:
             )
             for row in rows
         ]
-
-    # --- Original async SQLAlchemy API (Phase 1) ------------------------ #
-
-    async def add(
-        self,
-        *,
-        text: str,
-        source_engagement_id: str | None = None,
-        created_at: datetime | None = None,
-        embedding: bytes | None = None,
-    ) -> Fact:
-        if self._engine is None:
-            raise RuntimeError(
-                "async LongtermRepo.add requires an AsyncEngine constructor"
-            )
-        ts = created_at or datetime.now()
-        async with self._engine.begin() as conn:
-            result = await conn.execute(
-                insert(facts).values(
-                    text=text,
-                    source_engagement_id=source_engagement_id,
-                    created_at=ts,
-                    embedding=embedding,
-                )
-            )
-        fact_id = result.inserted_primary_key[0]
-        return Fact(
-            id=fact_id,
-            text=text,
-            source_engagement_id=source_engagement_id,
-            created_at=ts,
-            embedding=None,  # not deserialized back to floats here; that's the vector store's job
-        )
-
-    async def list_all(self) -> list[Fact]:
-        if self._engine is None:
-            raise RuntimeError(
-                "async LongtermRepo.list_all requires an AsyncEngine constructor"
-            )
-        async with self._engine.begin() as conn:
-            result = await conn.execute(select(facts))
-            return [
-                Fact(
-                    id=row.id,
-                    text=row.text,
-                    source_engagement_id=row.source_engagement_id,
-                    created_at=row.created_at,
-                    embedding=None,
-                )
-                for row in result.fetchall()
-            ]

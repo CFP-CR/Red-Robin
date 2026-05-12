@@ -1,90 +1,74 @@
-"""SQLAlchemy Core + aiosqlite — episodic + longterm repos."""
+"""Persistence unit tests — sync sqlite3 API for EpisodicRepo + LongtermRepo.
 
-import pytest
-import pytest_asyncio
+The original async SQLAlchemy API was removed in Slice 9 of the v0.1.x
+hardening pass (single-mode repos). Tests below exercise the surviving
+sync surface: ``EpisodicRepo.record`` / ``list_episodes_for_engagement``
+and ``LongtermRepo.upsert_lesson`` / ``list_lessons``.
+"""
 
-from redrobin.infrastructure.persistence.db import make_engine, metadata
+from __future__ import annotations
+
+from datetime import datetime
+
+from redrobin.domain.memory import PromotedLesson
 from redrobin.infrastructure.persistence.episodic_repo import EpisodicRepo
 from redrobin.infrastructure.persistence.longterm_repo import LongtermRepo
 
 
-@pytest_asyncio.fixture
-async def episodic_engine(tmp_path):
-    engine = make_engine(tmp_path / "episodic.db")
-    async with engine.begin() as conn:
-        await conn.run_sync(metadata.create_all)
-    yield engine
-    await engine.dispose()
-
-
-@pytest_asyncio.fixture
-async def longterm_engine(tmp_path):
-    engine = make_engine(tmp_path / "longterm.db")
-    async with engine.begin() as conn:
-        await conn.run_sync(metadata.create_all)
-    yield engine
-    await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_episodic_add_and_list(episodic_engine):
-    repo = EpisodicRepo(episodic_engine)
-    lesson = await repo.add(
+def test_episodic_record_and_list(tmp_path) -> None:
+    repo = EpisodicRepo(tmp_path / "episodic.db")
+    episode = repo.record(
         engagement_id="acme-q2",
-        text="nanodump invisible to Falcon on Win 2022",
-        source="auto-detected",
+        correlation_id="corr-1",
+        command="whoami",
+        verdict="BLOCK",
+        reason="opsec policy",
+    )
+    assert episode.id is not None
+    assert episode.engagement_id == "acme-q2"
+    assert episode.verdict == "BLOCK"
+
+    episodes = repo.list_episodes_for_engagement("acme-q2")
+    assert len(episodes) == 1
+    assert episodes[0].command == "whoami"
+
+
+def test_episodic_isolates_per_engagement(tmp_path) -> None:
+    repo = EpisodicRepo(tmp_path / "episodic.db")
+    repo.record(
+        engagement_id="acme-q2",
+        correlation_id="c1",
+        command="nanodump",
+        verdict="WARN",
+    )
+    repo.record(
+        engagement_id="globex-q3",
+        correlation_id="c2",
+        command="rubeus",
+        verdict="BLOCK",
+    )
+
+    acme = repo.list_episodes_for_engagement("acme-q2")
+    globex = repo.list_episodes_for_engagement("globex-q3")
+    assert {ep.command for ep in acme} == {"nanodump"}
+    assert {ep.command for ep in globex} == {"rubeus"}
+
+
+def test_longterm_upsert_and_list(tmp_path) -> None:
+    repo = LongtermRepo(tmp_path / "longterm.db")
+    lesson = repo.upsert_lesson(
+        PromotedLesson(
+            id=None,
+            command="nanodump.bof",
+            verdict="BLOCK",
+            summary="nanodump blocked by Falcon",
+            occurrence_count=3,
+            created_at=datetime.now(),
+        )
     )
     assert lesson.id is not None
-    assert lesson.engagement_id == "acme-q2"
-    assert lesson.promoted_to_longterm is False
 
-    lessons = await repo.list_for_engagement("acme-q2")
-    assert len(lessons) == 1
-    assert lessons[0].text == "nanodump invisible to Falcon on Win 2022"
-
-
-@pytest.mark.asyncio
-async def test_episodic_isolates_per_engagement(episodic_engine):
-    repo = EpisodicRepo(episodic_engine)
-    await repo.add(engagement_id="acme-q2", text="lesson A")
-    await repo.add(engagement_id="globex-q3", text="lesson B")
-
-    acme = await repo.list_for_engagement("acme-q2")
-    globex = await repo.list_for_engagement("globex-q3")
-    assert {lesson.text for lesson in acme} == {"lesson A"}
-    assert {lesson.text for lesson in globex} == {"lesson B"}
-
-
-@pytest.mark.asyncio
-async def test_episodic_mark_promoted(episodic_engine):
-    repo = EpisodicRepo(episodic_engine)
-    lesson = await repo.add(engagement_id="acme-q2", text="x")
-    await repo.mark_promoted(lesson.id)
-    refreshed = await repo.list_for_engagement("acme-q2")
-    assert refreshed[0].promoted_to_longterm is True
-
-
-@pytest.mark.asyncio
-async def test_longterm_add_and_list(longterm_engine):
-    repo = LongtermRepo(longterm_engine)
-    fact = await repo.add(
-        text="nanodump bypasses Falcon",
-        source_engagement_id="acme-q2",
-    )
-    assert fact.id is not None
-
-    all_facts = await repo.list_all()
-    assert len(all_facts) == 1
-    assert all_facts[0].source_engagement_id == "acme-q2"
-
-
-@pytest.mark.asyncio
-async def test_longterm_stores_embedding_bytes(longterm_engine):
-    repo = LongtermRepo(longterm_engine)
-    embedding_bytes = b"\x00\x01\x02\x03" * 256  # mock embedding
-    fact = await repo.add(
-        text="x",
-        source_engagement_id=None,
-        embedding=embedding_bytes,
-    )
-    assert fact.id is not None
+    all_lessons = repo.list_lessons()
+    assert len(all_lessons) == 1
+    assert all_lessons[0].command == "nanodump.bof"
+    assert all_lessons[0].occurrence_count == 3

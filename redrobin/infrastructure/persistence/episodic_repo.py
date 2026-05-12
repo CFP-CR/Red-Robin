@@ -1,21 +1,19 @@
-"""redrobin/infrastructure/persistence/episodic_repo.py — Engagement-specific lessons + raw episodes.
+"""redrobin/infrastructure/persistence/episodic_repo.py — Engagement-specific episodes (L3).
 
-Phase 1 shipped this repo as an async SQLAlchemy facade over the ``lessons``
-table (L3 Episodic per spec §4). Slice 10 adds:
+Single-mode store backed by a filesystem ``Path`` and a sync ``sqlite3``
+connection opened lazily per call. Provisions the ``lessons`` and
+``episodes`` tables on first use so the synchronous reducer dispatch can
+append episodes without an event-loop hop per event.
 
-* A second constructor that accepts a filesystem ``Path``. When constructed
-  from a path the repo opens a sync ``sqlite3`` connection lazily per call
-  and provisions both the ``lessons`` and new ``episodes`` tables on first
-  use, so the synchronous reducer dispatch can append episodes without an
-  event-loop hop per event.
-* ``record(...)``/``list_episodes_for_engagement(...)`` — sync writes that
-  capture every ``opsec.verdict`` event into the raw episode log. The
-  ``LessonPromoter`` aggregates these into structured ``PromotedLesson``
-  records stored in ``LongtermRepo``.
+``record(...)``/``list_episodes_for_engagement(...)`` capture every
+``opsec.verdict`` event into the raw episode log. The ``LessonPromoter``
+aggregates these into structured ``PromotedLesson`` records stored in
+:class:`LongtermRepo`.
 
-The original async API (``add``/``list_for_engagement``/``mark_promoted``) is
-preserved for callers built on the SQLAlchemy ``AsyncEngine`` path — those
-tests continue to pass unchanged.
+Phase 1's async SQLAlchemy API (``add``/``list_for_engagement``/
+``mark_promoted``) was removed in Slice 9 — the production reducer →
+promoter → summarizer → Layer B flow only ever used the sync API, and no
+production caller referenced the async branch.
 """
 
 from __future__ import annotations
@@ -24,11 +22,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from sqlalchemy import insert, select, update
-from sqlalchemy.ext.asyncio import AsyncEngine
-
-from redrobin.domain.memory import Episode, Lesson
-from redrobin.infrastructure.persistence.db import lessons
+from redrobin.domain.memory import Episode
 
 
 _SCHEMA_SQL = """
@@ -70,24 +64,14 @@ def _parse_iso(value: str | datetime) -> datetime:
 class EpisodicRepo:
     """L3 Episodic store — lessons (curated) + episodes (raw verdict log)."""
 
-    def __init__(self, engine_or_path: AsyncEngine | Path | str):
-        # Two modes: AsyncEngine (Phase 1) or filesystem Path (Slice 10 sync).
-        if isinstance(engine_or_path, AsyncEngine):
-            self._engine: AsyncEngine | None = engine_or_path
-            self._path: Path | None = None
-        else:
-            self._engine = None
-            self._path = Path(engine_or_path)
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._ensure_schema()
+    def __init__(self, path: Path) -> None:
+        self._path = Path(path)
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._ensure_schema()
 
-    # --- Sync sqlite3 helpers (Slice 10) -------------------------------- #
+    # --- Sync sqlite3 helpers ------------------------------------------- #
 
     def _connect(self) -> sqlite3.Connection:
-        if self._path is None:
-            raise RuntimeError(
-                "sync EpisodicRepo methods require a Path-based constructor"
-            )
         # No PARSE_DECLTYPES: we serialise timestamps as ISO strings ourselves
         # to dodge the deprecated default datetime adapter on Python 3.12+.
         conn = sqlite3.connect(self._path)
@@ -147,70 +131,3 @@ class EpisodicRepo:
             )
             for row in rows
         ]
-
-    # --- Original async SQLAlchemy API (Phase 1) ------------------------ #
-
-    async def add(
-        self,
-        *,
-        engagement_id: str,
-        text: str,
-        source: str = "auto-detected",
-        created_at: datetime | None = None,
-    ) -> Lesson:
-        if self._engine is None:
-            raise RuntimeError(
-                "async EpisodicRepo.add requires an AsyncEngine constructor"
-            )
-        ts = created_at or datetime.now()
-        async with self._engine.begin() as conn:
-            result = await conn.execute(
-                insert(lessons).values(
-                    engagement_id=engagement_id,
-                    text=text,
-                    source=source,
-                    created_at=ts,
-                    promoted_to_longterm=False,
-                )
-            )
-        lesson_id = result.inserted_primary_key[0]
-        return Lesson(
-            id=lesson_id,
-            engagement_id=engagement_id,
-            text=text,
-            source=source,
-            created_at=ts,
-            promoted_to_longterm=False,
-        )
-
-    async def list_for_engagement(self, engagement_id: str) -> list[Lesson]:
-        if self._engine is None:
-            raise RuntimeError(
-                "async EpisodicRepo.list_for_engagement requires an AsyncEngine "
-                "constructor"
-            )
-        async with self._engine.begin() as conn:
-            result = await conn.execute(
-                select(lessons).where(lessons.c.engagement_id == engagement_id)
-            )
-            return [
-                Lesson(
-                    id=row.id,
-                    engagement_id=row.engagement_id,
-                    text=row.text,
-                    source=row.source,
-                    created_at=row.created_at,
-                    promoted_to_longterm=row.promoted_to_longterm,
-                )
-                for row in result.fetchall()
-            ]
-
-    async def mark_promoted(self, lesson_id: int) -> None:
-        if self._engine is None:
-            raise RuntimeError(
-                "async EpisodicRepo.mark_promoted requires an AsyncEngine constructor"
-            )
-        async with self._engine.begin() as conn:
-            await conn.execute(
-                update(lessons).where(lessons.c.id == lesson_id).values(promoted_to_longterm=True)
-            )
