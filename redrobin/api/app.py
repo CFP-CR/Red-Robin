@@ -11,7 +11,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import sys
 from contextlib import asynccontextmanager
+from importlib.metadata import PackageNotFoundError, version as _pkg_version
 from typing import Any, AsyncIterator, Coroutine
 
 from fastapi import Depends, FastAPI, Request
@@ -34,6 +36,7 @@ from redrobin.application.longterm_lifecycle import (
 )
 from redrobin.application.rules_lifecycle import RulesLoader
 from redrobin.application.scope_enforcer import ScopeEnforcer
+from redrobin.application.startup_banner import format_banner
 from redrobin.application.summarizer import L5Summarizer
 from redrobin.application.verdict_pipeline_factory import (
     build_default_dependencies,
@@ -298,6 +301,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         promoter_interval,
         summarizer_interval,
     )
+
+    # Slice 7 (v0.1.x hardening): structured startup banner. Surfaces the
+    # resolved config (engagement, rules, adapters, secret key set/missing,
+    # L5/promoter tuning) at boot so operators can diagnose "why is it doing
+    # X" without diving into logs. Emitted to stderr so the daemon's stdout
+    # remains available for structured JSON output. Secret VALUES never
+    # appear — only the literal strings ``set`` / ``MISSING (degraded)``.
+    try:
+        _version = _pkg_version("redrobin")
+    except PackageNotFoundError:
+        _version = "0.0.0+unknown"
+    _banner = format_banner(
+        settings=settings,
+        rules_count=len(app.state.rules_loader.list_rules()),
+        engagement_name=(
+            app.state.engagement.name if app.state.engagement is not None else None
+        ),
+        version=_version,
+        adapter_names=list(app.state.cs_adapters.keys()),
+    )
+    print(_banner, file=sys.stderr, flush=True)
 
     try:
         yield
