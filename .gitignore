@@ -40,5 +40,9 @@ Thumbs.db
 .env
 .env.local
 
+# Adapter YAMLs hold CS team-server creds; only commit example templates.
+adapters/cobaltstrike/*.yaml
+!adapters/cobaltstrike/*.example.yaml
+
 # Stray commit message scratch file
 .commitmsg.tmp

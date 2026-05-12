@@ -22,6 +22,7 @@ contract.
 
 from __future__ import annotations
 
+import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -63,6 +64,7 @@ def load_adapter_configs(adapters_dir: Path) -> list[AdapterConfig]:
         return []
     configs: list[AdapterConfig] = []
     for p in sorted(adapters_dir.glob("*.yaml")):
+        _warn_loose_perms(p)
         data = yaml.safe_load(p.read_text()) or {}
         if data.get("kind") != "cobaltstrike":
             continue
@@ -83,6 +85,34 @@ def _truthy(v: object) -> bool:
     if isinstance(v, bool):
         return v
     return str(v).lower() in ("true", "1", "yes")
+
+
+def _warn_loose_perms(path: Path) -> None:
+    """POSIX-only: warn if adapter YAML is group/world readable or writable.
+
+    Windows operators get NO warning (audit pass 1 #16 documented this):
+    Windows ACLs differ — protecting adapter YAMLs on Windows requires
+    running daemon under an account where NTFS ACLs already restrict
+    access, or manually using ``icacls``. Documented in
+    ``docs/secrets-handling.md`` (Slice 13).
+
+    The warning prints to stderr deliberately (not via ``logger``) so the
+    no-password-in-logs contract (``test_no_password_in_logs``) stays
+    pristine — operators still see the WARN on the terminal at boot.
+    """
+    if sys.platform == "win32":
+        return
+    try:
+        mode = path.stat().st_mode
+    except OSError:
+        return
+    if mode & (stat.S_IRGRP | stat.S_IROTH | stat.S_IWGRP | stat.S_IWOTH):
+        perms = oct(mode & 0o777)[2:]
+        print(
+            f"WARN: {path} has loose permissions ({perms}); "
+            f"recommended 600 (chmod 600 {path})",
+            file=sys.stderr,
+        )
 
 
 def _default_transport() -> Optional[httpx.AsyncBaseTransport]:
