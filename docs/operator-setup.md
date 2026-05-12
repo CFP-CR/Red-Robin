@@ -192,7 +192,7 @@ Hot-reload check: in another shell, drop a rule live:
 cat > ~/.redrobin/rules/shared/test-block.yaml <<'EOF'
 id: rule-test-whoami
 description: Test block for smoke
-severity: HIGH
+severity: DANGER
 match:
   command: whoami
 reason: Smoke test rule

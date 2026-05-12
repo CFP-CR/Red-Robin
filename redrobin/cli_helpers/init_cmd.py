@@ -61,11 +61,17 @@ summary: |
 _SAMPLE_RULE = """\
 id: rule-sample-lazagne
 description: Sample rule - block LaZagne credential dumping
-severity: HIGH
+severity: DANGER
 match:
   command: lazagne
 reason: LaZagne is loud - prefer in-memory creds extraction
 """
+# Native Red Robin rules use ``RuleSeverity`` enum values
+# (INFO / WARN / DANGER) — not Sigma-style "high" / "critical". DANGER
+# maps to VerdictAction.BLOCK via SEVERITY_TO_ACTION, which is the
+# intent for the sample lazagne rule. Sigma-format rules (separate
+# ``detection`` block) use Sigma's ``level`` field — see
+# infrastructure/rules_loader.py:_SIGMA_LEVEL_TO_SEVERITY.
 
 
 def run_init(
