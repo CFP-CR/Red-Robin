@@ -10,8 +10,9 @@ on shutdown.
 
 Slice 8 (v0.1.x hardening) was a pure refactor: the body was split out
 of this file without changing any resource creation or shutdown
-sequencing. Slice 10 will reorder shutdown (drain background tasks
-before adapter close); Slice 11 will touch the Sigma matcher.
+sequencing. Slice 10 reordered shutdown so background tasks drain
+BEFORE adapters close (fixes spurious "httpx client closed" errors
+when verdicts dispatched an ALLOW path right before Ctrl+C).
 """
 
 from __future__ import annotations
@@ -75,9 +76,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.background_task_factory = _track_task
 
     # Start each subsystem. Order matters — see lifespan_helpers for the
-    # contract of each helper. The close hooks are kept by name (not a
-    # list) so the shutdown order can stay bit-for-bit identical to the
-    # pre-refactor monolithic body.
+    # contract of each helper. Close hooks are kept by name (not a list)
+    # so the shutdown sequence in the ``finally`` block is explicit and
+    # each phase can be reordered independently. Slice 10 reordered the
+    # shutdown so background tasks drain before adapters close — see the
+    # ``finally`` block below for the current contract.
     _, close_bus = await start_event_bus(app, settings)
     _, stop_rules = await start_rules(app, settings)
     _, close_wm = await start_working_memory(app, settings)
@@ -121,45 +124,75 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        # Shutdown ordering preserved from the pre-refactor monolithic
-        # body. Slice 10 will revisit (drain tasks before adapter close);
-        # for this slice we keep it bit-for-bit identical.
+        # Slice 10 (v0.1.x hardening): reorder so background tasks drain
+        # BEFORE adapters close. The pre-Slice-10 order closed adapters
+        # first, which meant a fire-and-forget ``_dispatch_to_cs_adapter()``
+        # scheduled by the verdict route just before shutdown hit a closed
+        # httpx client and surfaced spurious errors in the logs. Now
+        # in-flight dispatches finish (or get cancelled cleanly) while the
+        # CS REST clients are still alive.
         #
-        # 0. Close adapter REST clients first so any in-flight dispatch
-        #    sees a live event loop. Failures during shutdown are
-        #    swallowed — we'd rather get to event_bus.close() cleanly
-        #    than crash on a half-open httpx socket.
-        await close_adapters()
+        # Each close hook is wrapped individually so one bad close doesn't
+        # prevent the rest from running — graceful shutdown is best-effort.
+        #
         # 1. Drain tracked fire-and-forget tasks (verdicts_router PASS
         #    dispatch + pipeline ESCALATE Layer B). The 5s timeout balances
         #    "give an in-flight LLM call time to finish" against "don't hang
-        #    a CTRL+C shutdown". Stragglers are cancelled. This happens
-        #    BEFORE closing adapter clients in the previous loop — except we
-        #    already closed them; the dispatch tasks are now operating on a
-        #    closed httpx session and will fail fast in their own logging
-        #    handler, which is fine.
+        #    a CTRL+C shutdown". Stragglers are cancelled and then awaited
+        #    briefly so their CancelledError handlers can run before the
+        #    event loop tears down.
         if background_tasks:
             try:
-                done, pending = await asyncio.wait(
-                    background_tasks, timeout=5.0
-                )
-                for task in pending:
-                    task.cancel()
+                pending_initial = [t for t in background_tasks if not t.done()]
+                if pending_initial:
+                    _, still_pending = await asyncio.wait(
+                        pending_initial, timeout=5.0
+                    )
+                    for task in still_pending:
+                        task.cancel()
+                    if still_pending:
+                        await asyncio.gather(
+                            *still_pending, return_exceptions=True
+                        )
             except Exception:
                 logger.exception("error draining background_tasks")
-        # 2. Cancel the promoter + summariser loops. Both run
+        # 2. Close adapter REST clients now that no tracked task is still
+        #    using them. Failures during shutdown are swallowed — we'd
+        #    rather get to event_bus.close() cleanly than crash on a
+        #    half-open httpx socket.
+        try:
+            await close_adapters()
+        except Exception:
+            logger.exception("close_adapters failed")
+        # 3. Cancel the promoter + summariser loops. Both run
         #    independently of the bus and reducer; cancelling them before
         #    ``bus.close()`` avoids a tail promotion/summarisation racing
         #    the shutdown.
-        await close_promoter()
-        await close_summarizer()
-        # 3. Close the bus — this broadcasts the sentinel to all subscribers
+        try:
+            await close_promoter()
+        except Exception:
+            logger.exception("close_promoter failed")
+        try:
+            await close_summarizer()
+        except Exception:
+            logger.exception("close_summarizer failed")
+        # 4. Close the bus — this broadcasts the sentinel to all subscribers
         #    including the reducer. The bus close is what signals reducer to exit
         #    after flushing any final episode write to the episodic DB.
-        await close_bus()
-        # 4. Wait for the reducer to drain and exit cleanly.
-        await close_wm()
-        await stop_rules()
+        try:
+            await close_bus()
+        except Exception:
+            logger.exception("close_bus failed")
+        # 5. Wait for the reducer to drain and exit cleanly.
+        try:
+            await close_wm()
+        except Exception:
+            logger.exception("close_wm failed")
+        # 6. Stop the rules-loader hot-reload watchdog last.
+        try:
+            await stop_rules()
+        except Exception:
+            logger.exception("stop_rules failed")
         logger.info("daemon lifespan shutdown complete")
 
 
