@@ -14,10 +14,6 @@ def _isolated_root(tmp_path, monkeypatch):
     # Slice 3: opt into degraded Layer B explicitly. This fixture previously
     # relied on the silent fallback in _build_layer_b when no API keys are set.
     monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
-    # Reset the pipeline cache for test isolation
-    from redrobin.application.verdict_pipeline_factory import reset_pipeline_cache
-
-    reset_pipeline_cache()
     yield root
 
 
@@ -77,10 +73,6 @@ match:
 severity: DANGER
 reason: 'lsass touch + cred extraction (T1003.001)'
 """)
-    # Reset cache so the new rules are loaded
-    from redrobin.application.verdict_pipeline_factory import reset_pipeline_cache
-
-    reset_pipeline_cache()
 
     r = client.post(
         "/v1/verdict/quick",
@@ -132,9 +124,6 @@ def test_verdict_quick_degraded_layer_b_when_api_keys_missing(
     """When API keys are missing, Layer B degrades to no-op (Path 3 only) but daemon still works."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
-    from redrobin.application.verdict_pipeline_factory import reset_pipeline_cache
-
-    reset_pipeline_cache()
 
     r = client.post(
         "/v1/verdict/quick",

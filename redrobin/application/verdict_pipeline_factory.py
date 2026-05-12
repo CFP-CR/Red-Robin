@@ -208,18 +208,6 @@ def build_pipeline(
     return pipeline
 
 
-def reset_pipeline_cache() -> None:
-    """Deprecated no-op kept for tests carried over from the pre-Slice-5 design.
-
-    The factory no longer caches the pipeline — :func:`build_pipeline` is the
-    sole entry point and is called once per FastAPI app from the lifespan. Test
-    isolation is achieved by setting ``REDROBIN_ROOT`` via ``monkeypatch.setenv``
-    and entering the TestClient as a context manager so the lifespan re-runs for
-    every test.
-    """
-    return None
-
-
 def build_pipeline_for_test(*, event_bus: EventBus) -> VerdictPipeline:
     """Minimal pipeline for unit tests: an ALLOW-everything Layer A, no Layer B.
 

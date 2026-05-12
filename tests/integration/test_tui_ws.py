@@ -17,9 +17,6 @@ def _isolated_root(tmp_path, monkeypatch):
     root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("REDROBIN_ROOT", str(root))
     monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
-    from redrobin.application.verdict_pipeline_factory import reset_pipeline_cache
-
-    reset_pipeline_cache()
     yield root
 
 

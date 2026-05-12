@@ -20,9 +20,6 @@ def _isolated_root(tmp_path, monkeypatch):
     root = tmp_path / ".redrobin"
     root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("REDROBIN_ROOT", str(root))
-    from redrobin.application.verdict_pipeline_factory import reset_pipeline_cache
-
-    reset_pipeline_cache()
     yield root
 
 
@@ -64,9 +61,6 @@ match:
 severity: DANGER
 reason: 'lsass touch + cred extraction (T1003.001)'
 """)
-    from redrobin.application.verdict_pipeline_factory import reset_pipeline_cache
-
-    reset_pipeline_cache()
 
 
 def test_e2e_adapter_connect_then_verdict_passthrough(client, auth, cs_manifest):

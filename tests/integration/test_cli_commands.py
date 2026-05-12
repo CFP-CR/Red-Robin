@@ -242,9 +242,6 @@ def test_replay_endpoint_publishes_to_event_bus(tmp_path, monkeypatch):
     monkeypatch.setenv("REDROBIN_RULES_DIR", str(root / "rules"))
     # Slice 3: opt into degraded Layer B explicitly. No API keys here.
     monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
-    from redrobin.application.verdict_pipeline_factory import reset_pipeline_cache
-
-    reset_pipeline_cache()
 
     from redrobin.api.app import create_app
     from redrobin.infrastructure.transport.bearer import get_or_create_token
@@ -283,9 +280,6 @@ def test_replay_endpoint_requires_auth(tmp_path, monkeypatch):
     monkeypatch.setenv("REDROBIN_RULES_DIR", str(root / "rules"))
     # Slice 3: opt into degraded Layer B explicitly. No API keys here.
     monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
-    from redrobin.application.verdict_pipeline_factory import reset_pipeline_cache
-
-    reset_pipeline_cache()
 
     from redrobin.api.app import create_app
 
