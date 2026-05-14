@@ -39,30 +39,38 @@ sub redrobin_load_token {
 
 
 # ===== HTTP POST helper (blocking; ~150ms target on healthy daemon) =====
+# Uses java.net.http.HttpClient (public API since Java 11). No sun.*
+# reflection — works on stock CS Client launches without --add-opens.
+# On any exception: returns "" (preserves fail-open caller contract)
+# and logs an actionable error via warn().
 sub redrobin_http_post {
-    local('$path $body $url $conn $reader $response $line $code $error_stream');
+    local('$path $body $reqBuilder $request $response $err');
     ($path, $body) = @_;
-    $url = [new URL: $REDROBIN_URL . $path];
-    $conn = [$url openConnection];
-    [$conn setRequestMethod: "POST"];
-    [$conn setRequestProperty: "Authorization": "Bearer " . $REDROBIN_TOKEN];
-    [$conn setRequestProperty: "Content-Type": "application/json"];
-    [$conn setDoOutput: true];
-    [$conn setConnectTimeout: 200];
-    [$conn setReadTimeout: 200];
-    [[$conn getOutputStream] write: [$body getBytes]];
-    $code = [$conn getResponseCode];
-    if ($code >= 200 && $code < 300) {
-        $reader = [new java.io.BufferedReader: [new java.io.InputStreamReader: [$conn getInputStream]]];
+
+    $reqBuilder = [HttpRequest newBuilder];
+    [$reqBuilder uri: [URI create: $REDROBIN_URL . $path]];
+    [$reqBuilder timeout: [Duration ofMillis: 200]];
+    [$reqBuilder header: "Authorization": "Bearer " . $REDROBIN_TOKEN];
+    [$reqBuilder header: "Content-Type": "application/json"];
+    [$reqBuilder POST: [java.net.http.HttpRequest$BodyPublishers ofString: $body]];
+    $request = [$reqBuilder build];
+
+    try {
+        $response = [$REDROBIN_HTTP_CLIENT send: $request: [java.net.http.HttpResponse$BodyHandlers ofString]];
+        return [$response body];
+    } catch $e {
+        $err = redrobin_sanitize_error($e);
+        if ($err ismatch '.*ConnectException.*' || $err ismatch '.*refused.*') {
+            warn("[Red Robin] daemon connection refused at " . $REDROBIN_URL . " — is the daemon running?");
+        } else if ($err ismatch '.*HttpTimeout.*' || $err ismatch '.*timed out.*') {
+            warn("[Red Robin] daemon timeout at " . $REDROBIN_URL . " (>200ms) — slow network or overloaded daemon");
+        } else if ($err ismatch '.*UnknownHost.*') {
+            warn("[Red Robin] cannot resolve daemon host in " . $REDROBIN_URL);
+        } else {
+            warn("[Red Robin] HTTP error: " . $err);
+        }
+        return "";
     }
-    else {
-        $reader = [new java.io.BufferedReader: [new java.io.InputStreamReader: [$conn getErrorStream]]];
-    }
-    $response = "";
-    while ($line = [$reader readLine]) { $response .= $line; }
-    [$reader close];
-    [$conn disconnect];
-    return $response;
 }
 
 
