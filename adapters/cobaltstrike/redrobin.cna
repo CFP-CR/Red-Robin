@@ -27,6 +27,38 @@ $REDROBIN_SESSION_ID = "";
 $REDROBIN_HTTP_CLIENT = $null;
 
 
+# ===== Java version guard =====
+# HttpClient (java.net.http.*) is Java 11+ only. CS 4.12 ships with
+# Java 17+ but operators on older CS distributions or with bring-your-own
+# JVM setups may still have Java 8 — abort with a clear message rather
+# than fail with cryptic "Unknown class HttpClient" errors downstream.
+sub redrobin_check_java_version {
+    local('$version $major_str $major');
+    $version = [System getProperty: "java.version"];
+
+    # Defensive: restrictive SecurityManager can deny this property.
+    if ($version is $null) {
+        warn("[Red Robin] cannot read java.version system property; assuming Java 11+");
+        return true;
+    }
+
+    # Java 11+: "11.0.21" / "17.0.9" / "21.0.2" / "25.0.1"
+    # Java 8 : "1.8.0_392"
+    $major_str = split('\.', $version)[0];
+    $major = parseNumber($major_str);
+    if ($major < 11) {
+        warn("[Red Robin] FATAL: Java " . $version . " detected. Red Robin requires Java 11+.");
+        warn("[Red Robin] Upgrade your CS Client JVM (e.g., install Temurin 21) and reload this script.");
+        return false;
+    }
+    return true;
+}
+
+if (!redrobin_check_java_version()) {
+    throw "Red Robin: Java 11+ required (see previous warn lines).";
+}
+
+
 # ===== Token loading =====
 sub redrobin_load_token {
     local('$path $reader $line');
