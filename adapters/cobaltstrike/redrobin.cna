@@ -74,6 +74,29 @@ sub redrobin_http_post {
 }
 
 
+# ===== HTTP GET helper =====
+# Returns %(code => N, body => "..."). code=0 means "no response"
+# (network error); code>=400 means daemon answered but rejected.
+# Caller chooses how to react to each.
+sub redrobin_http_get {
+    local('$path $reqBuilder $request $response');
+    $path = $1;
+
+    $reqBuilder = [HttpRequest newBuilder];
+    [$reqBuilder uri: [URI create: $REDROBIN_URL . $path]];
+    [$reqBuilder timeout: [Duration ofMillis: 1000]];
+    [$reqBuilder GET];
+    $request = [$reqBuilder build];
+
+    try {
+        $response = [$REDROBIN_HTTP_CLIENT send: $request: [java.net.http.HttpResponse$BodyHandlers ofString]];
+        return %(code => [$response statusCode], body => [$response body]);
+    } catch $e {
+        return %(code => 0, body => "");
+    }
+}
+
+
 # ===== JSON helpers (Sleep has no native JSON; use String.replace tricks) =====
 sub redrobin_escape_json {
     local('$s');
@@ -259,23 +282,16 @@ println("[Red Robin] .cna loaded; gate active.");
 
 # ===== Heartbeat — surface daemon outages in the CS event log =====
 # Without this loop the operator would silently keep typing while the alias
-# gate fails open (Sleep's HTTP timeouts swallow the dropped connection).
-# Hitting /v1/adapter/heartbeat every 30s gives them a visible warning.
+# gate fails open. Hitting /v1/adapter/heartbeat every 30s gives them a
+# visible warning when the daemon goes away mid-engagement.
 sub redrobin_heartbeat {
-    local('$url $conn $code');
-    try {
-        $url = [new URL: $REDROBIN_URL . "/v1/adapter/heartbeat?adapter=cs-main"];
-        $conn = [$url openConnection];
-        [$conn setRequestMethod: "GET"];
-        [$conn setConnectTimeout: 1000];
-        [$conn setReadTimeout: 1000];
-        $code = [$conn getResponseCode];
-        [$conn disconnect];
-        if ($code != 200) {
-            warn("[Red Robin] daemon heartbeat returned " . $code . "; alias gates may fail-open");
-        }
-    } catch $e {
+    local('$result $code');
+    $result = redrobin_http_get("/v1/adapter/heartbeat?adapter=cs-main");
+    $code = $result["code"];
+    if ($code == 0) {
         warn("[Red Robin] daemon unreachable; alias gates will fail-open");
+    } else if ($code != 200) {
+        warn("[Red Robin] daemon heartbeat returned " . $code . "; alias gates may fail-open");
     }
 }
 
