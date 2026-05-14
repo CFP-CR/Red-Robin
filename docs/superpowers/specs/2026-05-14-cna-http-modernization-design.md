@@ -75,13 +75,18 @@ It is not production-grade because:
 - **Adding CI lint for Sleep code.** Identified during design as a gap but
   deferred to a post-DEF CON follow-up — `test_cna_smoke.md` remains the
   validation gate for this change.
+- **Fixing the pre-existing heartbeat-fork accumulation on script reload.**
+  Each unload+load of the `.cna` spawns a new `fork{}` heartbeat loop
+  without cancelling the previous one. This is current behavior, not
+  introduced by this refactor, and operators are expected to restart CS
+  Client periodically anyway. Tracked as a separate hardening item.
 
 ## 4. Architecture
 
 ```
 .cna load
     │
-    ├─► 1. redrobin_check_java_version()    [fail-fast if Java < 11]
+    ├─► 1. redrobin_check_java_version()    [throw if Java < 11, halts script load]
     │
     ├─► 2. redrobin_init_http_client()      [singleton, connectTimeout=200ms]
     │
@@ -89,13 +94,23 @@ It is not production-grade because:
     │
     ├─► 4. redrobin_handshake_with_retry()  [3 attempts, 500/1000/2000ms backoff]
     │
-    └─► 5. .cna loaded; gate active.
+    ├─► 5. include alias templates (tier1a, tier1b, tier2, popup_beacon)
+    │
+    ├─► 6. set BEACON_OUTPUT hook + on beacon_tasked hook
+    │
+    ├─► 7. println "[Red Robin] .cna loaded; gate active."
+    │
+    └─► 8. fork{} background heartbeat loop (every 30s, calls redrobin_heartbeat)
     
 At runtime:
     redrobin_query_quick()    ─► redrobin_http_post()   ─► HttpClient.send()
     redrobin_push_event_async ─► fork{} ─► redrobin_http_post()  (fire-and-forget)
     redrobin_heartbeat()       ─► redrobin_http_get()    ─► HttpClient.send()
 ```
+
+Steps 5-8 are existing code preserved from the current `.cna` (lines
+200-249). The refactor only changes the HTTP layer that steps 4, 6, 7
+depend on indirectly via the helpers.
 
 The HttpClient instance is created once at script load and reused for every
 subsequent call. Sleep's `fork{}` provides concurrency at the call-site level;
@@ -109,6 +124,14 @@ HttpClient itself is thread-safe and supports concurrent `send()` calls.
 sub redrobin_check_java_version {
     local('$version $major_str $major');
     $version = [System getProperty: "java.version"];
+
+    # Defensive: in restricted contexts SecurityManager can deny this
+    # property and return null. Assume modern Java rather than crash on null.
+    if ($version is $null) {
+        warn("[Red Robin] cannot read java.version system property; assuming Java 11+");
+        return true;
+    }
+
     # Java 11+: "11.0.21" / "17.0.9" / "21.0.2" / "25.0.1"
     # Java 8 : "1.8.0_392"
     $major_str = split('\.', $version)[0];
@@ -122,20 +145,31 @@ sub redrobin_check_java_version {
 }
 
 # Top of script (after imports + globals, before any HTTP):
-if (!redrobin_check_java_version()) { return; }
+# Use throw (not return) — Sleep's top-level return semantics are ambiguous
+# in Aggressor. throw bubbles to Aggressor's script-load handler which
+# halts the script visibly with the message.
+if (!redrobin_check_java_version()) {
+    throw "Red Robin: Java 11+ required (see previous warn lines).";
+}
 ```
 
 The check uses `System.getProperty("java.version")` (public API, always
-available) and parses only the leading major-version number. Format is
-stable across Java 11–25 inclusive (and per the JEP roadmap will remain
-stable through Java 30+).
+available except under restrictive SecurityManager) and parses only the
+leading major-version number. Format is stable across Java 11–25 inclusive
+(and per the JEP roadmap will remain stable through Java 30+).
+
+**Why `throw` instead of `return`:** Sleep's behavior on `return` at
+script top level is not documented to abort the script — it may just
+exit the implicit script-load closure while letting downstream top-level
+statements continue, which would attempt to import `java.net.http.*`
+(unavailable in Java 8) and produce confusing cascading errors.
+`throw` is caught by Aggressor's script-load handler, halts execution
+cleanly, and surfaces the message in the Script Console.
 
 ### 5.2 HttpClient singleton
 
 ```sleep
 import java.net.http.*;
-import java.net.http.HttpRequest$BodyPublishers;
-import java.net.http.HttpResponse$BodyHandlers;
 import java.time.Duration;
 
 global('$REDROBIN_HTTP_CLIENT');
@@ -144,7 +178,7 @@ $REDROBIN_HTTP_CLIENT = $null;
 sub redrobin_init_http_client {
     local('$builder');
     $builder = [HttpClient newBuilder];
-    [$builder connectTimeout: [Duration ofMillis: 200L]];
+    [$builder connectTimeout: [Duration ofMillis: 200]];
     $REDROBIN_HTTP_CLIENT = [$builder build];
 }
 ```
@@ -153,6 +187,19 @@ A single `HttpClient` is created at script load. It's thread-safe and
 internally manages a connection pool — multiple concurrent `send()` calls
 from forks share the underlying connections.
 
+**Numeric literal note:** Sleep does NOT support the `L` suffix for long
+literals. `[Duration ofMillis: 200]` passes a plain integer and Sleep
+auto-promotes to `long` when calling the Java method (`ofMillis(long)`).
+If auto-promotion fails on some JVMs, fallback to `[Long valueOf: 200]`
+which constructs an explicit `Long` wrapper.
+
+**Nested static class note:** `BodyPublishers` and `BodyHandlers` are
+nested static classes of `HttpRequest` and `HttpResponse` respectively.
+Sleep cannot reliably import nested static classes via `import` (the
+`$` is reserved for variable interpolation). The wildcard import
+`java.net.http.*` brings in the outer classes; the nested ones must be
+referenced with fully-qualified names at the call site (see §5.4).
+
 **Lifecycle note:** when the operator unloads + reloads the `.cna`, the old
 `HttpClient` reference is dropped but not explicitly closed. The JVM will
 reap underlying TCP connections via standard GC. Acceptable for normal
@@ -160,6 +207,10 @@ engagement patterns (load once per CS Client session); a long-running CS
 Client with many unload/reload cycles will accumulate dangling resources
 slowly. Mitigation deferred — operators are expected to restart CS Client
 periodically anyway.
+
+The same reload concern applies to the heartbeat `fork{}` loop already
+present at the end of the script (line 244-249 in current code) — see
+non-goal #6 in §3.
 
 ### 5.3 Error sanitization
 
@@ -187,6 +238,9 @@ Returns the raw response body string on success, or `""` on any error
 (preserving the existing fail-open contract). Logs an actionable error
 message in each failure category.
 
+Note: `BodyPublishers` and `BodyHandlers` are referenced via FQN because
+they are nested static classes (see §5.2 nested class note).
+
 ```sleep
 sub redrobin_http_post {
     local('$path $body $reqBuilder $request $response $err');
@@ -194,14 +248,14 @@ sub redrobin_http_post {
 
     $reqBuilder = [HttpRequest newBuilder];
     [$reqBuilder uri: [URI create: $REDROBIN_URL . $path]];
-    [$reqBuilder timeout: [Duration ofMillis: 200L]];
+    [$reqBuilder timeout: [Duration ofMillis: 200]];
     [$reqBuilder header: "Authorization": "Bearer " . $REDROBIN_TOKEN];
     [$reqBuilder header: "Content-Type": "application/json"];
-    [$reqBuilder POST: [BodyPublishers ofString: $body]];
+    [$reqBuilder POST: [java.net.http.HttpRequest$BodyPublishers ofString: $body]];
     $request = [$reqBuilder build];
 
     try {
-        $response = [$REDROBIN_HTTP_CLIENT send: $request: [BodyHandlers ofString]];
+        $response = [$REDROBIN_HTTP_CLIENT send: $request: [java.net.http.HttpResponse$BodyHandlers ofString]];
         return [$response body];
     } catch $e {
         $err = redrobin_sanitize_error($e);
@@ -233,12 +287,12 @@ sub redrobin_http_get {
 
     $reqBuilder = [HttpRequest newBuilder];
     [$reqBuilder uri: [URI create: $REDROBIN_URL . $path]];
-    [$reqBuilder timeout: [Duration ofMillis: 1000L]];
+    [$reqBuilder timeout: [Duration ofMillis: 1000]];
     [$reqBuilder GET];
     $request = [$reqBuilder build];
 
     try {
-        $response = [$REDROBIN_HTTP_CLIENT send: $request: [BodyHandlers ofString]];
+        $response = [$REDROBIN_HTTP_CLIENT send: $request: [java.net.http.HttpResponse$BodyHandlers ofString]];
         return %(code => [$response statusCode], body => [$response body]);
     } catch $e {
         return %(code => 0, body => "");
@@ -320,6 +374,7 @@ refactor.
 | Token leakage via exception toString in operator logs / shared screens | `redrobin_sanitize_error` regex-strips both the literal token and any `Bearer ...` pattern |
 | Token exposure via `HttpClient` debug logging (some JDKs enable this with `-Djdk.httpclient.HttpClient.log=...`) | Documented as out of scope — operator must not enable JDK HTTP debug logging during engagements; documented in operator-setup.md as a no-no |
 | Empty token sent in handshake before `redrobin_load_token()` runs | Boot order guarantees `$REDROBIN_TOKEN` is set BEFORE `redrobin_handshake_with_retry` is called. If load_token fails, handshake will fire with empty Authorization header — daemon returns 401, our error logging surfaces it clearly |
+| Future token formats with regex metacharacters confusing `replace($err_str, $REDROBIN_TOKEN, ...)` | Sleep's `replace()` treats its second argument as a Java regex. Current Red Robin tokens are URL-safe base64 — `_`, `-`, `=` are not regex metacharacters outside character classes — so this is currently safe. If the token format ever changes to include `.`/`*`/`+`/`?`/`(`/`)`/`[`/`{`, add a regex-escape helper before passing the token to `replace`. Documented here as a deliberate constraint, not a fix-now item. |
 
 ## 9. Test plan
 
@@ -415,7 +470,11 @@ No DB migrations, no daemon-side changes, no broken contracts elsewhere.
 
 | # | Question | Resolution plan |
 |---|----------|-----------------|
-| Q1 | Does Sleep correctly resolve `HttpRequest$BodyPublishers` as a nested static class via the import? | Test during implementation. If `Unknown class` error appears, fallback to fully-qualified `[java.net.http.HttpRequest$BodyPublishers ofString: $body]` inline. |
-| Q2 | Will `[Duration ofMillis: 200L]` accept the `200L` Sleep literal as a `long` parameter, or do we need explicit boxing? | Test during implementation. Fallback: `[Long parseLong: "200"]` (wrapper class — capital L) or `cast(200, ^long)` if necessary. |
-| Q3 | Does Sleep's `try/catch` correctly catch `java.net.http.HttpTimeoutException` and `java.net.ConnectException`, which are checked exceptions in some method signatures? | Test during implementation. Sleep should reflect properly because it's all runtime — checked vs unchecked is a compile-time concept. If problems surface, wrap in additional Sleep-level `try` around the `send()` call. |
-| Q4 | Are there any other Sleep scripts in the project that share this HTTP pattern and should be refactored at the same time? | `spike/test_http_latency.cna` does — but it's a one-off benchmark, not production code. Explicitly excluded from this refactor's scope (non-goal #5). Track as a separate v0.1.x cleanup task. |
+| Q1 | Does Sleep's `try/catch` correctly catch `java.net.http.HttpTimeoutException` and `java.net.ConnectException`, which are checked exceptions in some method signatures? | Test during implementation. Sleep should reflect properly because it's all runtime — checked vs unchecked is a compile-time concept. If problems surface, wrap in additional Sleep-level `try` around the `send()` call. |
+| Q2 | Does Aggressor halt cleanly on top-level `throw` from a `.cna`, or does it crash the CS Client? | Test in implementation by deliberately failing the version check on a stubbed Java version. Expected: warn lines visible in Script Console + script halts + CS Client stays alive (Aggressor catches script-load throws). If CS crashes, fallback to wrapping the rest of the script in `if (check) { ... }` block. |
+| Q3 | Are there any other Sleep scripts in the project that share this HTTP pattern and should be refactored at the same time? | `spike/test_http_latency.cna` does — but it's a one-off benchmark, not production code. Explicitly excluded from this refactor's scope (non-goal #5). Track as a separate v0.1.x cleanup task. |
+
+(Two prior open questions — Q1 on nested-class imports and Q2 on `200L`
+suffix — were resolved during the audit: use FQN at call sites for nested
+classes, drop the `L` suffix and rely on Sleep's int→long auto-coercion.
+Both decisions are baked into §5.2, §5.4, §5.5.)
