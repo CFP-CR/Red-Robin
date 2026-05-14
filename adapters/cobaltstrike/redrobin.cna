@@ -216,9 +216,13 @@ sub redrobin_push_event_async {
 }
 
 
-# ===== Adapter handshake (best-effort; if daemon down, alias gate fails open) =====
-sub redrobin_handshake {
-    local('$manifest_json $response');
+# ===== Adapter handshake (3-attempt retry with backoff) =====
+# Daemon may be still booting when operator loads the .cna. Single-shot
+# handshake left the alias gate in a permanently failed state if the
+# first attempt missed the boot window. Retry with 500/1000/2000ms
+# backoff covers the typical daemon-boot race without being annoying.
+sub redrobin_handshake_with_retry {
+    local('$manifest_json $response $attempt $delay');
     $manifest_json = '{"manifest":{"manifest_version":"0.1.0","spec_versions_supported":">=0.1.0,<0.2.0",' .
                      '"name":"cs-aggressor","version":"1.0.0","capabilities":{"preflight_block_console":true,' .
                      '"preflight_block_tui":false,"tui_dispatch":true,"output_observe":true,' .
@@ -226,18 +230,21 @@ sub redrobin_handshake {
                      '"command_modification":false},"events_emitted":["beacon.command_input","beacon.command_output",' .
                      '"host.observation","credential.observed"],"events_consumed":["opsec.verdict"],' .
                      '"requirements":{"cobalt_strike":">=4.12"}}}';
-    try {
+
+    $attempt = 1;
+    while ($attempt <= 3) {
         $response = redrobin_http_post("/v1/adapters/connect", $manifest_json);
         if ($response ismatch '"adapter_session_id":"(ses_[^"]+)"') {
             $REDROBIN_SESSION_ID = matched()[0];
             println("[Red Robin] handshake OK; session=" . $REDROBIN_SESSION_ID);
+            return;
         }
-        else {
-            println("[Red Robin] handshake response unexpected: " . $response);
-        }
-    } catch $e {
-        println("[Red Robin] handshake failed (daemon down?); gate will fail-open.");
+        $delay = 500 * (1 << ($attempt - 1));
+        warn("[Red Robin] handshake attempt " . $attempt . "/3 failed; retrying in " . $delay . "ms");
+        sleep($delay);
+        $attempt = $attempt + 1;
     }
+    warn("[Red Robin] handshake failed after 3 attempts. Verify daemon at " . $REDROBIN_URL . " and reload the .cna.");
 }
 
 
@@ -255,7 +262,7 @@ sub redrobin_init_http_client {
 # ===== Boot =====
 redrobin_init_http_client();
 $REDROBIN_TOKEN = redrobin_load_token();
-redrobin_handshake();
+redrobin_handshake_with_retry();
 
 
 # ===== Load alias templates =====
