@@ -20,10 +20,11 @@ import java.net.http.*;
 import java.io.*;
 import java.time.Duration;
 
-global('$REDROBIN_URL $REDROBIN_TOKEN $REDROBIN_SESSION_ID');
+global('$REDROBIN_URL $REDROBIN_TOKEN $REDROBIN_SESSION_ID $REDROBIN_HTTP_CLIENT');
 $REDROBIN_URL = "http://localhost:7777";
 $REDROBIN_TOKEN = "";
 $REDROBIN_SESSION_ID = "";
+$REDROBIN_HTTP_CLIENT = $null;
 
 
 # ===== Token loading =====
