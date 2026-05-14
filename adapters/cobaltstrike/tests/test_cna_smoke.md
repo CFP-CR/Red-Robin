@@ -67,3 +67,66 @@ deployment but NOT v0.1 ship readiness.
 - All 6 TCs pass on real CS 4.12 + daemon
 - Operator updates `docs/aggressor-alias-args.md` to check off "Spike 1" + "Spike 2" if not already
 - Update this file with PASS/FAIL annotations during the smoke test
+
+---
+
+## CNA HTTP modernization smoke (added 2026-05-14)
+
+These steps verify the refactor in `docs/superpowers/specs/2026-05-14-cna-http-modernization-design.md`.
+
+### 1. Stock launch (no --add-opens)
+
+- [ ] Close any running CS Client.
+- [ ] Launch CS Client via its default shortcut (no JVM flags):
+  ```powershell
+  java -jar cobaltstrike-client.jar
+  ```
+- [ ] Connect to the teamserver, load `redrobin.cna`.
+- [ ] In Script Console expect: `[Red Robin] handshake OK; session=ses_<uuid>`
+- [ ] In Script Console expect: NO `cannot access sun.net.www.protocol.http`
+- [ ] In Script Console expect: NO `Attempted to call a non-static method on a null reference`
+- [ ] In daemon log expect: `POST /v1/adapters/connect HTTP/1.1 200 OK`
+
+### 2. Verdict round-trip
+
+- [ ] `&binit(rand(100000))` in Script Console → registers dummy bid.
+- [ ] Type alias `mimikatz` in beacon console.
+- [ ] In daemon log expect: `POST /v1/verdict/quick HTTP/1.1 200 OK`
+- [ ] In beacon console expect: `[!] [Red Robin] DANGER: ...` (rule fires) OR `[*] [Red Robin] novel pattern — Layer B reviewing async`
+
+### 3. Heartbeat
+
+- [ ] Wait 30-40 seconds after .cna load.
+- [ ] In daemon log expect: `GET /v1/adapter/heartbeat?adapter=cs-main HTTP/1.1 200 OK`
+
+### 4. Actionable error logging
+
+- [ ] Stop the daemon (`redrobin daemon stop`).
+- [ ] Type any aliased command in the beacon console.
+- [ ] In Script Console expect: `[Red Robin] daemon connection refused at http://localhost:7777 — is the daemon running?`
+- [ ] Restart daemon. Next aliased command must succeed without warn.
+
+### 5. Token sanitization
+
+- [ ] Note the current `$REDROBIN_TOKEN` value (first 8 chars only — don't paste anywhere).
+- [ ] Temporarily set `$REDROBIN_URL = "http://127.0.0.1:9999"` (no listener — produces a connect-refused error path).
+- [ ] Type an aliased command.
+- [ ] In Script Console: confirm the `warn` line does NOT contain the token's actual characters.
+- [ ] Restore `$REDROBIN_URL` to its original value.
+
+### 6. Handshake retry under daemon-boot race
+
+- [ ] Stop daemon.
+- [ ] Aggressor Scripts → Unload `redrobin.cna` → Load again.
+- [ ] Within 1-2 seconds: `redrobin daemon start --host 127.0.0.1 --port 7777`
+- [ ] In Script Console expect (depending on timing): `[Red Robin] handshake attempt 1/3 failed; retrying in 500ms` followed eventually by `[Red Robin] handshake OK; session=...`
+
+### 7. Java version guard (optional smoke)
+
+Skip if no easy way to fake Java version. Otherwise:
+
+- [ ] Temporarily hard-code `$major = 8;` in `redrobin_check_java_version`.
+- [ ] Reload .cna.
+- [ ] In Script Console expect: `[Red Robin] FATAL: Java ... detected. Red Robin requires Java 11+.`
+- [ ] Confirm `[Red Robin] handshake OK` does NOT appear (script aborted at throw).
+- [ ] Revert the test edit.
