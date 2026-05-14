@@ -79,6 +79,22 @@ sub redrobin_escape_json {
 }
 
 
+# ===== Error sanitization =====
+# Strip bearer token + token value from exception messages before logging.
+# The Aggressor Script Console appears in engagement screenshots / shared
+# screens; an exception's toString() can include request headers in some
+# JVMs. Wrap every exception via this sub before printing.
+sub redrobin_sanitize_error {
+    local('$err_str');
+    $err_str = "" . $1;
+    if (strlen($REDROBIN_TOKEN) > 8) {
+        $err_str = replace($err_str, $REDROBIN_TOKEN, '***REDACTED***');
+    }
+    $err_str = replace($err_str, 'Bearer [A-Za-z0-9_\-\.=]+', 'Bearer ***REDACTED***');
+    return $err_str;
+}
+
+
 # ===== Integrity level (Slice 11) =====
 # Canonical CS elevated-context detection: &binfo($bid, "user") returns the
 # same string CS displays in the beacon table — e.g. "CORP\\admin *" with a
