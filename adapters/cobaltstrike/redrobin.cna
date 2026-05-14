@@ -210,7 +210,19 @@ sub redrobin_handshake {
 }
 
 
+# ===== HttpClient singleton =====
+# Built once at script load, reused for every sync/async HTTP call.
+# Thread-safe per Java 11+ docs (supports concurrent send() from forks).
+sub redrobin_init_http_client {
+    local('$builder');
+    $builder = [HttpClient newBuilder];
+    [$builder connectTimeout: [Duration ofMillis: 200]];
+    $REDROBIN_HTTP_CLIENT = [$builder build];
+}
+
+
 # ===== Boot =====
+redrobin_init_http_client();
 $REDROBIN_TOKEN = redrobin_load_token();
 redrobin_handshake();
 
