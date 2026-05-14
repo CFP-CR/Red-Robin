@@ -145,6 +145,24 @@ The loader warns at boot if the file is group/world readable on POSIX. On
 Windows the loose-perms check is skipped; rely on NTFS ACLs. See
 `docs/secrets-handling.md`.
 
+### Cobalt Strike Client Java requirement
+
+Red Robin's Aggressor script (`redrobin.cna`) requires **Java 11+** on the CS
+Client side. CS 4.7+ bundles Java 17+ in its standard distribution, so
+operators on stock CS launches are automatically on a supported JVM.
+
+**No JVM flags required.** Earlier Red Robin versions documented an
+`--add-opens java.base/sun.net.www.protocol.http=ALL-UNNAMED` workaround
+for Java module access issues. As of 2026-05-14 (the HTTP modernization
+refactor — see `docs/superpowers/specs/2026-05-14-cna-http-modernization-design.md`),
+the `.cna` uses the public `java.net.http.HttpClient` API and no longer
+requires any `--add-opens` flag.
+
+If the .cna fails to load with `Java ... detected. Red Robin requires
+Java 11+` in the Script Console, upgrade your JVM (Temurin 21 or
+Microsoft Build of OpenJDK 17 are both well-tested) and reload the
+script.
+
 ## 6. Start the daemon
 
 ```bash
