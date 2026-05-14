@@ -16,7 +16,9 @@
 #     — orthogonal to gate, NOT a "call original" mechanism
 
 import java.net.*;
+import java.net.http.*;
 import java.io.*;
+import java.time.Duration;
 
 global('$REDROBIN_URL $REDROBIN_TOKEN $REDROBIN_SESSION_ID');
 $REDROBIN_URL = "http://localhost:7777";
