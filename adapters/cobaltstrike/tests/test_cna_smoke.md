@@ -130,3 +130,89 @@ Skip if no easy way to fake Java version. Otherwise:
 - [ ] In Script Console expect: `[Red Robin] FATAL: Java ... detected. Red Robin requires Java 11+.`
 - [ ] Confirm `[Red Robin] handshake OK` does NOT appear (script aborted at throw).
 - [ ] Revert the test edit.
+
+---
+
+## CNA JAR helper smoke (added 2026-05-17)
+
+These steps verify the refactor in `docs/superpowers/specs/2026-05-17-cna-jar-helper-design.md`. Supersedes prior smoke sections above.
+
+### 1. Stock launch (no JVM flags) — KEYSTONE
+
+The keystone test. Operator launches CS Client via the official launcher with **zero JVM flags**.
+
+- [ ] Close any running CS Client.
+- [ ] Launch CS Client via stock launcher:
+  ```powershell
+  cd C:\Users\jcspi\Documents\opt\cobaltstrike\client
+  .\cobaltstrike.exe
+  ```
+  (Linux/Mac: `./cobaltstrike-client`)
+- [ ] Connect to the teamserver, load `redrobin.cna`.
+- [ ] In Script Console expect: `[Red Robin] handshake OK; session=ses_<uuid>`
+- [ ] In Script Console expect: NO `cannot access X in class sun.*`
+- [ ] In Script Console expect: NO `cannot access X in class jdk.internal.*`
+- [ ] In Script Console expect: NO `Unable to make X accessible: module Y does not export Z`
+- [ ] In Script Console expect: NO `ClassNotFoundException: com.redrobin.aggressor.RedRobinHttp`
+- [ ] In daemon log expect: `POST /v1/adapters/connect HTTP/1.1 200 OK`
+- [ ] In daemon log expect: NO `Unsupported upgrade request` warnings (JAR forces HTTP/1.1).
+
+### 2. JAR loading
+
+- [ ] Verify the JAR is at the expected path:
+  ```bash
+  ls C:/Users/jcspi/Documents/dev-projects/Red-Robin/adapters/cobaltstrike/jars/
+  ```
+  Expected: `redrobin-aggressor-http-1.0.0.jar`
+- [ ] In Script Console after .cna load: NO ClassNotFoundException visible.
+- [ ] Optional verification — type in Script Console: `println([$REDROBIN_HTTP getClass]);` → expect `class com.redrobin.aggressor.RedRobinHttp`.
+
+### 3. Heartbeat round-trip
+
+- [ ] Wait 30-40 seconds after .cna load.
+- [ ] In daemon log expect: `GET /v1/adapter/heartbeat?adapter=cs-main HTTP/1.1 200 OK`
+- [ ] In Script Console expect: NO `Attempted to call a non-static method on a null reference` errors.
+
+### 4. Verdict round-trip (regex fix verification)
+
+- [ ] `&binit(rand(100000))` in Script Console → registers dummy bid.
+- [ ] Type alias `mimikatz` in beacon console.
+- [ ] In daemon log expect: `POST /v1/verdict/quick HTTP/1.1 200 OK`
+- [ ] In beacon console expect: `[!] [Red Robin] DANGER: <reason from rule>` (BLOCK or WARN — the rule fires and `hasmatch` actually extracts the action). NOT a silent dispatch.
+
+### 5. Actionable error logging
+
+- [ ] Stop the daemon (`redrobin daemon stop`).
+- [ ] Type any aliased command in the beacon console.
+- [ ] In Script Console expect: `[Red Robin] daemon connection refused at http://localhost:7777 — is the daemon running?`
+- [ ] Restart daemon. Next aliased command must succeed without warn.
+
+### 6. Token sanitization (real 401 path)
+
+Strengthens the prior weak connect-refused TC.
+
+- [ ] In a separate terminal, start a Python one-liner HTTP server:
+  ```bash
+  python -c "from http.server import BaseHTTPRequestHandler,HTTPServer
+  class H(BaseHTTPRequestHandler):
+      def do_POST(self):
+          self.send_response(401);self.send_header('Content-Type','application/json');self.end_headers()
+          self.wfile.write(f'{{\"detail\":\"req-headers={dict(self.headers)}\"}}'.encode())
+  HTTPServer(('127.0.0.1',9999),H).serve_forever()"
+  ```
+- [ ] In CS Client Script Console: `$REDROBIN_URL = "http://127.0.0.1:9999"; redrobin_init_http(); redrobin_handshake_with_retry();`
+- [ ] In Script Console expect: a warn with `[Red Robin] daemon returned non-2xx for /v1/adapters/connect`.
+- [ ] Verify: warn message does NOT contain literal token characters. Look for `***REDACTED***` or absence of the token's first 8 chars.
+- [ ] Restore `$REDROBIN_URL = "http://localhost:7777"; redrobin_init_http()` and Ctrl+C the Python server.
+
+### 7. Handshake retry under daemon-boot race
+
+- [ ] Stop daemon (`redrobin daemon stop`).
+- [ ] Aggressor Scripts → Unload `redrobin.cna` → Load again.
+- [ ] Within 1-2 seconds: `redrobin daemon start --host 127.0.0.1 --port 7777`
+- [ ] Watch the Script Console — expect:
+  ```
+  [Red Robin] handshake attempt 1/3 failed; retrying in 500ms
+  [Red Robin] handshake OK; session=ses_<uuid>
+  ```
+  (Or attempt 2 then attempt 3 then success, depending on timing.)
