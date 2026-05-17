@@ -726,23 +726,27 @@ Source remains diffable in helper-jar/src/."
 
 ---
 
-## Task 7: Add `redrobin_init_http` sub + wire into boot block
+## Task 7: ATOMIC PIVOT — `redrobin_init_http` + POST + GET delegation
 
 **Files:**
 - Modify: `adapters/cobaltstrike/redrobin.cna`
 
-The .cna currently uses `java.net.http.HttpClient` directly. We add a new sub that loads our JAR via URLClassLoader and instantiates `RedRobinHttp`. Later tasks will rewrite the HTTP helpers to delegate to that instance.
+**Why one task (audit fix 2026-05-17):** the original plan split this pivot into 3 separate commits (T7 init, T8 POST, T9 GET). The audit found that between T7 and T9 the .cna would crash at runtime — `redrobin_init_http_client` is removed in T7 but `redrobin_http_post` and `redrobin_http_get` still reference the now-uninitialized `$REDROBIN_HTTP_CLIENT`. To keep each commit shippable (per per-commit-rollback principle), the entire HttpClient→JAR pivot is one atomic commit.
 
-- [ ] **Step 1: Locate the existing `redrobin_init_http_client` sub**
+- [ ] **Step 1: Locate the three subs and the boot block**
 
 ```bash
 cd C:/Users/jcspi/Documents/dev-projects/Red-Robin
-grep -n "redrobin_init_http_client\|# ===== HttpClient singleton" adapters/cobaltstrike/redrobin.cna
+grep -n "redrobin_init_http_client\|sub redrobin_http_post\|sub redrobin_http_get\|# ===== HttpClient singleton\|# ===== HTTP POST helper\|# ===== HTTP GET helper\|# ===== Boot" adapters/cobaltstrike/redrobin.cna
 ```
 
-Note the line range. The sub is typically near line 285 with a comment block above it.
+Expected (line numbers approximate):
+- `# ===== HTTP POST helper` and `sub redrobin_http_post` near line 73-78
+- `# ===== HTTP GET helper` and `sub redrobin_http_get` near line 113
+- `# ===== HttpClient singleton` and `sub redrobin_init_http_client` near line 283-285
+- `# ===== Boot` near line 294
 
-- [ ] **Step 2: Replace the existing init sub with `redrobin_init_http`**
+- [ ] **Step 2: Replace `redrobin_init_http_client` with `redrobin_init_http`**
 
 Find the entire block starting with `# ===== HttpClient singleton =====` through the closing `}` of `redrobin_init_http_client`. Replace with:
 
@@ -769,70 +773,11 @@ sub redrobin_init_http {
 }
 ```
 
-Note: every multi-arg method call uses **comma** separators (`@($string_cls, $string_cls)`, `newInstance: @($REDROBIN_URL, $REDROBIN_TOKEN)`) per Sleep manual §7.1.
+Note: every multi-arg method call uses **comma** separators per Sleep manual §7.1.
 
-- [ ] **Step 3: Update the boot block**
+- [ ] **Step 3: Rewrite `redrobin_http_post`**
 
-Find the boot block (near line 295, look for `# ===== Boot =====`). It currently reads:
-
-```sleep
-redrobin_init_http_client();
-$REDROBIN_TOKEN = redrobin_load_token();
-redrobin_handshake_with_retry();
-```
-
-Replace with:
-
-```sleep
-$REDROBIN_TOKEN = redrobin_load_token();
-redrobin_init_http();
-redrobin_handshake_with_retry();
-```
-
-**Order matters:** the JAR helper's constructor takes the token, so the token must be loaded first.
-
-- [ ] **Step 4: Verify**
-
-```bash
-grep -n "redrobin_init_http\b\|redrobin_load_token\|redrobin_handshake_with_retry" adapters/cobaltstrike/redrobin.cna
-```
-
-Expected: the sub definition, the boot-block call (in the correct order), and no remaining references to `redrobin_init_http_client`.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add adapters/cobaltstrike/redrobin.cna
-git commit -m "feat(cna): replace HttpClient singleton with JAR helper init
-
-redrobin_init_http loads adapters/cobaltstrike/jars/redrobin-aggressor-http-1.0.0.jar
-via URLClassLoader (Sleep's 'import from:' is broken on Java 9+ per
-PyCobalt) and instantiates RedRobinHttp with the daemon URL and bearer
-token.
-
-\$REDROBIN_HTTP global now holds the helper instance. Tasks 8 and 9
-rewrite redrobin_http_post and redrobin_http_get to delegate to it.
-
-Boot block reordered: token loads BEFORE init (the helper's ctor takes
-the token at construction time)."
-```
-
----
-
-## Task 8: Rewrite `redrobin_http_post` to delegate to JAR
-
-**Files:**
-- Modify: `adapters/cobaltstrike/redrobin.cna`
-
-- [ ] **Step 1: Locate the current sub**
-
-```bash
-grep -n "sub redrobin_http_post" adapters/cobaltstrike/redrobin.cna
-```
-
-- [ ] **Step 2: Replace the entire sub**
-
-Find the block from `# ===== HTTP POST helper` (comment header) through the closing `}` of `redrobin_http_post`. Replace with:
+Find the block from `# ===== HTTP POST helper` through the closing `}` of `redrobin_http_post`. Replace with:
 
 ```sleep
 # ===== HTTP POST helper (delegates to JAR; ~150ms target on healthy daemon) =====
@@ -864,54 +809,9 @@ sub redrobin_http_post {
 }
 ```
 
-Note: `[$REDROBIN_HTTP post: $path, $body]` uses **comma** between the two args (Sleep manual §7.1).
+- [ ] **Step 4: Rewrite `redrobin_http_get`**
 
-- [ ] **Step 3: Verify the sub is well-formed**
-
-```bash
-grep -B 1 -A 22 "sub redrobin_http_post" adapters/cobaltstrike/redrobin.cna | head -25
-```
-
-Should show the new sub. No leftover `HttpRequest newBuilder` or `BodyPublishers` references.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add adapters/cobaltstrike/redrobin.cna
-git commit -m "refactor(cna): redrobin_http_post delegates to JAR helper
-
-All HTTP request building, sending, and response parsing now lives in
-com.redrobin.aggressor.RedRobinHttp.post() inside the JAR. The Sleep
-sub is a thin shim: dispatch the call, catch any exception, route to
-the appropriate operator-facing warn line, return ''.
-
-Note that argument lists use commas (not colons) per Sleep 2.1 Manual
-section 7.1. The prior HttpClient code used colons by mistake — that
-syntax 'worked by accident' for some method dispatch paths but is not
-idiomatic.
-
-Wire shape (POST body, headers, path) byte-identical to the prior
-HttpClient version — the JAR makes the same HTTP/1.1 call with the
-same Authorization, Content-Type, and JSON body. Daemon contract
-unchanged."
-```
-
----
-
-## Task 9: Rewrite `redrobin_http_get` to delegate to JAR
-
-**Files:**
-- Modify: `adapters/cobaltstrike/redrobin.cna`
-
-- [ ] **Step 1: Locate the current sub**
-
-```bash
-grep -n "sub redrobin_http_get" adapters/cobaltstrike/redrobin.cna
-```
-
-- [ ] **Step 2: Replace the entire sub**
-
-Find the block from `# ===== HTTP GET helper` (comment header) through the closing `}` of `redrobin_http_get`. Replace with:
+Find the block from `# ===== HTTP GET helper` through the closing `}` of `redrobin_http_get`. Replace with:
 
 ```sleep
 # ===== HTTP GET helper (delegates to JAR) =====
@@ -931,34 +831,95 @@ sub redrobin_http_get {
 }
 ```
 
-`[$result code]` and `[$result body]` access public fields on the inner `Response` class. Sleep's `getMethod` lookup falls through to field lookup when no matching method is found (per `sleep.engine.atoms.ObjectAccess` bytecode — Audit Agent #5).
+`[$result code]` and `[$result body]` access public fields on the inner `Response` class. Sleep's `getMethod` lookup falls through to field lookup when no matching method is found (per `sleep.engine.atoms.ObjectAccess` bytecode — verified in prior audit). The `Response` class declares both as `public final`, so the field-access path resolves without `setAccessible`.
 
-- [ ] **Step 3: Verify**
+- [ ] **Step 5: Update the boot block**
 
-```bash
-grep -B 1 -A 12 "sub redrobin_http_get" adapters/cobaltstrike/redrobin.cna | head -15
+Find the boot block (`# ===== Boot =====`). It currently reads:
+
+```sleep
+redrobin_init_http_client();
+$REDROBIN_TOKEN = redrobin_load_token();
+redrobin_handshake_with_retry();
 ```
 
-Should show the new sub.
+Replace with:
 
-- [ ] **Step 4: Commit**
+```sleep
+$REDROBIN_TOKEN = redrobin_load_token();
+redrobin_init_http();
+redrobin_handshake_with_retry();
+```
+
+**Order matters:** the JAR helper's constructor takes the token, so the token must be loaded BEFORE `redrobin_init_http()`.
+
+- [ ] **Step 6: Verify all 4 changes landed atomically**
+
+```bash
+# All three new symbols should exist
+grep -n "sub redrobin_init_http\b\|sub redrobin_http_post\b\|sub redrobin_http_get\b" adapters/cobaltstrike/redrobin.cna
+# All three old symbols should be GONE
+grep -n "redrobin_init_http_client\|REDROBIN_HTTP_CLIENT\|HttpRequest newBuilder\|BodyPublishers" adapters/cobaltstrike/redrobin.cna
+# Boot block should be in the correct order
+grep -B 1 -A 5 "# ===== Boot" adapters/cobaltstrike/redrobin.cna
+```
+
+Expected:
+- First grep: 3 hits (new subs exist)
+- Second grep: NO hits (old symbols cleared)
+- Third grep: shows `$REDROBIN_TOKEN = redrobin_load_token();` BEFORE `redrobin_init_http();` BEFORE `redrobin_handshake_with_retry();`
+
+If any of these don't match, the atomic pivot is incomplete — go back and finish.
+
+- [ ] **Step 7: Single atomic commit**
 
 ```bash
 git add adapters/cobaltstrike/redrobin.cna
-git commit -m "refactor(cna): redrobin_http_get delegates to JAR helper
+git commit -m "refactor(cna): atomic pivot — HttpClient -> JAR helper (POST + GET + init)
 
-Same delegation pattern as Task 8 (POST). The JAR's get(path) returns
-a Response object with public final fields 'code' and 'body'. The
-Sleep sub maps this to the hash shape the rest of the .cna expects:
-%(code => N, body => '...').
+Single architectural change replacing the entire java.net.http.HttpClient
+HTTP layer with delegation to com.redrobin.aggressor.RedRobinHttp loaded
+from the sibling jars/ dir via URLClassLoader.
 
-Heartbeat fork (unchanged) calls this sub every 30s. Wire request and
-hash return shape byte-identical to the prior HttpClient version."
+Four coordinated changes in one commit (must not be split — splitting
+leaves the .cna runtime-broken between intermediate states):
+
+  1. redrobin_init_http_client SUB replaced with redrobin_init_http.
+     New sub loads adapters/cobaltstrike/jars/redrobin-aggressor-http-1.0.0.jar
+     via URLClassLoader (PyCobalt pattern, since Sleep's 'import from:'
+     is broken on Java 9+) and instantiates RedRobinHttp(url, token).
+     \$REDROBIN_HTTP holds the helper instance.
+
+  2. redrobin_http_post REWRITTEN to a thin shim:
+     [\$REDROBIN_HTTP post: \$path, \$body]
+     wrapped in try/catch with the existing actionable error logging
+     (ConnectException, SocketTimeout, UnknownHost, HttpException, generic).
+
+  3. redrobin_http_get REWRITTEN to a thin shim:
+     [\$REDROBIN_HTTP get: \$path] -> %(code, body) hash.
+     code=0 on caught exception (heartbeat unreachable path),
+     code>=400 on daemon non-2xx (heartbeat warn path).
+
+  4. Boot block reordered: token loads BEFORE redrobin_init_http()
+     because the JAR ctor takes the token at construction time.
+
+Wire shape (POST body, headers, path; GET path, headers) byte-identical
+to prior versions. Daemon contract unchanged.
+
+Sleep idioms used throughout:
+  - multi-arg method calls use commas (Sleep manual S7.1) — NOT colons
+  - field access via [\$obj fieldName] no-args (Sleep falls through
+    method lookup to field lookup; verified in ObjectAccess bytecode)
+  - hasmatch for substring regex (Sleep manual S6) — Tasks 8/9 below
+    apply the same migration to handshake + verdict regexes
+
+After this commit the .cna still imports java.net.http.* and declares
+the unused \$REDROBIN_HTTP_CLIENT global — Task 10 removes those."
 ```
 
 ---
 
-## Task 10: Migrate handshake regex `ismatch` → `hasmatch`
+## Task 8: Migrate handshake regex `ismatch` → `hasmatch`
 
 **Files:**
 - Modify: `adapters/cobaltstrike/redrobin.cna` — `redrobin_handshake_with_retry` sub
@@ -1017,12 +978,12 @@ specified pattern.'"
 
 ---
 
-## Task 11: Migrate verdict regexes `ismatch` → `hasmatch`
+## Task 9: Migrate verdict regexes `ismatch` → `hasmatch`
 
 **Files:**
 - Modify: `adapters/cobaltstrike/redrobin.cna` — `redrobin_query_quick` sub
 
-Same root cause as Task 10, applied to the 5 verdict regexes (BLOCK action, BLOCK reason capture, WARN action, WARN reason capture, ESCALATE action). This is a **latent bug fix**: with `ismatch`, every verdict silently fell through to PASS, making the pre-flight gate a no-op.
+Same root cause as Task 8, applied to the 5 verdict regexes (BLOCK action, BLOCK reason capture, WARN action, WARN reason capture, ESCALATE action). This is a **latent bug fix**: with `ismatch`, every verdict silently fell through to PASS, making the pre-flight gate a no-op.
 
 - [ ] **Step 1: Locate the verdict regex block**
 
@@ -1123,12 +1084,12 @@ the operator's beacon console."
 
 ---
 
-## Task 12: Remove obsolete imports and globals
+## Task 10: Remove obsolete imports and globals
 
 **Files:**
 - Modify: `adapters/cobaltstrike/redrobin.cna` — imports + globals
 
-With the JAR delegating all HTTP work, the .cna no longer needs `java.net.http.*`, `java.time.Duration`, or `$REDROBIN_HTTP_CLIENT` directly.
+After Task 7's atomic pivot, the .cna no longer uses `java.net.http.*`, `java.time.Duration`, or `$REDROBIN_HTTP_CLIENT` — but the imports and the global declaration are still there. Clean them up so the script's surface area reflects its actual dependencies.
 
 - [ ] **Step 1: Remove `java.net.http.*` and `java.time.Duration` imports**
 
@@ -1187,7 +1148,7 @@ Expected: no matches.
 git add adapters/cobaltstrike/redrobin.cna
 git commit -m "refactor(cna): remove obsolete HttpClient imports and globals
 
-After Tasks 7-9 moved all HTTP work into the JAR, the .cna no longer
+After Task 7 moved all HTTP work into the JAR, the .cna no longer
 references java.net.http.*, java.time.Duration, or
 \$REDROBIN_HTTP_CLIENT directly.
 
@@ -1202,7 +1163,7 @@ referenced anywhere else in the script after the prior tasks landed."
 
 ---
 
-## Task 13: Update `docs/operator-setup.md`
+## Task 11: Update `docs/operator-setup.md`
 
 **Files:**
 - Modify: `docs/operator-setup.md`
@@ -1302,7 +1263,7 @@ hit (Java < 11, JAR missing)."
 
 ---
 
-## Task 14: Append "CNA JAR helper smoke" to `test_cna_smoke.md`
+## Task 12: Append "CNA JAR helper smoke" to `test_cna_smoke.md`
 
 **Files:**
 - Modify: `adapters/cobaltstrike/tests/test_cna_smoke.md`
@@ -1440,9 +1401,9 @@ broken and we'd need to root-cause before proceeding."
 
 ---
 
-## Task 15: Comprehensive end-to-end smoke validation
+## Task 13: Comprehensive end-to-end smoke validation
 
-This is the gate task — running all 7 sub-TCs from the new "CNA JAR helper smoke" section against real CS Client + Red Robin daemon + teamserver.
+This is the gate task — running all 7 sub-TCs from the "CNA JAR helper smoke" section (added in Task 12) against real CS Client + Red Robin daemon + teamserver.
 
 **Files:** None modified. Verification only.
 
@@ -1488,7 +1449,7 @@ Walk through each sub-TC in `adapters/cobaltstrike/tests/test_cna_smoke.md` "CNA
 
 If any TC fails:
 
-- Identify which task (T7-T14) introduced the regression. Use `git log --oneline` to see the commit range and `git bisect` if needed.
+- Identify which task (T7-T12) introduced the regression. Use `git log --oneline` to see the commit range and `git bisect` if needed.
 - Fix forward with a new commit (do NOT amend prior commits if they're already pushed).
 - Re-run the failing TC.
 
@@ -1510,31 +1471,34 @@ git push origin dev-juan
 - §5.2 RedRobinHttpTest.java → Task 3
 - §5.3 build.ps1 → Task 5
 - §5.4 build.sh → Task 5
-- §5.5 redrobin_init_http → Task 7
-- §5.6 redrobin_http_post → Task 8
-- §5.7 redrobin_http_get → Task 9
-- §5.8 handshake regex → Task 10
-- §5.9 verdict regex → Task 11
+- §5.5 redrobin_init_http → Task 7 Step 2 (atomic pivot)
+- §5.6 redrobin_http_post → Task 7 Step 3 (atomic pivot)
+- §5.7 redrobin_http_get → Task 7 Step 4 (atomic pivot)
+- §5.8 handshake regex → Task 8
+- §5.9 verdict regex → Task 9
 - §5.10 error sanitization → unchanged (preserved by not editing)
 - §5.11 Java version guard → unchanged (preserved)
-- §5.12 boot block → Task 7 Step 3
-- §6 Behavior contracts → preserved across Tasks 7-9 (commit messages document)
+- §5.12 boot block → Task 7 Step 5
+- §6 Behavior contracts → preserved across Task 7 (commit message documents)
 - §7 Java compatibility → version guard unchanged; JAR built with `--release 11`
 - §8 Security considerations → token handling unchanged; JAR ctor takes token, doesn't expose; explicit UTF-8 in JAR via HttpClient defaults
-- §9 Test plan → Task 3/4 (JUnit) + Task 14 (smoke doc) + Task 15 (run it)
-- §10 Rollback plan → per-task `git revert` simplicity (referenced in Task 15 Step 4)
-- §11 Implementation order → matches Tasks 1-15 (the spec listed T0-T12, this plan splits some into separate-commit tasks for atomicity)
+- §9 Test plan → Task 3/4 (JUnit) + Task 12 (smoke doc) + Task 13 (run it)
+- §10 Rollback plan → per-task `git revert` simplicity (referenced in Task 13 Step 4)
+- §11 Implementation order → matches Tasks 1-13 (spec listed T0-T12; Tasks 7-9 from spec collapsed into a single atomic Task 7 per audit fix to avoid runtime-broken intermediate commits)
 - §12 Open questions → Q1 (JUnit source) resolved in Task 2 Step 4/5; Q2 (manifest) resolved by `jar --create` default; Q3-Q5 carried as accepted constraints.
+
+**Audit fixes applied:**
+- 2026-05-17 audit found Tasks 7-9 split would leave the .cna in a runtime-broken state between commits (T7 removes `redrobin_init_http_client` but `$REDROBIN_HTTP_CLIENT` is still referenced by POST/GET helpers). Resolution: collapsed into one atomic Task 7 with 7 steps and one commit. Renumbered downstream tasks.
 
 **Placeholder scan:** No TBDs, no "implement later", no "similar to Task N". Each task contains full code, full commit message, and exact verification commands.
 
 **Type consistency:**
 - `RedRobinHttp(String baseUrl, String bearerToken)` ctor in Task 4 → called from Task 7's `newInstance: @($REDROBIN_URL, $REDROBIN_TOKEN)` ✓
-- `RedRobinHttp.post(String, String)` → called from Task 8's `[$REDROBIN_HTTP post: $path, $body]` ✓
-- `RedRobinHttp.get(String)` → called from Task 9's `[$REDROBIN_HTTP get: $path]` ✓
-- `RedRobinHttp.Response` (inner class with public `int code`, `String body`) → Task 9 reads `[$result code]` and `[$result body]` ✓
-- `RedRobinHttp.HttpException` (RuntimeException) → Task 8 catches it via Sleep's catch-binds-throwable + `hasmatch 'HttpException'` ✓
-- `$REDROBIN_HTTP` global declared inside Task 7's sub → read in Task 8 and Task 9 ✓
-- `redrobin_sanitize_error` unchanged from prior plan → called in Task 8 catch block ✓
+- `RedRobinHttp.post(String, String)` → called from Task 7's `[$REDROBIN_HTTP post: $path, $body]` ✓
+- `RedRobinHttp.get(String)` → called from Task 7's `[$REDROBIN_HTTP get: $path]` ✓
+- `RedRobinHttp.Response` (inner class with public `int code`, `String body`) → Task 7's GET helper reads `[$result code]` and `[$result body]` ✓
+- `RedRobinHttp.HttpException` (RuntimeException) → Task 7's POST helper catches it via Sleep's catch-binds-throwable + `hasmatch 'HttpException'` ✓
+- `$REDROBIN_HTTP` global declared inside Task 7's init sub → read by POST and GET helpers in the same task ✓
+- `redrobin_sanitize_error` unchanged from prior plan → called in Task 7's POST catch block ✓
 
 All references consistent. Ready for execution.
