@@ -148,20 +148,50 @@ Windows the loose-perms check is skipped; rely on NTFS ACLs. See
 ### Cobalt Strike Client Java requirement
 
 Red Robin's Aggressor script (`redrobin.cna`) requires **Java 11+** on the CS
-Client side. CS 4.7+ bundles Java 17+ in its standard distribution, so
-operators on stock CS launches are automatically on a supported JVM.
+Client side. CS 4.12 bundles OpenJDK 17 in its standard launcher per
+[Fortra Java dependency docs](https://www.cobaltstrike.com/help-java-dependency),
+so operators on stock CS launches are automatically on a supported JVM.
 
-**No JVM flags required.** Earlier Red Robin versions documented an
-`--add-opens java.base/sun.net.www.protocol.http=ALL-UNNAMED` workaround
-for Java module access issues. As of 2026-05-14 (the HTTP modernization
-refactor — see `docs/superpowers/specs/2026-05-14-cna-http-modernization-design.md`),
-the `.cna` uses the public `java.net.http.HttpClient` API and no longer
-requires any `--add-opens` flag.
+**No JVM flags required.** All HTTP work happens inside a Java helper JAR
+(`adapters/cobaltstrike/jars/redrobin-aggressor-http-1.0.0.jar`) loaded by
+the .cna via `URLClassLoader`. Sleep reflection targets only our public
+`com.redrobin.aggressor.RedRobinHttp` class — never `jdk.internal.*` or
+`sun.*` — so JVM access checks pass on stock launches.
 
-If the .cna fails to load with `Java ... detected. Red Robin requires
-Java 11+` in the Script Console, upgrade your JVM (Temurin 21 or
-Microsoft Build of OpenJDK 17 are both well-tested) and reload the
-script.
+**Launch CS Client via the official launcher** (no manual `java -jar`):
+
+```
+cobaltstrike.exe              # Windows
+./cobaltstrike-client         # Linux/Mac
+```
+
+**JAR co-location:** the .cna expects `redrobin-aggressor-http-1.0.0.jar`
+in a sibling `jars/` directory. If you cloned the Red-Robin repo, the
+layout is already correct:
+
+```
+adapters/cobaltstrike/
+├── redrobin.cna
+└── jars/
+    └── redrobin-aggressor-http-1.0.0.jar
+```
+
+If you copy the .cna elsewhere, also copy the `jars/` directory next to
+it (relative path `./jars/redrobin-aggressor-http-1.0.0.jar`).
+
+**Troubleshooting:**
+
+- If the .cna fails to load with `Java ... detected. Red Robin requires
+  Java 11+` in the Script Console, your CS Client JVM is older than 11.
+  Upgrade to a modern JDK (Temurin 17 or 21).
+- If the .cna fails with `ClassNotFoundException: com.redrobin.aggressor.RedRobinHttp`,
+  the JAR is missing or misplaced. Verify the sibling-jars layout above.
+
+**Historical note:** Earlier Red Robin versions documented an
+`--add-opens` JVM flag workaround. That is no longer needed as of the
+2026-05-17 JAR helper refactor — see
+`docs/superpowers/specs/2026-05-17-cna-jar-helper-design.md` for the
+architecture rationale.
 
 ## 6. Start the daemon
 
