@@ -177,18 +177,21 @@ sub redrobin_query_quick {
     $body .= '}';
     $response = redrobin_http_post("/v1/verdict/quick", $body);
 
-    # Crude JSON parse — extract action field via regex
-    if ($response ismatch '"action":"BLOCK"') {
+    # Crude JSON parse — extract action field via Sleep hasmatch (substring).
+    # ismatch (used previously) is full-string anchored and never matched
+    # the daemon's JSON wrapper, silently falling through to PASS — a
+    # latent bug that turned the pre-flight gate into a no-op.
+    if ($response hasmatch '"action":"BLOCK"') {
         local('$reason');
-        if ($response ismatch '"reason":"([^"]+)"') { $reason = matched()[0]; }
+        if ($response hasmatch '"reason":"([^"]+)"') { $reason = matched()[0]; }
         else { $reason = "see daemon log"; }
         return %(action => "BLOCK", reason => $reason);
-    } else if ($response ismatch '"action":"WARN"') {
+    } else if ($response hasmatch '"action":"WARN"') {
         local('$reason');
-        if ($response ismatch '"reason":"([^"]+)"') { $reason = matched()[0]; }
+        if ($response hasmatch '"reason":"([^"]+)"') { $reason = matched()[0]; }
         else { $reason = ""; }
         return %(action => "WARN", reason => $reason);
-    } else if ($response ismatch '"action":"ESCALATE"') {
+    } else if ($response hasmatch '"action":"ESCALATE"') {
         return %(action => "ESCALATE", reason => "Layer B reviewing");
     } else {
         return %(action => "PASS", reason => "");
