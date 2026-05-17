@@ -70,34 +70,27 @@ sub redrobin_load_token {
 }
 
 
-# ===== HTTP POST helper (blocking; ~150ms target on healthy daemon) =====
-# Uses java.net.http.HttpClient (public API since Java 11). No sun.*
-# reflection — works on stock CS Client launches without --add-opens.
-# On any exception: returns "" (preserves fail-open caller contract)
-# and logs an actionable error via warn().
+# ===== HTTP POST helper (delegates to JAR; ~150ms target on healthy daemon) =====
+# All HTTP machinery lives in com.redrobin.aggressor.RedRobinHttp.post().
+# Sleep just translates the call and handles errors with sanitized logging.
+# Returns response body string on success, "" on any error (fail-open
+# semantics preserved per caller contract).
 sub redrobin_http_post {
-    local('$path $body $reqBuilder $request $response $err');
+    local('$path $body $err');
     ($path, $body) = @_;
 
-    $reqBuilder = [HttpRequest newBuilder];
-    [$reqBuilder uri: [URI create: $REDROBIN_URL . $path]];
-    [$reqBuilder timeout: [Duration ofMillis: 200]];
-    [$reqBuilder header: "Authorization": "Bearer " . $REDROBIN_TOKEN];
-    [$reqBuilder header: "Content-Type": "application/json"];
-    [$reqBuilder POST: [java.net.http.HttpRequest$BodyPublishers ofString: $body]];
-    $request = [$reqBuilder build];
-
     try {
-        $response = [$REDROBIN_HTTP_CLIENT send: $request: [java.net.http.HttpResponse$BodyHandlers ofString]];
-        return [$response body];
+        return [$REDROBIN_HTTP post: $path, $body];
     } catch $e {
         $err = redrobin_sanitize_error($e);
-        if ($err ismatch '.*ConnectException.*' || $err ismatch '.*refused.*') {
+        if ($err hasmatch 'ConnectException' || $err hasmatch 'refused') {
             warn("[Red Robin] daemon connection refused at " . $REDROBIN_URL . " — is the daemon running?");
-        } else if ($err ismatch '.*HttpTimeout.*' || $err ismatch '.*timed out.*') {
+        } else if ($err hasmatch 'HttpTimeout' || $err hasmatch 'timed out') {
             warn("[Red Robin] daemon timeout at " . $REDROBIN_URL . " (>200ms) — slow network or overloaded daemon");
-        } else if ($err ismatch '.*UnknownHost.*') {
+        } else if ($err hasmatch 'UnknownHost') {
             warn("[Red Robin] cannot resolve daemon host in " . $REDROBIN_URL);
+        } else if ($err hasmatch 'HttpException') {
+            warn("[Red Robin] daemon returned non-2xx for " . $path . " — see daemon log");
         } else {
             warn("[Red Robin] HTTP error: " . $err);
         }
@@ -106,23 +99,17 @@ sub redrobin_http_post {
 }
 
 
-# ===== HTTP GET helper =====
-# Returns %(code => N, body => "..."). code=0 means "no response"
-# (network error); code>=400 means daemon answered but rejected.
+# ===== HTTP GET helper (delegates to JAR) =====
+# Returns %(code => N, body => "..."). code=0 means caught Java exception
+# (connect/timeout/DNS); code>=400 means daemon answered with non-2xx.
 # Caller chooses how to react to each.
 sub redrobin_http_get {
-    local('$path $reqBuilder $request $response');
+    local('$path $result');
     $path = $1;
 
-    $reqBuilder = [HttpRequest newBuilder];
-    [$reqBuilder uri: [URI create: $REDROBIN_URL . $path]];
-    [$reqBuilder timeout: [Duration ofMillis: 1000]];
-    [$reqBuilder GET];
-    $request = [$reqBuilder build];
-
     try {
-        $response = [$REDROBIN_HTTP_CLIENT send: $request: [java.net.http.HttpResponse$BodyHandlers ofString]];
-        return %(code => [$response statusCode], body => [$response body]);
+        $result = [$REDROBIN_HTTP get: $path];
+        return %(code => [$result code], body => [$result body]);
     } catch $e {
         return %(code => 0, body => "");
     }
@@ -280,20 +267,31 @@ sub redrobin_handshake_with_retry {
 }
 
 
-# ===== HttpClient singleton =====
-# Built once at script load, reused for every sync/async HTTP call.
-# Thread-safe per Java 11+ docs (supports concurrent send() from forks).
-sub redrobin_init_http_client {
-    local('$builder');
-    $builder = [HttpClient newBuilder];
-    [$builder connectTimeout: [Duration ofMillis: 200]];
-    $REDROBIN_HTTP_CLIENT = [$builder build];
+# ===== JAR helper init =====
+# Load com.redrobin.aggressor.RedRobinHttp from sibling jars/ dir via
+# URLClassLoader (Sleep's 'import from:' is broken on Java 9+ per the
+# PyCobalt comment at https://github.com/dcsync/pycobalt/blob/master/aggressor/json.cna).
+# The .cna NEVER reflects on jdk.internal or sun.* classes — Sleep only
+# touches our public RedRobinHttp class (loaded in the unnamed module,
+# same as Sleep itself, so JVM access check passes trivially).
+sub redrobin_init_http {
+    global('$REDROBIN_HTTP');
+    local('$jar_path $jar_url $loader $cls $string_cls $ctor');
+
+    $jar_path = script_resource() . '/jars/redrobin-aggressor-http-1.0.0.jar';
+    $jar_url = [new java.net.URL: 'file://' . $jar_path];
+    $loader = [new java.net.URLClassLoader: @($jar_url)];
+
+    $cls = [java.lang.Class forName: 'com.redrobin.aggressor.RedRobinHttp', false, $loader];
+    $string_cls = [java.lang.Class forName: 'java.lang.String'];
+    $ctor = [$cls getConstructor: @($string_cls, $string_cls)];
+    $REDROBIN_HTTP = [$ctor newInstance: @($REDROBIN_URL, $REDROBIN_TOKEN)];
 }
 
 
 # ===== Boot =====
-redrobin_init_http_client();
 $REDROBIN_TOKEN = redrobin_load_token();
+redrobin_init_http();
 redrobin_handshake_with_retry();
 
 
