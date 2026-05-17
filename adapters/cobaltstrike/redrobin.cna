@@ -253,7 +253,7 @@ sub redrobin_handshake_with_retry {
     $attempt = 1;
     while ($attempt <= 3) {
         $response = redrobin_http_post("/v1/adapters/connect", $manifest_json);
-        if ($response ismatch '"adapter_session_id":"(ses_[^"]+)"') {
+        if ($response hasmatch '"adapter_session_id":"(ses_[^"]+)"') {
             $REDROBIN_SESSION_ID = matched()[0];
             println("[Red Robin] handshake OK; session=" . $REDROBIN_SESSION_ID);
             return;
