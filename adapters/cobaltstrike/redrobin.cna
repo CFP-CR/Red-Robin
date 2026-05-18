@@ -18,10 +18,11 @@
 import java.net.*;
 import java.io.*;
 
-global('$REDROBIN_URL $REDROBIN_TOKEN $REDROBIN_SESSION_ID');
+global('$REDROBIN_URL $REDROBIN_TOKEN $REDROBIN_SESSION_ID $REDROBIN_HTTP');
 $REDROBIN_URL = "http://localhost:7777";
 $REDROBIN_TOKEN = "";
 $REDROBIN_SESSION_ID = "";
+$REDROBIN_HTTP = $null;
 
 
 # ===== Java version guard =====
