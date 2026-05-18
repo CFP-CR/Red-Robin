@@ -1,131 +1,171 @@
-# Tier 1A: direct Beacon commands. Each alias body extracts raw arg string
-# via the redrobin_alias_args() helper. This avoids the $2-is-first-token
-# trap (Aggressor docs: $2 = first whitespace-tokenized arg, NOT entire
-# arg string) AND guards against the Sleep substr() modular-wrap bug that
-# fired when the operator typed just the bare alias name with no args.
+# Tier 1A: direct Beacon commands. Each alias body uses redrobin_alias_parse()
+# to reconstruct both the args string and the full raw command line.
 #
 # Sleep function references use the symbol from BeaconTaskBridge bytecode
 # (see docs/aggressor-alias-args.md for mapping table — verified Phase 1 spike).
 
-# Extract raw arg string from $0 (full command line) given the alias name.
-# Returns "" if the operator typed just the bare alias name (no space, no args).
+# Parse an alias body's @_ into a hash with two keys:
+#   'args' — the args string, joined with spaces. "" if operator typed
+#            just the bare alias name.
+#   'raw'  — the reconstructed full command line: "<cmd>" or "<cmd> <args>".
+#            This is what gets sent to the daemon for rule eval — rules
+#            need the args to match patterns like "mimikatz logonpasswords"
+#            or "shell nxc ldap".
 #
-# Why: Sleep's substr($str, $start) does modular wrap-around when $start
-# exceeds strlen($str), so substr("mimikatz", 10) returns "imikatz" instead
-# of "". The naive substr($0, strlen("<cmd> ")+1) pattern dispatched
-# "imikatz" / "csync" / "exec" etc. as the args to the bare command —
-# mimikatz then errored with 'ERROR mimikatz_doLocal ; "imikatz" command of
-# "standard" module not found'. Discovered 2026-05-18 during T13 smoke.
-sub redrobin_alias_args {
-    local('$full $cmd $prefix_len');
-    ($full, $cmd) = @_;
-    $prefix_len = strlen($cmd) + 1;   # +1 for the space after the cmd name
-    if (strlen($full) > $prefix_len) {
-        return substr($full, $prefix_len + 1);   # +1 because Sleep substr is 1-indexed
+# CS Aggressor passes alias args via @_ as [bid, arg1, arg2, ...]. Quoting
+# is handled by CS: `mimikatz "lsadump::sam /system"` arrives as
+# [bid, "lsadump::sam /system"] (single arg).
+#
+# Empirical discovery 2026-05-18: $0 inside a CS Aggressor alias body
+# does NOT contain the full typed command line (despite CS docs). It
+# appears to be just the alias name. The previous pattern
+# substr($0, strlen("<cmd> ")+1) ALWAYS returned the wrong substring
+# because Sleep's substr modular-wraps when start > strlen($0). Bare
+# `mimikatz` AND `mimikatz logonpasswords` BOTH dispatched
+# &bmimikatz($bid, "imikatz") which mimikatz_doLocal rejected with
+# 'ERROR ... "imikatz" command of "standard" module not found'.
+#
+# Caller pattern:
+#   local('%p');
+#   %p = redrobin_alias_parse("mimikatz", @_);
+#   if (redrobin_gate($1, "mimikatz", %p['raw'])) {
+#       &bmimikatz($1, %p['args']);
+#   }
+sub redrobin_alias_parse {
+    local('$cmd @argv $args');
+    $cmd = $1;
+    @argv = $2;
+    if (size(@argv) <= 1) {
+        return %(args => "", raw => $cmd);
     }
-    return "";
+    $args = join(' ', sublist(@argv, 1));
+    return %(args => $args, raw => $cmd . " " . $args);
 }
 
 alias mimikatz {
-    if (redrobin_gate($1, "mimikatz", $0)) {
-        &bmimikatz($1, redrobin_alias_args($0, "mimikatz"));
+    local('%p');
+    %p = redrobin_alias_parse("mimikatz", @_);
+    if (redrobin_gate($1, "mimikatz", %p['raw'])) {
+        &bmimikatz($1, %p['args']);
     }
 }
 
 alias dcsync {
-    if (redrobin_gate($1, "dcsync", $0)) {
-        local('$rest @parts');
-        $rest = redrobin_alias_args($0, "dcsync");
-        @parts = split(' ', $rest);
+    local('%p @parts');
+    %p = redrobin_alias_parse("dcsync", @_);
+    if (redrobin_gate($1, "dcsync", %p['raw'])) {
+        @parts = split(' ', %p['args']);
         if (size(@parts) >= 2) {
             &bdcsync($1, @parts[0], @parts[1]);
         } else if (size(@parts) >= 1 && @parts[0] ne "") {
             &bdcsync($1, @parts[0]);
         }
-        # else: empty rest, don't dispatch — operator typed bare 'dcsync'
+        # else: empty args, don't dispatch — operator typed bare 'dcsync'
     }
 }
 
 alias hashdump {
-    if (redrobin_gate($1, "hashdump", $0)) {
+    if (redrobin_gate($1, "hashdump", "hashdump")) {
         &bhashdump($1);
     }
 }
 
 alias logonpasswords {
-    if (redrobin_gate($1, "logonpasswords", $0)) {
+    if (redrobin_gate($1, "logonpasswords", "logonpasswords")) {
         &blogonpasswords($1);
     }
 }
 
 alias kerberos_ticket_use {
-    if (redrobin_gate($1, "kerberos_ticket_use", $0)) {
-        &bkerberos_ticket_use($1, redrobin_alias_args($0, "kerberos_ticket_use"));
+    local('%p');
+    %p = redrobin_alias_parse("kerberos_ticket_use", @_);
+    if (redrobin_gate($1, "kerberos_ticket_use", %p['raw'])) {
+        &bkerberos_ticket_use($1, %p['args']);
     }
 }
 
 alias psexec {
-    if (redrobin_gate($1, "psexec", $0)) {
-        &bpsexec($1, redrobin_alias_args($0, "psexec"));
+    local('%p');
+    %p = redrobin_alias_parse("psexec", @_);
+    if (redrobin_gate($1, "psexec", %p['raw'])) {
+        &bpsexec($1, %p['args']);
     }
 }
 
 alias wmi {
-    if (redrobin_gate($1, "wmi", $0)) {
-        &bwmi($1, redrobin_alias_args($0, "wmi"));
+    local('%p');
+    %p = redrobin_alias_parse("wmi", @_);
+    if (redrobin_gate($1, "wmi", %p['raw'])) {
+        &bwmi($1, %p['args']);
     }
 }
 
 alias winrm {
-    if (redrobin_gate($1, "winrm", $0)) {
-        &bwinrm($1, redrobin_alias_args($0, "winrm"));
+    local('%p');
+    %p = redrobin_alias_parse("winrm", @_);
+    if (redrobin_gate($1, "winrm", %p['raw'])) {
+        &bwinrm($1, %p['args']);
     }
 }
 
 alias jump {
-    if (redrobin_gate($1, "jump", $0)) {
-        &bjump($1, redrobin_alias_args($0, "jump"));
+    local('%p');
+    %p = redrobin_alias_parse("jump", @_);
+    if (redrobin_gate($1, "jump", %p['raw'])) {
+        &bjump($1, %p['args']);
     }
 }
 
 alias spawn {
-    if (redrobin_gate($1, "spawn", $0)) {
-        &bspawn($1, redrobin_alias_args($0, "spawn"));
+    local('%p');
+    %p = redrobin_alias_parse("spawn", @_);
+    if (redrobin_gate($1, "spawn", %p['raw'])) {
+        &bspawn($1, %p['args']);
     }
 }
 
 alias bypassuac {
-    if (redrobin_gate($1, "bypassuac", $0)) {
-        &bbypassuac($1, redrobin_alias_args($0, "bypassuac"));
+    local('%p');
+    %p = redrobin_alias_parse("bypassuac", @_);
+    if (redrobin_gate($1, "bypassuac", %p['raw'])) {
+        &bbypassuac($1, %p['args']);
     }
 }
 
 alias getsystem {
-    if (redrobin_gate($1, "getsystem", $0)) {
+    if (redrobin_gate($1, "getsystem", "getsystem")) {
         &bgetsystem($1);
     }
 }
 
 alias elevate {
-    if (redrobin_gate($1, "elevate", $0)) {
-        &belevate($1, redrobin_alias_args($0, "elevate"));
+    local('%p');
+    %p = redrobin_alias_parse("elevate", @_);
+    if (redrobin_gate($1, "elevate", %p['raw'])) {
+        &belevate($1, %p['args']);
     }
 }
 
 alias inject {
-    if (redrobin_gate($1, "inject", $0)) {
-        &binject($1, redrobin_alias_args($0, "inject"));
+    local('%p');
+    %p = redrobin_alias_parse("inject", @_);
+    if (redrobin_gate($1, "inject", %p['raw'])) {
+        &binject($1, %p['args']);
     }
 }
 
 alias dllinject {
-    if (redrobin_gate($1, "dllinject", $0)) {
-        &bdllinject($1, redrobin_alias_args($0, "dllinject"));
+    local('%p');
+    %p = redrobin_alias_parse("dllinject", @_);
+    if (redrobin_gate($1, "dllinject", %p['raw'])) {
+        &bdllinject($1, %p['args']);
     }
 }
 
 alias psinject {
-    if (redrobin_gate($1, "psinject", $0)) {
-        &bpsinject($1, redrobin_alias_args($0, "psinject"));
+    local('%p');
+    %p = redrobin_alias_parse("psinject", @_);
+    if (redrobin_gate($1, "psinject", %p['raw'])) {
+        &bpsinject($1, %p['args']);
     }
 }

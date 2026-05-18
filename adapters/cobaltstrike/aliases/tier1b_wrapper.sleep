@@ -1,59 +1,61 @@
-# Tier 1B: wrappers. The DAEMON inspects $0 (full raw line) for arg patterns
-# like 'nxc ldap', 'Rubeus.exe kerberoast', 'Invoke-Mimikatz' etc. Each alias
-# stub just passes $0 to the gate and forwards if PASS/WARN.
+# Tier 1B: wrappers. The DAEMON inspects the raw command line for arg
+# patterns like 'nxc ldap', 'Rubeus.exe kerberoast', 'Invoke-Mimikatz' etc.
+# Each alias passes the reconstructed raw to the gate and dispatches the
+# args on PASS/WARN/ESCALATE. Uses redrobin_alias_parse() helper defined
+# in tier1a_gate.sleep (loaded first per redrobin.cna include order).
 
 alias shell {
-    if (redrobin_gate($1, "shell", $0)) {
-        local('$args');
-        $args = substr($0, strlen("shell ")+1);
-        &bshell($1, $args);
+    local('%p');
+    %p = redrobin_alias_parse("shell", @_);
+    if (redrobin_gate($1, "shell", %p['raw'])) {
+        &bshell($1, %p['args']);
     }
 }
 
 alias powershell {
-    if (redrobin_gate($1, "powershell", $0)) {
-        local('$args');
-        $args = substr($0, strlen("powershell ")+1);
-        &bpowershell($1, $args);
+    local('%p');
+    %p = redrobin_alias_parse("powershell", @_);
+    if (redrobin_gate($1, "powershell", %p['raw'])) {
+        &bpowershell($1, %p['args']);
     }
 }
 
 alias powerpick {
-    if (redrobin_gate($1, "powerpick", $0)) {
-        local('$args');
-        $args = substr($0, strlen("powerpick ")+1);
-        &bpowerpick($1, $args);
+    local('%p');
+    %p = redrobin_alias_parse("powerpick", @_);
+    if (redrobin_gate($1, "powerpick", %p['raw'])) {
+        &bpowerpick($1, %p['args']);
     }
 }
 
 alias execute-assembly {
-    if (redrobin_gate($1, "execute-assembly", $0)) {
-        local('$args');
-        $args = substr($0, strlen("execute-assembly ")+1);
-        &bexecute_assembly($1, $args);
+    local('%p');
+    %p = redrobin_alias_parse("execute-assembly", @_);
+    if (redrobin_gate($1, "execute-assembly", %p['raw'])) {
+        &bexecute_assembly($1, %p['args']);
     }
 }
 
 alias inline-execute {
-    if (redrobin_gate($1, "inline-execute", $0)) {
-        local('$args');
-        $args = substr($0, strlen("inline-execute ")+1);
-        &binline_execute($1, $args);
+    local('%p');
+    %p = redrobin_alias_parse("inline-execute", @_);
+    if (redrobin_gate($1, "inline-execute", %p['raw'])) {
+        &binline_execute($1, %p['args']);
     }
 }
 
 alias run {
-    if (redrobin_gate($1, "run", $0)) {
-        local('$args');
-        $args = substr($0, strlen("run ")+1);
-        &brun($1, $args);
+    local('%p');
+    %p = redrobin_alias_parse("run", @_);
+    if (redrobin_gate($1, "run", %p['raw'])) {
+        &brun($1, %p['args']);
     }
 }
 
 alias execute {
-    if (redrobin_gate($1, "execute", $0)) {
-        local('$args');
-        $args = substr($0, strlen("execute ")+1);
-        &bexecute($1, $args);
+    local('%p');
+    %p = redrobin_alias_parse("execute", @_);
+    if (redrobin_gate($1, "execute", %p['raw'])) {
+        &bexecute($1, %p['args']);
     }
 }
