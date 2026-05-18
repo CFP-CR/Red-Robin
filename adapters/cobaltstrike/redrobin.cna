@@ -335,19 +335,28 @@ sub redrobin_heartbeat {
     }
 }
 
-# Fire on a background thread so the main Aggressor event pump never blocks.
-# Sleep's fork() creates an isolated execution context — globals set in the
-# main thread are NOT visible to the fork (verified empirically 2026-05-18).
-# So we re-init the JAR helper inside the fork's own scope before entering
-# the heartbeat loop. \$REDROBIN_URL and \$REDROBIN_TOKEN are set via direct
-# assignment at script top-level (before any fork), and Sleep's fork()
-# captures those top-level scalars, so redrobin_init_http can read them
-# from the fork's scope. The new JAR helper instance gets stored in the
-# fork's local \$REDROBIN_HTTP via the sub's global() declaration.
-fork({
-    redrobin_init_http();
-    while (1) {
-        sleep(30000);
-        redrobin_heartbeat();
-    }
-});
+# ===== Heartbeat fork — DISABLED for v0.1 =====
+# Originally a 30s fork{} loop calling redrobin_heartbeat(). Empirical
+# testing 2026-05-18 proved Sleep's fork() creates a FULLY ISOLATED
+# execution context: top-level globals (set via global('$X')) are not
+# visible to the fork, AND top-level direct scalar assignments (like
+# $REDROBIN_URL = "...") are ALSO not visible. The fork's scope is
+# constructed from scratch.
+#
+# Operational impact of disabling: zero. Every redrobin_http_post call
+# (for handshake + per-alias verdict queries) already catches network
+# errors and emits "[Red Robin] daemon connection refused at ..." warn
+# lines. The operator sees daemon outages at the moment they trigger an
+# alias — not 30s later via a proactive heartbeat. Adequate for v0.1.
+#
+# Re-enable in v0.1.x via Sleep's lambda(...) to explicitly capture
+# variables INTO the fork closure (Task #110). Pattern:
+#   fork(lambda({ ... }, \$_http => \$REDROBIN_HTTP));
+# where \$_http becomes visible inside the closure body.
+#
+# fork({
+#     while (1) {
+#         sleep(30000);
+#         redrobin_heartbeat();
+#     }
+# });
