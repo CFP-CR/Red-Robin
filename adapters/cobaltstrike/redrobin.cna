@@ -74,6 +74,7 @@ sub redrobin_load_token {
 # Returns response body string on success, "" on any error (fail-open
 # semantics preserved per caller contract).
 sub redrobin_http_post {
+    global('$REDROBIN_HTTP $REDROBIN_URL $REDROBIN_TOKEN');
     local('$path $body $err');
     ($path, $body) = @_;
 
@@ -102,6 +103,7 @@ sub redrobin_http_post {
 # (connect/timeout/DNS); code>=400 means daemon answered with non-2xx.
 # Caller chooses how to react to each.
 sub redrobin_http_get {
+    global('$REDROBIN_HTTP $REDROBIN_URL $REDROBIN_TOKEN');
     local('$path $result');
     $path = $1;
 
