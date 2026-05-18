@@ -336,7 +336,16 @@ sub redrobin_heartbeat {
 }
 
 # Fire on a background thread so the main Aggressor event pump never blocks.
+# Sleep's fork() creates an isolated execution context — globals set in the
+# main thread are NOT visible to the fork (verified empirically 2026-05-18).
+# So we re-init the JAR helper inside the fork's own scope before entering
+# the heartbeat loop. \$REDROBIN_URL and \$REDROBIN_TOKEN are set via direct
+# assignment at script top-level (before any fork), and Sleep's fork()
+# captures those top-level scalars, so redrobin_init_http can read them
+# from the fork's scope. The new JAR helper instance gets stored in the
+# fork's local \$REDROBIN_HTTP via the sub's global() declaration.
 fork({
+    redrobin_init_http();
     while (1) {
         sleep(30000);
         redrobin_heartbeat();
