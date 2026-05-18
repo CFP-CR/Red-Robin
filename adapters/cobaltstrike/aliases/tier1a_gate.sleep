@@ -1,29 +1,48 @@
-# Tier 1A: direct Beacon commands. Each alias body uses the CANONICAL SAFE
-# PATTERN: substr($0, strlen("<cmd> ")+1) to extract raw arg string.
-# This avoids the $2-is-first-token trap (Aggressor docs: $2 = first
-# whitespace-tokenized arg, NOT entire arg string).
+# Tier 1A: direct Beacon commands. Each alias body extracts raw arg string
+# via the redrobin_alias_args() helper. This avoids the $2-is-first-token
+# trap (Aggressor docs: $2 = first whitespace-tokenized arg, NOT entire
+# arg string) AND guards against the Sleep substr() modular-wrap bug that
+# fired when the operator typed just the bare alias name with no args.
 #
 # Sleep function references use the symbol from BeaconTaskBridge bytecode
 # (see docs/aggressor-alias-args.md for mapping table — verified Phase 1 spike).
 
+# Extract raw arg string from $0 (full command line) given the alias name.
+# Returns "" if the operator typed just the bare alias name (no space, no args).
+#
+# Why: Sleep's substr($str, $start) does modular wrap-around when $start
+# exceeds strlen($str), so substr("mimikatz", 10) returns "imikatz" instead
+# of "". The naive substr($0, strlen("<cmd> ")+1) pattern dispatched
+# "imikatz" / "csync" / "exec" etc. as the args to the bare command —
+# mimikatz then errored with 'ERROR mimikatz_doLocal ; "imikatz" command of
+# "standard" module not found'. Discovered 2026-05-18 during T13 smoke.
+sub redrobin_alias_args {
+    local('$full $cmd $prefix_len');
+    ($full, $cmd) = @_;
+    $prefix_len = strlen($cmd) + 1;   # +1 for the space after the cmd name
+    if (strlen($full) > $prefix_len) {
+        return substr($full, $prefix_len + 1);   # +1 because Sleep substr is 1-indexed
+    }
+    return "";
+}
+
 alias mimikatz {
     if (redrobin_gate($1, "mimikatz", $0)) {
-        local('$args');
-        $args = substr($0, strlen("mimikatz ")+1);
-        &bmimikatz($1, $args);
+        &bmimikatz($1, redrobin_alias_args($0, "mimikatz"));
     }
 }
 
 alias dcsync {
     if (redrobin_gate($1, "dcsync", $0)) {
         local('$rest @parts');
-        $rest = substr($0, strlen("dcsync ")+1);
+        $rest = redrobin_alias_args($0, "dcsync");
         @parts = split(' ', $rest);
         if (size(@parts) >= 2) {
             &bdcsync($1, @parts[0], @parts[1]);
-        } else {
+        } else if (size(@parts) >= 1 && @parts[0] ne "") {
             &bdcsync($1, @parts[0]);
         }
+        # else: empty rest, don't dispatch — operator typed bare 'dcsync'
     }
 }
 
@@ -41,57 +60,43 @@ alias logonpasswords {
 
 alias kerberos_ticket_use {
     if (redrobin_gate($1, "kerberos_ticket_use", $0)) {
-        local('$args');
-        $args = substr($0, strlen("kerberos_ticket_use ")+1);
-        &bkerberos_ticket_use($1, $args);
+        &bkerberos_ticket_use($1, redrobin_alias_args($0, "kerberos_ticket_use"));
     }
 }
 
 alias psexec {
     if (redrobin_gate($1, "psexec", $0)) {
-        local('$args');
-        $args = substr($0, strlen("psexec ")+1);
-        &bpsexec($1, $args);
+        &bpsexec($1, redrobin_alias_args($0, "psexec"));
     }
 }
 
 alias wmi {
     if (redrobin_gate($1, "wmi", $0)) {
-        local('$args');
-        $args = substr($0, strlen("wmi ")+1);
-        &bwmi($1, $args);
+        &bwmi($1, redrobin_alias_args($0, "wmi"));
     }
 }
 
 alias winrm {
     if (redrobin_gate($1, "winrm", $0)) {
-        local('$args');
-        $args = substr($0, strlen("winrm ")+1);
-        &bwinrm($1, $args);
+        &bwinrm($1, redrobin_alias_args($0, "winrm"));
     }
 }
 
 alias jump {
     if (redrobin_gate($1, "jump", $0)) {
-        local('$args');
-        $args = substr($0, strlen("jump ")+1);
-        &bjump($1, $args);
+        &bjump($1, redrobin_alias_args($0, "jump"));
     }
 }
 
 alias spawn {
     if (redrobin_gate($1, "spawn", $0)) {
-        local('$args');
-        $args = substr($0, strlen("spawn ")+1);
-        &bspawn($1, $args);
+        &bspawn($1, redrobin_alias_args($0, "spawn"));
     }
 }
 
 alias bypassuac {
     if (redrobin_gate($1, "bypassuac", $0)) {
-        local('$args');
-        $args = substr($0, strlen("bypassuac ")+1);
-        &bbypassuac($1, $args);
+        &bbypassuac($1, redrobin_alias_args($0, "bypassuac"));
     }
 }
 
@@ -103,32 +108,24 @@ alias getsystem {
 
 alias elevate {
     if (redrobin_gate($1, "elevate", $0)) {
-        local('$args');
-        $args = substr($0, strlen("elevate ")+1);
-        &belevate($1, $args);
+        &belevate($1, redrobin_alias_args($0, "elevate"));
     }
 }
 
 alias inject {
     if (redrobin_gate($1, "inject", $0)) {
-        local('$args');
-        $args = substr($0, strlen("inject ")+1);
-        &binject($1, $args);
+        &binject($1, redrobin_alias_args($0, "inject"));
     }
 }
 
 alias dllinject {
     if (redrobin_gate($1, "dllinject", $0)) {
-        local('$args');
-        $args = substr($0, strlen("dllinject ")+1);
-        &bdllinject($1, $args);
+        &bdllinject($1, redrobin_alias_args($0, "dllinject"));
     }
 }
 
 alias psinject {
     if (redrobin_gate($1, "psinject", $0)) {
-        local('$args');
-        $args = substr($0, strlen("psinject ")+1);
-        &bpsinject($1, $args);
+        &bpsinject($1, redrobin_alias_args($0, "psinject"));
     }
 }
