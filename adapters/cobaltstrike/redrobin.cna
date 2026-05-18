@@ -279,7 +279,7 @@ sub redrobin_init_http {
     local('$jar_path $jar_url $loader $cls $string_cls $ctor');
 
     $jar_path = script_resource() . '/jars/redrobin-aggressor-http-1.0.0.jar';
-    $jar_url = [[new java.io.File: $jar_path] toURI] toURL];
+    $jar_url = [[[new java.io.File: $jar_path] toURI] toURL];
     $loader = [new java.net.URLClassLoader: @($jar_url)];
 
     $cls = [java.lang.Class forName: 'com.redrobin.aggressor.RedRobinHttp', false, $loader];
