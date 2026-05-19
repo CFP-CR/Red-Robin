@@ -216,3 +216,47 @@ Strengthens the prior weak connect-refused TC.
   [Red Robin] handshake OK; session=ses_<uuid>
   ```
   (Or attempt 2 then attempt 3 then success, depending on timing.)
+
+---
+
+## Layer B verdict visibility smoke (added 2026-05-20)
+
+These steps verify the refactor in `docs/superpowers/specs/2026-05-20-adapter-event-stream-design.md`. Requires daemon running, CS Client connected with .cna loaded, a real beacon already callbacked.
+
+### TC1: Layer B verdict reaches beacon console
+
+- [ ] Daemon running: `redrobin daemon start --host 127.0.0.1 --port 7777`
+- [ ] csrestapi running on teamserver (per runbook).
+- [ ] CS Client launched stock (no JVM flags), connected to teamserver, beacon active.
+- [ ] Load `adapters/cobaltstrike/redrobin.cna` in CS Client.
+- [ ] In daemon log expect: `INFO: ... "GET /v1/adapters/events ... HTTP/1.1" 101 Switching Protocols` (the WS upgrade — confirms the .cna's RedRobinEventStream connected).
+- [ ] In Script Console expect: `[Red Robin] handshake OK; session=ses_<uuid>` followed by `[Red Robin] .cna loaded; gate active.` No errors.
+- [ ] Type `mimikatz` in a beacon console.
+- [ ] Within ~1s, beacon console expect: `[Red Robin] novel pattern — Layer B reviewing async` (Layer A immediate response).
+- [ ] Within ~30s, the SAME beacon console expect a second line: `[Red Robin] Layer B BLOCK: <Claude rationale about Reflective DLL injection / mimikatz signatures>` (Layer B async verdict).
+
+If the second line appears, TC1 PASS.
+
+### TC2: Verdict for different command surfaces correctly
+
+- [ ] Type `shell whoami` in the beacon.
+- [ ] Layer A returns immediately (PASS — no rule fires; `whoami` executes).
+- [ ] Within ~30s, a `[Red Robin] Layer B WARN: <reason about cmd.exe child process>` line should appear (Claude's heuristic flag — matching the empirical evidence from 2026-05-18 smoke session in episodic.db).
+
+### TC3: Reconnect after daemon restart
+
+- [ ] With .cna loaded and idle, stop the daemon (Ctrl+C in daemon terminal).
+- [ ] Wait ~5s.
+- [ ] Restart daemon (`redrobin daemon start --host 127.0.0.1 --port 7777`).
+- [ ] Within ~60s the JAR should reconnect. Daemon log shows a new WS upgrade. Script Console may show a warn line about gap-during-reconnect (acceptable).
+- [ ] Trigger TC1 again (`mimikatz`). Verify Layer B verdict still arrives — proves the new WS connection works.
+
+### TC4: Cross-check verdict against episodic.db
+
+After TC1, run:
+
+```bash
+python C:/Users/jcspi/redrobin-smoke/_inspect_episodic.py 2>&1 | tail -20
+```
+
+The MOST RECENT row should match the verdict + reason that appeared in beacon for the `mimikatz` command. Confirms beacon console output = daemon's stored verdict (no truncation, no drift).
