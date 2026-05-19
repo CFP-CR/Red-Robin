@@ -295,12 +295,14 @@ Layer A's _publish_layer_a_event includes beacon_id in the payload
 pre-existing inconsistency that prevented the CS Aggressor adapter
 from routing Layer B verdicts back to the right beacon console.
 
-Threads beacon_id through from _run_layer_b (which already has it
-in scope) into _on_retroactive's signature, then into the published
-payload alongside correlation_id / verdict / reason.
+Threads beacon_id from quick_verdict (where it's already a parameter)
+through _run_layer_b's new beacon_id kwarg into _on_retroactive's
+signature, then into the published payload alongside correlation_id /
+verdict / reason.
 
-Resolves the test added by the prior commit. Existing pytest suite
-passes unchanged."
+Resolves the test added by the prior commit. Direct callers in
+test_verdict_emission.py (and any others surfaced by Step 6) get a
+beacon_id=\"bid_TEST\" placeholder; rest of the pytest suite unaffected."
 ```
 
 ---
@@ -358,8 +360,10 @@ git add protocol/schemas/v0.1/events/opsec_verdict.schema.json
 git commit -m "docs(protocol): add optional beacon_id to opsec.verdict schema
 
 Documents the field added by the prior commit. Optional rather than
-required because pre-v0.1.x trace replays predate the field — the
-working-memory reducer and TUI client tolerate its absence.
+required because (a) external adapters POSTing opsec.verdict envelopes
+pre-date the field, and (b) the bus payload that internally publishes
+beacon_id never traverses this schema — so making it required only
+constrains the wire ingestion path with no benefit.
 
 Spec: docs/superpowers/specs/2026-05-20-adapter-event-stream-design.md
 section 5.3."
@@ -1216,7 +1220,13 @@ if any operator still has 1.0.0 referenced.
 
 Verified: all 6 .class files present in 1.0.1 (RedRobinHttp +
 inner classes Response/HttpException, RedRobinEventStream + inner
-Listener, VerdictEvent). JUnit 4/4 pass on a clean rebuild."
+Listener, VerdictEvent). JUnit 4/4 pass on a clean rebuild.
+
+Note: this commit ships the new JARs but leaves redrobin.cna still
+referencing 1.0.0 — that .cna ref bump and the new event-stream
+wiring land in the next commit. Do NOT load redrobin.cna against
+this HEAD; it will fail with a file-not-found URL on the now-
+deleted redrobin-aggressor-http-1.0.0.jar."
 ```
 
 ---
@@ -1384,7 +1394,7 @@ Expected: empty.
 git add adapters/cobaltstrike/redrobin.cna
 git commit -m "feat(cna): consume opsec.verdict via RedRobinEventStream fork
 
-Single atomic commit (four coordinated changes — splitting would leave
+Single atomic commit (five coordinated changes — splitting would leave
 the .cna runtime-broken between intermediate states):
 
   1. Top-level global \$REDROBIN_EVENT_STREAM with \$null init.
