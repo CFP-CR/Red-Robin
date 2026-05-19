@@ -7,6 +7,10 @@
   "properties": {
     "type": {"const": "opsec.verdict"},
     "source_event_id": {"type": "string"},
+    "beacon_id": {
+      "type": "string",
+      "description": "ID of the beacon for which the verdict applies. Required for Layer A; included in Layer B as of v0.1.x."
+    },
     "severity": {"type": "string", "enum": ["INFO", "WARN", "DANGER", "ESCALATE"]},
     "reason": {"type": "string"},
     "rule_id": {"type": ["string", "null"]},
