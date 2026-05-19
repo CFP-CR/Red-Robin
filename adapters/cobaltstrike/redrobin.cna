@@ -18,11 +18,12 @@
 import java.net.*;
 import java.io.*;
 
-global('$REDROBIN_URL $REDROBIN_TOKEN $REDROBIN_SESSION_ID $REDROBIN_HTTP');
+global('$REDROBIN_URL $REDROBIN_TOKEN $REDROBIN_SESSION_ID $REDROBIN_HTTP $REDROBIN_EVENT_STREAM');
 $REDROBIN_URL = "http://localhost:7777";
 $REDROBIN_TOKEN = "";
 $REDROBIN_SESSION_ID = "";
 $REDROBIN_HTTP = $null;
+$REDROBIN_EVENT_STREAM = $null;
 
 
 # ===== Java version guard =====
@@ -281,7 +282,7 @@ sub redrobin_init_http {
     global('$REDROBIN_HTTP');
     local('$jar_path $jar_url $loader $cls $string_cls $ctor');
 
-    $jar_path = script_resource() . '/jars/redrobin-aggressor-http-1.0.0.jar';
+    $jar_path = script_resource() . '/jars/redrobin-aggressor-http-1.0.1.jar';
     $jar_url = [[[new java.io.File: $jar_path] toURI] toURL];
     $loader = [new java.net.URLClassLoader: @($jar_url)];
 
@@ -292,9 +293,32 @@ sub redrobin_init_http {
 }
 
 
+# ===== Event stream init =====
+# Load com.redrobin.aggressor.RedRobinEventStream from the same JAR as
+# RedRobinHttp + sibling json-20240303.jar (org.json parser). The stream's
+# WebSocket connection lives in a Java background thread — Sleep just polls
+# the resulting queue.
+sub redrobin_init_event_stream {
+    global('$REDROBIN_EVENT_STREAM');
+    local('$jar_path $json_jar_path $jar_url $json_url $loader $cls $string_cls $ctor');
+
+    $jar_path = script_resource() . '/jars/redrobin-aggressor-http-1.0.1.jar';
+    $json_jar_path = script_resource() . '/jars/json-20240303.jar';
+    $jar_url = [[[new java.io.File: $jar_path] toURI] toURL];
+    $json_url = [[[new java.io.File: $json_jar_path] toURI] toURL];
+    $loader = [new java.net.URLClassLoader: @($jar_url, $json_url)];
+
+    $cls = [java.lang.Class forName: 'com.redrobin.aggressor.RedRobinEventStream', false, $loader];
+    $string_cls = [java.lang.Class forName: 'java.lang.String'];
+    $ctor = [$cls getConstructor: @($string_cls, $string_cls)];
+    $REDROBIN_EVENT_STREAM = [$ctor newInstance: @($REDROBIN_URL, $REDROBIN_TOKEN)];
+}
+
+
 # ===== Boot =====
 $REDROBIN_TOKEN = redrobin_load_token();
 redrobin_init_http();
+redrobin_init_event_stream();
 redrobin_handshake_with_retry();
 
 
@@ -360,3 +384,28 @@ sub redrobin_heartbeat {
 #         redrobin_heartbeat();
 #     }
 # });
+
+
+# ===== Layer B verdict consumer fork =====
+# Async LLM judge (Layer B) finishes 10-30s after the operator typed a
+# command and publishes opsec.verdict events. This fork polls the
+# RedRobinEventStream's queue and surfaces verdicts to the relevant beacon
+# console via blog($bid, ...).
+#
+# Sleep fork() creates an isolated execution context that does NOT see
+# parent globals (verified empirically 2026-05-18, Task #110). lambda()
+# with explicit variable capture is the documented Sleep idiom for this —
+# see Sleep manual S10. We capture $REDROBIN_EVENT_STREAM as $_stream so
+# the fork body can call its pollEvent method.
+fork(lambda({
+    local('$evt $msg');
+    while (1) {
+        $evt = [$_stream pollEvent: 5000];   # 5s timeout, then loop again
+        if ($evt !is $null) {
+            if ([$evt source] eq "layer_b") {
+                $msg = "[Red Robin] Layer B " . [$evt verdict] . ": " . [$evt reason];
+                blog([$evt beaconId], $msg);
+            }
+        }
+    }
+}, $_stream => $REDROBIN_EVENT_STREAM));
