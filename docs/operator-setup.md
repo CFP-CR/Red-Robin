@@ -208,8 +208,13 @@ Red Robin's pre-flight gate has two layers:
   ```
   [Red Robin] Layer B BLOCK: <Claude's rationale>
   [Red Robin] Layer B WARN:  <Claude's rationale>
-  [Red Robin] Layer B ALLOW: <Claude's rationale>
   ```
+
+  Only `WARN` and `BLOCK` retroactive verdicts are surfaced. A clean
+  Layer B result (`PASS`) is silent — no news is good news. The full
+  enum is `PASS / WARN / BLOCK / ESCALATE`; `ESCALATE` is what Layer A
+  emits when it defers to Layer B, and Layer B's job is to upgrade that
+  to one of `PASS / WARN / BLOCK`.
 
 Layer B verdicts are delivered over a WebSocket subscription to the daemon
 (`/v1/adapters/events`), maintained by the
