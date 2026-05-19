@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from redrobin.api.app import create_app
 from redrobin.infrastructure.transport.bearer import get_or_create_token
@@ -27,12 +28,12 @@ def app_client(tmp_path, monkeypatch):
 
 def test_adapter_events_ws_rejects_invalid_token(app_client):
     _app, client = app_client
-    try:
+    with pytest.raises(WebSocketDisconnect) as excinfo:
         with client.websocket_connect("/v1/adapters/events?token=wrong"):
             pass
-    except Exception:
-        return
-    pytest.fail("expected websocket to be rejected")
+    assert excinfo.value.code == 1008, (
+        f"expected close code 1008 (policy violation / invalid token), got {excinfo.value.code}"
+    )
 
 
 def test_adapter_events_ws_forwards_opsec_verdict(app_client):
