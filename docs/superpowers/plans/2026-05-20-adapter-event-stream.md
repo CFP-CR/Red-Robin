@@ -206,28 +206,59 @@ Find the `_on_retroactive` method (around line 192-218). Replace its signature a
         )
 ```
 
-- [ ] **Step 3: Update `_run_layer_b` caller**
+- [ ] **Step 3: Thread `beacon_id` through `_run_layer_b` (two concrete edits)**
 
-Find the call site of `_on_retroactive` inside `_run_layer_b`. It should currently look like:
+`_run_layer_b` does NOT currently have `beacon_id` in scope (audited against verdict_pipeline.py:150-157). Make these two edits exactly as shown.
+
+**Edit A — extend `_run_layer_b` signature** (`verdict_pipeline.py:150-157`):
 
 ```python
-await self._on_retroactive(
-    correlation_id=...,
-    original_verdict=...,
-    new_verdict=...,
-    reason=...,
-)
+    async def _run_layer_b(
+        self,
+        *,
+        command: str,
+        raw: str,
+        source_event_id: str,
+        beacon_id: str,
+        original_action: VerdictAction,
+    ) -> None:
 ```
 
-Add `beacon_id=beacon_id` to the call. The `beacon_id` should already be in scope as a parameter or local of `_run_layer_b` (verify by reading the method); if it isn't, walk up the call chain and thread it through.
+**Edit B — pass `beacon_id` to `_on_retroactive`** (inside `_run_layer_b`, around `verdict_pipeline.py:183-188`):
 
-- [ ] **Step 4: Check for factory-bound external callers**
+```python
+        await self._on_retroactive(
+            correlation_id=source_event_id,
+            beacon_id=beacon_id,
+            original_verdict=original_action.value,
+            new_verdict=retro.action.value,
+            reason=retro.reason,
+        )
+```
+
+**Edit C — pass `beacon_id` at the `_run_layer_b` call site** (inside `quick_verdict`, around `verdict_pipeline.py:139-146`). `beacon_id` is already a parameter of `quick_verdict` (`:83`), so just thread it:
+
+```python
+            self._task_factory(
+                self._run_layer_b(
+                    command=command,
+                    raw=raw,
+                    source_event_id=source_event_id,
+                    beacon_id=beacon_id,
+                    original_action=verdict.action,
+                )
+            )
+```
+
+- [ ] **Step 4: Check for factory-bound external callers (informational)**
 
 ```bash
 grep -rn "_on_retroactive\|on_retroactive_verdict" redrobin/ 2>&1 | grep -v __pycache__
 ```
 
-If the factory binds `_on_retroactive` to a `LayerBEngine.on_retroactive_verdict` hook (as the docstring suggests), update that wiring so external Layer B implementations also pass `beacon_id`.
+Audited 2026-05-20: `verdict_pipeline_factory.py:206-207` binds `pipeline._on_retroactive` onto `LayerBEngine.on_retroactive_verdict`, BUT no production code currently invokes that bound hook — `grep "on_retroactive_verdict("` across the whole repo returns zero matches (the seam is forward-compat, see the docstring at `layer_b_engine.py:107-111`).
+
+So the binding line itself doesn't need editing — just the `_on_retroactive` signature change in Step 2 implicitly extends the seam contract. If grep surfaces a new caller introduced after this audit, thread `beacon_id` through it; otherwise this step is a no-op.
 
 - [ ] **Step 5: Run the Task 2 pytest to verify GREEN**
 
@@ -239,11 +270,18 @@ Expected: PASS.
 
 - [ ] **Step 6: Run the broader pipeline test suite to check no regressions**
 
+The audit confirmed the four real test files that exercise `_on_retroactive` / `_run_layer_b`:
+
 ```bash
-pytest tests/integration/test_verdict_pipeline.py tests/integration/test_verdict_pipeline_factory.py -v 2>&1 | tail -30
+pytest tests/unit/test_verdict_pipeline.py \
+       tests/integration/test_verdict_emission.py \
+       tests/integration/test_background_task_tracker.py \
+       tests/e2e/test_retroactive_journey.py -v 2>&1 | tail -40
 ```
 
-If any existing test breaks because it calls `_on_retroactive` without `beacon_id`, update those tests to pass a placeholder `beacon_id` value. Do NOT skip them.
+(`tests/integration/test_verdict_pipeline.py` and `test_verdict_pipeline_factory.py` do NOT exist — earlier draft used wrong paths; fixed during 2026-05-20 audit.)
+
+If any existing test breaks because it calls `_on_retroactive` without `beacon_id` (likely candidates: `test_verdict_emission.py` per the docstring at `verdict_pipeline_factory.py:216-218` — "the emission tests don't trigger Layer B; they call `pipeline._on_retroactive` directly"), update those tests to pass a placeholder `beacon_id="bid_TEST"` value. Do NOT skip them.
 
 - [ ] **Step 7: Commit**
 
@@ -272,7 +310,9 @@ passes unchanged."
 **Files:**
 - Modify: `protocol/schemas/v0.1/events/opsec_verdict.schema.json`
 
-The schema documents the protocol contract. The Layer B bus events are produced internally (not via POST), so the schema doesn't gate them, but keeping it accurate matters for protocol discoverability and future-proofing.
+**Audit note (2026-05-20):** This schema is the **wire** envelope (validated only at `POST /v1/events` ingestion, `events_router.py:60-73`). Its current required fields are `[type, source_event_id, severity, reason]` and `severity` uses `INFO/WARN/DANGER/ESCALATE`. The **bus** payload published by `_publish_layer_a_event` and `_on_retroactive` is a *different* shape entirely — `{correlation_id, beacon_id, command, verdict, reason, rule_id, source}` with `verdict` being `BLOCK/WARN/ALLOW/PASS/ESCALATE`. This wire-vs-bus divergence is pre-existing and out of scope for this spec.
+
+What this task does: adds `beacon_id` to the wire schema so any future adapter that POSTs an `opsec.verdict` envelope can include `beacon_id` without tripping `additionalProperties: false`. It does NOT (and can NOT) document the internal bus shape — the bus events are produced in-process and never traverse the schema. Forward-compat seam only.
 
 - [ ] **Step 1: Read the current schema**
 
@@ -334,53 +374,53 @@ section 5.3."
 
 - [ ] **Step 1: Write the failing pytest**
 
-Create `tests/integration/test_adapter_events_ws.py` with:
+Create `tests/integration/test_adapter_events_ws.py` with the same scaffold pattern used by the proven `tests/integration/test_tui_ws_broadcast.py` (lifespan context + `client.portal.call(...)` to bridge sync→async on the correct event loop — `asyncio.get_event_loop().run_until_complete(...)` runs on the WRONG loop and either deadlocks or no-ops with TestClient's portal):
 
 ```python
 """Integration tests for /v1/adapters/events WebSocket endpoint.
 
-Mirrors the testing pattern of tui_ws (tests/integration/test_tui_ws.py
-if it exists) but verifies the adapter-specific behavior:
+Mirrors test_tui_ws_broadcast.py: lifespan-bound TestClient + portal-call
+to publish from the sync test thread onto the daemon's async event loop.
 
+Cases:
   - Auth via ?token=<x> query parameter (same as TUI)
   - Server-side filter: only opsec.verdict events forwarded
-  - Drop-oldest backpressure on bus full
+  - Non-verdict events do NOT arrive (filter is selective, not blocking)
 """
 from __future__ import annotations
-
-import asyncio
-import json
 
 import pytest
 from fastapi.testclient import TestClient
 
 from redrobin.api.app import create_app
-from redrobin.application.transport_auth import get_or_create_token
+from redrobin.infrastructure.transport.bearer import get_or_create_token
 
 
-@pytest.fixture
-def app():
-    return create_app()
+@pytest.fixture()
+def app_client(tmp_path, monkeypatch):
+    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
+    app = create_app()
+    with TestClient(app) as client:
+        yield app, client
 
 
-@pytest.fixture
-def client(app):
-    return TestClient(app)
-
-
-def test_adapter_events_ws_rejects_invalid_token(client):
-    with pytest.raises(Exception):
+def test_adapter_events_ws_rejects_invalid_token(app_client):
+    _app, client = app_client
+    try:
         with client.websocket_connect("/v1/adapters/events?token=wrong"):
             pass
+    except Exception:
+        return
+    pytest.fail("expected websocket to be rejected")
 
 
-def test_adapter_events_ws_forwards_opsec_verdict(client, app):
+def test_adapter_events_ws_forwards_opsec_verdict(app_client):
+    app, client = app_client
     token = get_or_create_token()
     with client.websocket_connect(f"/v1/adapters/events?token={token}") as ws:
-        # Allow the subscribe() to register
-        async def publish():
-            bus = app.state.event_bus
-            await bus.publish({
+        client.portal.call(
+            app.state.event_bus.publish,
+            {
                 "type": "opsec.verdict",
                 "payload": {
                     "beacon_id": "bid_X",
@@ -390,27 +430,27 @@ def test_adapter_events_ws_forwards_opsec_verdict(client, app):
                     "correlation_id": "c_1",
                     "previous_verdict": "ESCALATE",
                 },
-            })
-
-        asyncio.get_event_loop().run_until_complete(publish())
+            },
+        )
         frame = ws.receive_json()
         assert frame["type"] == "opsec.verdict"
         assert frame["payload"]["beacon_id"] == "bid_X"
         assert frame["payload"]["source"] == "layer_b"
 
 
-def test_adapter_events_ws_filters_non_verdict_events(client, app):
+def test_adapter_events_ws_filters_non_verdict_events(app_client):
+    app, client = app_client
     token = get_or_create_token()
     with client.websocket_connect(f"/v1/adapters/events?token={token}") as ws:
-        async def publish():
-            bus = app.state.event_bus
-            # First publish a non-verdict event — must NOT arrive
-            await bus.publish({
-                "type": "host.observation",
-                "payload": {"hostname": "irrelevant"},
-            })
-            # Then a verdict — MUST arrive (proves filter is selective, not blocking)
-            await bus.publish({
+        # First publish a non-verdict event — must NOT arrive
+        client.portal.call(
+            app.state.event_bus.publish,
+            {"type": "host.observation", "payload": {"hostname": "irrelevant"}},
+        )
+        # Then a verdict — MUST arrive (proves filter is selective, not blocking)
+        client.portal.call(
+            app.state.event_bus.publish,
+            {
                 "type": "opsec.verdict",
                 "payload": {
                     "beacon_id": "bid_Y",
@@ -420,9 +460,8 @@ def test_adapter_events_ws_filters_non_verdict_events(client, app):
                     "correlation_id": "c_2",
                     "previous_verdict": "ESCALATE",
                 },
-            })
-
-        asyncio.get_event_loop().run_until_complete(publish())
+            },
+        )
         # If filter is broken, the first frame would be host.observation
         frame = ws.receive_json()
         assert frame["type"] == "opsec.verdict"
@@ -1264,32 +1303,9 @@ sub redrobin_init_event_stream {
 }
 ```
 
-- [ ] **Step 5: Update `redrobin_init_http` to load the json jar too**
+- [ ] **Step 5: Update the boot block**
 
-`redrobin_init_http` currently builds a URLClassLoader with only the main jar. Update it to include the json jar so RedRobinHttp gets the same classpath visibility (defensive — RedRobinHttp doesn't use org.json today but co-loading is harmless and keeps both classes in the same loader hierarchy).
-
-Find inside `redrobin_init_http`:
-
-```sleep
-    $jar_path = script_resource() . '/jars/redrobin-aggressor-http-1.0.1.jar';
-    $jar_url = [[[new java.io.File: $jar_path] toURI] toURL];
-    $loader = [new java.net.URLClassLoader: @($jar_url)];
-```
-
-Replace with:
-
-```sleep
-    $jar_path = script_resource() . '/jars/redrobin-aggressor-http-1.0.1.jar';
-    local('$json_jar_path $json_url');
-    $json_jar_path = script_resource() . '/jars/json-20240303.jar';
-    $jar_url = [[[new java.io.File: $jar_path] toURI] toURL];
-    $json_url = [[[new java.io.File: $json_jar_path] toURI] toURL];
-    $loader = [new java.net.URLClassLoader: @($jar_url, $json_url)];
-```
-
-(The pre-existing `local('...')` line at the top of `redrobin_init_http` declares `$jar_path $jar_url $loader $cls $string_cls $ctor`. We add `$json_jar_path $json_url` via a second `local()` call — Sleep allows multiple `local()` declarations in the same sub.)
-
-- [ ] **Step 6: Update the boot block**
+(Audit 2026-05-20 dropped the earlier "also load json jar into init_http" step: `RedRobinHttp` does not use `org.json`, and the two URLClassLoaders are independent sibling loaders anyway — adding the json URL to `init_http` would not put both classes in the same loader hierarchy. Leave `redrobin_init_http` as a single-URL `URLClassLoader` and let `redrobin_init_event_stream` own the json-jar URL independently.)
 
 Find the boot block (around line 294-297):
 
@@ -1310,7 +1326,7 @@ redrobin_handshake_with_retry();
 
 The order matters: `redrobin_init_event_stream` reads `$REDROBIN_URL` and `$REDROBIN_TOKEN` at construction time, so both must already be set.
 
-- [ ] **Step 7: Add the Layer B handler fork**
+- [ ] **Step 6: Add the Layer B handler fork**
 
 Find the disabled-heartbeat fork comment block (around line 338, search for `# ===== Heartbeat fork — DISABLED`). Immediately AFTER its closing comment (the commented-out `# fork({` block), insert:
 
@@ -1342,7 +1358,7 @@ fork(lambda({
 }, $_stream => $REDROBIN_EVENT_STREAM));
 ```
 
-- [ ] **Step 8: Verify everything landed atomically**
+- [ ] **Step 7: Verify everything landed atomically**
 
 ```bash
 grep -n "REDROBIN_EVENT_STREAM\|redrobin_init_event_stream\|fork(lambda" adapters/cobaltstrike/redrobin.cna
@@ -1362,7 +1378,7 @@ grep -n "1\.0\.0\.jar" adapters/cobaltstrike/redrobin.cna
 
 Expected: empty.
 
-- [ ] **Step 9: Commit (atomic .cna pivot)**
+- [ ] **Step 8: Commit (atomic .cna pivot)**
 
 ```bash
 git add adapters/cobaltstrike/redrobin.cna
@@ -1372,12 +1388,12 @@ Single atomic commit (four coordinated changes — splitting would leave
 the .cna runtime-broken between intermediate states):
 
   1. Top-level global \$REDROBIN_EVENT_STREAM with \$null init.
-  2. redrobin_init_http updated to:
-       - reference jars/redrobin-aggressor-http-1.0.1.jar (was 1.0.0)
-       - include sibling json-20240303.jar in URLClassLoader array
+  2. redrobin_init_http JAR ref bumped to 1.0.1 (was 1.0.0). Its
+     URLClassLoader is unchanged — RedRobinHttp doesn't use org.json.
   3. New redrobin_init_event_stream sub: loads RedRobinEventStream
-     class from same JAR + json.jar via URLClassLoader, constructs
-     instance with (\$REDROBIN_URL, \$REDROBIN_TOKEN).
+     class via its own URLClassLoader with both jars (main + json.jar),
+     constructs instance with (\$REDROBIN_URL, \$REDROBIN_TOKEN). The
+     two subs keep independent loaders — sibling loaders, not shared.
   4. Boot block reordered: load_token -> init_http -> init_event_stream
      -> handshake_with_retry. Event stream must init AFTER token loads
      (ctor reads it) and AFTER http init (defensive ordering).
