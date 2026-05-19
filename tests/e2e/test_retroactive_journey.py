@@ -80,6 +80,7 @@ def test_retroactive_verdict_emits_second_event(daemon):
         client.portal.call(
             lambda: app.state.verdict_pipeline._on_retroactive(
                 correlation_id="c-retro",
+                beacon_id="bid_TEST",
                 original_verdict="PASS",
                 new_verdict="BLOCK",
                 reason="post-hoc EDR risk",

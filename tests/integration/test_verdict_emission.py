@@ -48,6 +48,7 @@ async def test_retroactive_callback_emits_event() -> None:
 
     await pipeline._on_retroactive(
         correlation_id="corr-002",
+        beacon_id="bid_TEST",
         original_verdict="PASS",
         new_verdict="BLOCK",
         reason="LLM flagged downstream impact",

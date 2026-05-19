@@ -141,6 +141,7 @@ class VerdictPipeline:
                     command=command,
                     raw=raw,
                     source_event_id=source_event_id,
+                    beacon_id=beacon_id,
                     original_action=verdict.action,
                 )
             )
@@ -153,6 +154,7 @@ class VerdictPipeline:
         command: str,
         raw: str,
         source_event_id: str,
+        beacon_id: str,
         original_action: VerdictAction,
     ) -> None:
         """Run Layer B async. Surface retroactive verdict via callback + bus if non-PASS."""
@@ -182,6 +184,7 @@ class VerdictPipeline:
         # verdict line by ``correlation_id``.
         await self._on_retroactive(
             correlation_id=source_event_id,
+            beacon_id=beacon_id,
             original_verdict=original_action.value,
             new_verdict=retro.action.value,
             reason=retro.reason,
@@ -191,6 +194,7 @@ class VerdictPipeline:
         self,
         *,
         correlation_id: str,
+        beacon_id: str,
         original_verdict: str,
         new_verdict: str,
         reason: str,
@@ -209,6 +213,7 @@ class VerdictPipeline:
                 "type": "opsec.verdict",
                 "payload": {
                     "correlation_id": correlation_id,
+                    "beacon_id": beacon_id,
                     "verdict": new_verdict,
                     "previous_verdict": original_verdict,
                     "reason": reason,
