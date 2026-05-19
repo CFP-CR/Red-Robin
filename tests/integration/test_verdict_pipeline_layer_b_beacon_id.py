@@ -12,18 +12,18 @@ import asyncio
 import pytest
 
 from redrobin.application.event_bus import EventBus
-from redrobin.application.verdict_pipeline import VerdictPipeline
+from redrobin.application.verdict_pipeline_factory import build_pipeline_for_test
 
 
 @pytest.mark.asyncio
-async def test_layer_b_publish_includes_beacon_id():
+async def test_layer_b_publish_includes_beacon_id() -> None:
+    """Layer B retroactive payload must include beacon_id for blog($bid, ...) routing."""
     bus = EventBus()
     queue = await bus.subscribe()
 
     # Instantiate the pipeline with the bus; layer_a / layer_b providers
     # are not exercised in this test — we call _on_retroactive directly.
-    pipeline = VerdictPipeline.__new__(VerdictPipeline)  # type: ignore[call-arg]
-    pipeline._bus = bus  # type: ignore[attr-defined]
+    pipeline = build_pipeline_for_test(event_bus=bus)
 
     await pipeline._on_retroactive(
         correlation_id="evt_abc123",
