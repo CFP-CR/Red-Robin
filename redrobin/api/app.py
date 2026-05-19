@@ -40,6 +40,7 @@ from redrobin.api.lifespan_helpers import (
     start_working_memory,
 )
 from redrobin.api.tui_ws import router as tui_ws_router
+from redrobin.api.adapter_events_ws import router as adapter_events_ws_router
 from redrobin.api.verdicts_router import router as verdicts_router
 from redrobin.application.config import Settings, validate_for_boot
 from redrobin.application.startup_banner import format_banner
@@ -202,6 +203,7 @@ def create_app() -> FastAPI:
     app.include_router(verdicts_router)
     app.include_router(events_router)
     app.include_router(tui_ws_router)
+    app.include_router(adapter_events_ws_router)
 
     @app.get("/v1/ping")
     async def ping() -> dict[str, bool]:
