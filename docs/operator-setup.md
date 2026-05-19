@@ -153,7 +153,7 @@ Client side. CS 4.12 bundles OpenJDK 17 in its standard launcher per
 so operators on stock CS launches are automatically on a supported JVM.
 
 **No JVM flags required.** All HTTP work happens inside a Java helper JAR
-(`adapters/cobaltstrike/jars/redrobin-aggressor-http-1.0.0.jar`) loaded by
+(`adapters/cobaltstrike/jars/redrobin-aggressor-http-1.0.1.jar`) loaded by
 the .cna via `URLClassLoader`. Sleep reflection targets only our public
 `com.redrobin.aggressor.RedRobinHttp` class — never `jdk.internal.*` or
 `sun.*` — so JVM access checks pass on stock launches.
@@ -165,7 +165,7 @@ cobaltstrike.exe              # Windows
 ./cobaltstrike-client         # Linux/Mac
 ```
 
-**JAR co-location:** the .cna expects `redrobin-aggressor-http-1.0.0.jar`
+**JAR co-location:** the .cna expects `redrobin-aggressor-http-1.0.1.jar`
 in a sibling `jars/` directory. If you cloned the Red-Robin repo, the
 layout is already correct:
 
@@ -173,11 +173,12 @@ layout is already correct:
 adapters/cobaltstrike/
 ├── redrobin.cna
 └── jars/
-    └── redrobin-aggressor-http-1.0.0.jar
+    ├── redrobin-aggressor-http-1.0.1.jar
+    └── json-20240303.jar
 ```
 
 If you copy the .cna elsewhere, also copy the `jars/` directory next to
-it (relative path `./jars/redrobin-aggressor-http-1.0.0.jar`).
+it (relative path `./jars/redrobin-aggressor-http-1.0.1.jar`).
 
 **Troubleshooting:**
 

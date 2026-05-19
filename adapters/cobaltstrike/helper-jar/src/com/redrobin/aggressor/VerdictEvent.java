@@ -12,7 +12,7 @@ public class VerdictEvent {
     public final String type;             // "opsec.verdict"
     public final String source;           // "layer_a" or "layer_b"
     public final String beaconId;
-    public final String verdict;          // "BLOCK", "WARN", "ALLOW", "ESCALATE"
+    public final String verdict;          // "BLOCK", "WARN", "ESCALATE" (PASS is filtered out before publish)
     public final String reason;
     public final String correlationId;
     public final String previousVerdict;  // populated for layer_b only; "" otherwise
