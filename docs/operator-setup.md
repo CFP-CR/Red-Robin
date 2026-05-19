@@ -193,6 +193,41 @@ it (relative path `./jars/redrobin-aggressor-http-1.0.0.jar`).
 `docs/superpowers/specs/2026-05-17-cna-jar-helper-design.md` for the
 architecture rationale.
 
+### Layer B (async) verdict visibility
+
+Red Robin's pre-flight gate has two layers:
+
+- **Layer A** — synchronous Sigma/YAML rule eval (~150 ms). Verdicts surface
+  in the beacon console immediately as `[Red Robin] DANGER: ...`,
+  `[Red Robin] WARN: ...`, or `[Red Robin] novel pattern — Layer B reviewing async`.
+
+- **Layer B** — async Claude LLM judge (~10–30 s). When Layer B finishes
+  evaluating a command that Layer A marked as ESCALATE, its verdict surfaces
+  back to the **same beacon console** as a second line:
+
+  ```
+  [Red Robin] Layer B BLOCK: <Claude's rationale>
+  [Red Robin] Layer B WARN:  <Claude's rationale>
+  [Red Robin] Layer B ALLOW: <Claude's rationale>
+  ```
+
+Layer B verdicts are delivered over a WebSocket subscription to the daemon
+(`/v1/adapters/events`), maintained by the
+`com.redrobin.aggressor.RedRobinEventStream` class inside the helper JAR.
+No operator configuration required — the connection establishes
+automatically when `redrobin.cna` loads.
+
+If the daemon goes down, the WS connection drops; the JAR reconnects with
+exponential backoff (up to 60 s). Verdicts published during the gap are
+NOT replayed — check `episodic.db` for the historical record:
+
+```powershell
+python C:\Users\jcspi\redrobin-smoke\_inspect_episodic.py
+```
+
+(That helper script is in the engagement root, created during the
+2026-05-18 smoke session — copy it to new engagements as needed.)
+
 ## 6. Start the daemon
 
 ```bash
