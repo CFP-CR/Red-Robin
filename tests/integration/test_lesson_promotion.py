@@ -235,6 +235,12 @@ async def test_promoter_updates_occurrence_count_when_pattern_grows(
 
 @pytest.mark.asyncio
 async def test_lifespan_runs_promoter_periodically(tmp_path: Path, monkeypatch) -> None:
+    # Isolate from any active engagement on the dev machine's real ~/.redrobin/
+    # so EngagementService.current() returns None and the env-var-set
+    # REDROBIN_ENGAGEMENT_ID below wins via the degraded fallback path.
+    monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path))
+    monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
+    monkeypatch.delenv("REDROBIN_ENGAGEMENT_SLUG", raising=False)
     monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     monkeypatch.setenv("REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json"))
     monkeypatch.setenv("REDROBIN_EPISODIC_PATH", str(tmp_path / "ep.db"))

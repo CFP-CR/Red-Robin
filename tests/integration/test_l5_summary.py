@@ -274,6 +274,12 @@ async def test_lifespan_wires_summarizer_and_layer_b(
     summariser; we verify the periodic task fires within one interval and
     Layer B is wired to the same repo.
     """
+    # Isolate from any active engagement on the dev machine's real ~/.redrobin/
+    # so EngagementService.current() returns None and the env-var-set
+    # REDROBIN_ENGAGEMENT_ID below wins via the degraded fallback path.
+    monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path))
+    monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
+    monkeypatch.delenv("REDROBIN_ENGAGEMENT_SLUG", raising=False)
     monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     monkeypatch.setenv(
         "REDROBIN_WORKING_MEMORY_PATH",
