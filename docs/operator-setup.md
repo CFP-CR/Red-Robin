@@ -122,6 +122,59 @@ uv run redrobin engagement new acme-q2-2026 --client "Acme Corp"
 uv run redrobin engagement use acme-q2-2026
 ```
 
+### Engagement isolation and persistence layout
+
+After `redrobin engagement use <slug>`, the daemon stores per-engagement
+state under `~/.redrobin/engagements/<slug>/`:
+
+- `engagement.yaml` — scope, objectives, kill-chain status (operator-edited)
+- `working_memory.json` — live host/credential/finding/session facts
+- `episodic.db` — every verdict and observation, one row per event
+
+Each engagement is isolated: switching engagements never mixes hosts,
+credentials, or verdict history between them. The daemon resolves the
+active engagement at startup with this precedence:
+
+1. `REDROBIN_ENGAGEMENT_SLUG` env var (explicit override, primarily for
+   CI/tests)
+2. `~/.redrobin/.active_engagement` (written by `redrobin engagement use`)
+3. None — degraded mode
+
+**Degraded mode** (no engagement active): the daemon writes to root paths
+`~/.redrobin/{working_memory.json, episodic.db}` and tags all episodes
+with `engagement_id="eng-default"`. The daemon banner emits a clear
+warning when this happens — verdicts won't be persisted per-engagement.
+This mode primarily exists for tests and dev scripts; production operators
+should always activate an engagement first.
+
+**Cross-engagement state** (shared, NOT per-engagement):
+
+- `~/.redrobin/longterm.db` — long-term lessons promoted from episodic
+- `~/.redrobin/context_summaries.db` — L5 sliding-window summaries
+- `~/.redrobin/shared/` — anything explicitly meant to span engagements
+
+The corresponding env vars (`REDROBIN_LONGTERM_PATH`,
+`REDROBIN_SUMMARY_PATH`) are still honored — those repos are
+cross-engagement by design (long-term tradecraft + context spans
+engagements).
+
+**Env-var caveat:** when an engagement is active, the daemon ignores
+`REDROBIN_WORKING_MEMORY_PATH` and `REDROBIN_EPISODIC_PATH`. Paths are
+derived from the engagement directory unconditionally. Setting those
+env vars only takes effect in degraded mode.
+
+**Historical data (pre-2026-05-24):** episodic rows accumulated before
+the per-engagement isolation change live at `~/.redrobin/episodic.db`
+tagged `engagement_id="eng-default"`. They are not auto-migrated to
+per-engagement DBs. To query historical data:
+
+```bash
+sqlite3 ~/.redrobin/episodic.db "SELECT * FROM episodes WHERE engagement_id='eng-default' ORDER BY id DESC LIMIT 20"
+```
+
+New engagements created after this change get their own clean DB at
+`~/.redrobin/engagements/<slug>/episodic.db`.
+
 ## 5. Cobalt Strike adapter (optional)
 
 If you want the daemon to dispatch ALLOW verdicts to a real teamserver,
