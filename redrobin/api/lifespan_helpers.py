@@ -26,6 +26,7 @@ from fastapi import FastAPI
 from redrobin.application.config import Settings
 from redrobin.application.cs_adapter_lifecycle import build_adapter, load_adapter_configs
 from redrobin.application.engagement_loader import Engagement, EngagementLoader
+from redrobin.application.engagement_service import EngagementService
 from redrobin.application.event_bus import EventBus
 from redrobin.application.lesson_promoter import LessonPromoter
 from redrobin.application.longterm_lifecycle import (
@@ -181,17 +182,32 @@ async def start_working_memory(
 async def start_engagement(app: FastAPI, settings: Settings) -> tuple[None, None]:
     """Load ``engagement.yaml`` (if configured) and build ``ScopeEnforcer``.
 
+    Engagement resolution precedence (highest -> lowest):
+      1. Env var ``REDROBIN_ENGAGEMENT_SLUG`` (explicit override; CI/tests)
+      2. ``~/.redrobin/.active_engagement`` file (operator's persistent
+         choice via ``redrobin engagement use <slug>``)
+      3. None - degraded wildcard scope, episodic writes skipped
+
+    Without this fallback the daemon ignored the CLI's persistent active
+    marker, which silently no-op'd ``engagement use`` for any operator
+    not also exporting the env var.
+
     Stores the loaded engagement and the derived scope on
     ``app.state.engagement`` + ``app.state.scope``. When no slug is
     configured (or the file is missing) we fall back to a wildcard scope
     so the dev workflow without a configured engagement still works.
 
-    No closeable resource — returns ``(None, None)``. The caller's reverse
+    No closeable resource - returns ``(None, None)``. The caller's reverse
     iteration skips ``None`` close hooks.
     """
     engagements_dir = settings.engagements_dir
     assert engagements_dir is not None  # Settings._derive_paths guarantees this
     engagement_slug = settings.engagement_slug
+    if engagement_slug is None:
+        # Fall back to the persistent active marker that `redrobin engagement
+        # use` writes. EngagementService is the single source of truth for
+        # this file (see ACTIVE_FILE in engagement_service.py).
+        engagement_slug = EngagementService(settings.root).current()
     engagement: Engagement | None = None
     if engagement_slug:
         try:

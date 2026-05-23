@@ -47,7 +47,13 @@ def format_banner(
     lines.append("=" * 70)
     lines.append(f"  Listening:  http://{settings.host}:{settings.port}")
     lines.append(f"  Root:       {settings.root}")
-    lines.append(f"  Engagement: {engagement_name or '(none)'}")
+    if engagement_name:
+        lines.append(f"  Engagement: {engagement_name}")
+    else:
+        lines.append(
+            '  Engagement: (none) - WARNING: verdicts will NOT be persisted. '
+            'Run "redrobin engagement use <slug>" first.'
+        )
     lines.append(f"  Rules:      {rules_count}")
     lines.append(
         f"  Adapters:   {', '.join(adapter_names) if adapter_names else '(none)'}"
