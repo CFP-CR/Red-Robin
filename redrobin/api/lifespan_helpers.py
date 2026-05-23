@@ -115,20 +115,44 @@ async def start_working_memory(
     the first event published after lifespan startup is guaranteed to be
     observed.
 
-    Engagement may rewrite ``app.state.engagement_id`` after this helper
-    runs — the reducer reads the captured value at construction time and
-    that's the documented contract.
+    Engagement isolation: ``start_engagement`` runs FIRST in the lifespan
+    so ``app.state.engagement`` is already resolved by the time this
+    helper builds the reducer. When an engagement is active, working
+    memory + episodic paths resolve to
+    ``engagements/<slug>/{working_memory.json, episodic.db}`` and the
+    reducer captures the engagement's slug. When no engagement is
+    resolved (degraded mode), paths fall back to ``settings.*_path`` so
+    tests/CI that don't set up an engagement keep their existing
+    behavior. ``longterm`` and ``summary`` repos stay at root paths by
+    design — they're cross-engagement shared state.
 
     Close hook waits up to 2 s for the reducer to drain, then cancels.
     Matches the original lifespan timeout exactly.
     """
-    wm_path = settings.working_memory_path
-    assert wm_path is not None  # Settings._derive_paths guarantees this
+    # Engagement isolation: when start_engagement (which now runs first in
+    # the lifespan) has resolved an active engagement, point working_memory
+    # + episodic at engagements/<slug>/ so each engagement has isolated
+    # state. Degraded mode (no engagement resolved) falls back to the
+    # root paths from settings — preserves backwards compat for tests/CI
+    # that don't set up an engagement.
+    active_engagement = getattr(app.state, "engagement", None)
+    if active_engagement is not None:
+        engagement_id = active_engagement.slug
+        eng_dir = settings.engagements_dir / engagement_id
+        assert eng_dir.exists(), (
+            f"start_engagement resolved {engagement_id} but {eng_dir} "
+            f"does not exist — invariant violated"
+        )
+        wm_path = eng_dir / "working_memory.json"
+        ep_path = eng_dir / "episodic.db"
+    else:
+        engagement_id = settings.engagement_id
+        wm_path = settings.working_memory_path
+        ep_path = settings.episodic_path
+    assert wm_path is not None and ep_path is not None  # _derive_paths or branch above
     wm_path.parent.mkdir(parents=True, exist_ok=True)
     working_memory_repo = WorkingMemoryRepo(wm_path)
     app.state.working_memory_repo = working_memory_repo
-
-    engagement_id = settings.engagement_id
     app.state.engagement_id = engagement_id
 
     # Seed an empty working memory file if none exists so the reducer's
@@ -137,17 +161,11 @@ async def start_working_memory(
     if not working_memory_repo.exists():
         working_memory_repo.save(WorkingMemory(engagement_id=engagement_id))
 
-    # Episodic repo is required by the reducer constructor — build it
-    # here AND mirror it on app.state so ``start_lesson_promoter`` and
-    # ``start_l5_summarizer`` can reuse the same instance. Same for the
-    # longterm + summary repos: keeping all three together avoids three
-    # separate path-derivation passes.
-    ep_path = settings.episodic_path
+    # Longterm + summary repos stay at root paths by design — they're
+    # cross-engagement shared state (long-term lessons + kb summaries).
     lt_path = settings.longterm_path
     summary_path = settings.summary_path
-    assert (
-        ep_path is not None and lt_path is not None and summary_path is not None
-    )  # _derive_paths guarantees
+    assert lt_path is not None and summary_path is not None  # _derive_paths guarantees
     episodic_repo = EpisodicRepo(ep_path)
     longterm_repo = LongtermRepo(lt_path)
     summary_repo = ContextSummaryRepo(summary_path)

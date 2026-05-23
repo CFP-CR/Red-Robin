@@ -84,8 +84,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # ``finally`` block below for the current contract.
     _, close_bus = await start_event_bus(app, settings)
     _, stop_rules = await start_rules(app, settings)
+    await start_engagement(app, settings)  # no close hook — must run before working_memory so the reducer captures the resolved engagement_id
     _, close_wm = await start_working_memory(app, settings)
-    await start_engagement(app, settings)  # no close hook
     _, _close_pipeline = await start_pipeline(app, settings)  # no-op close
     _, close_adapters = await start_adapters(app, settings)
     _, close_promoter = await start_lesson_promoter(app, settings)
