@@ -386,26 +386,29 @@ sub redrobin_heartbeat {
 # });
 
 
-# ===== Layer B verdict consumer fork =====
+# ===== Layer B verdict consumer (heartbeat-driven) =====
 # Async LLM judge (Layer B) finishes 10-30s after the operator typed a
-# command and publishes opsec.verdict events. This fork polls the
-# RedRobinEventStream's queue and surfaces verdicts to the relevant beacon
-# console via blog($bid, ...).
+# command and publishes opsec.verdict events onto a Java BlockingQueue
+# inside RedRobinEventStream. This handler drains any queued verdicts on
+# every Aggressor heartbeat_5s tick (main script thread, full scope) and
+# surfaces each to the relevant beacon console via blog($bid, ...).
 #
-# Sleep fork() creates an isolated execution context that does NOT see
-# parent globals (verified empirically 2026-05-18, Task #110). lambda()
-# with explicit variable capture is the documented Sleep idiom for this —
-# see Sleep manual S10. We capture $REDROBIN_EVENT_STREAM as $_stream so
-# the fork body can call its pollEvent method.
-fork(lambda({
+# Why heartbeat_5s and not fork(): empirical testing 2026-05-23 (T14
+# smoke) proved that fork() + lambda($_x => $GLOBAL) does NOT propagate
+# $GLOBAL into the spawned ScriptInstance — the bound $_x is null in the
+# fork's scope. Same scope-isolation root cause as Task #110. heartbeat_5s
+# runs on the main thread, so $REDROBIN_EVENT_STREAM is directly visible.
+# Latency cost: up to 5s vs. ~instant — acceptable for v0.1 (Layer B
+# itself takes 10-30s, so 5s drain cadence is well within the budget).
+on heartbeat_5s {
     local('$evt $msg');
+    if ($REDROBIN_EVENT_STREAM is $null) { return; }
     while (1) {
-        $evt = [$_stream pollEvent: 5000];   # 5s timeout, then loop again
-        if ($evt !is $null) {
-            if ([$evt source] eq "layer_b") {
-                $msg = "[Red Robin] Layer B " . [$evt verdict] . ": " . [$evt reason];
-                blog([$evt beaconId], $msg);
-            }
+        $evt = [$REDROBIN_EVENT_STREAM pollEvent: 0];   # non-blocking drain
+        if ($evt is $null) { break; }
+        if ([$evt source] eq "layer_b") {
+            $msg = "[Red Robin] Layer B " . [$evt verdict] . ": " . [$evt reason];
+            blog([$evt beaconId], $msg);
         }
     }
-}, $_stream => $REDROBIN_EVENT_STREAM));
+}
