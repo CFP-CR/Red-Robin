@@ -135,6 +135,18 @@ sub redrobin_escape_json {
 # The Aggressor Script Console appears in engagement screenshots / shared
 # screens; an exception's toString() can include request headers in some
 # JVMs. Wrap every exception via this sub before printing.
+#
+# Three redaction layers (ordered most-specific to most-general):
+#   1. The raw token value (covers any place it appears verbatim).
+#   2. `Authorization: Bearer <token>` header pattern.
+#   3. `?token=<value>` / `&token=<value>` URL query params — added
+#      for #111. RedRobinEventStream builds its WS URL as
+#      `ws://.../v1/adapters/events?token=<bearer>` (see
+#      RedRobinEventStream.java:51). The JAR does not log the URL today,
+#      but any future Java exception whose message embeds the URI
+#      (URISyntaxException, IOException with cause) would leak the
+#      token here. This redaction is defensive and a no-op against
+#      today's logs.
 sub redrobin_sanitize_error {
     local('$err_str');
     $err_str = "" . $1;
@@ -142,6 +154,7 @@ sub redrobin_sanitize_error {
         $err_str = replace($err_str, $REDROBIN_TOKEN, '***REDACTED***');
     }
     $err_str = replace($err_str, 'Bearer [A-Za-z0-9_\-\.=]+', 'Bearer ***REDACTED***');
+    $err_str = replace($err_str, '([?&])token=[^\s&"\\\']+', '$1token=***REDACTED***');
     return $err_str;
 }
 
