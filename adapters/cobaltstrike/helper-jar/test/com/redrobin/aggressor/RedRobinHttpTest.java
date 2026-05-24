@@ -93,4 +93,57 @@ class RedRobinHttpTest {
         assertEquals(401, r.code);
         assertTrue(r.body.contains("unauthorized"));
     }
+
+    // ULID contract tests (added 2026-05-24 for #138). The wire envelope
+    // schema requires id to match `^evt_[0-9ABCDEFGHJKMNPQRSTVWXYZ]{26}$`
+    // (Crockford base32, 26 chars). These tests pin the ULID generator
+    // against that exact requirement.
+
+    @Test
+    void ulid_isExactly26Chars() {
+        RedRobinHttp http = new RedRobinHttp("http://localhost:7777", "token");
+        String id = http.ulid();
+        assertEquals(26, id.length(), "ULID must be exactly 26 chars");
+    }
+
+    @Test
+    void ulid_usesCrockfordAlphabetOnly() {
+        RedRobinHttp http = new RedRobinHttp("http://localhost:7777", "token");
+        String id = http.ulid();
+        // Crockford base32: 0-9 + A-Z minus I, L, O, U
+        assertTrue(id.matches("^[0-9ABCDEFGHJKMNPQRSTVWXYZ]{26}$"),
+                "ULID must use only Crockford base32 alphabet (got '" + id + "')");
+    }
+
+    @Test
+    void ulid_matchesEnvelopeSchemaPattern() {
+        RedRobinHttp http = new RedRobinHttp("http://localhost:7777", "token");
+        String id = "evt_" + http.ulid();
+        // Exact regex from protocol/schemas/v0.1/envelope.schema.json
+        assertTrue(id.matches("^evt_[0-9ABCDEFGHJKMNPQRSTVWXYZ]{26}$"),
+                "Prefixed ULID must match envelope schema regex");
+    }
+
+    @Test
+    void ulid_consecutiveCallsAreDistinct() {
+        RedRobinHttp http = new RedRobinHttp("http://localhost:7777", "token");
+        String a = http.ulid();
+        String b = http.ulid();
+        assertNotEquals(a, b, "Two consecutive ULID calls must produce distinct IDs");
+    }
+
+    @Test
+    void ulid_timestampPrefixIsMonotonic() throws InterruptedException {
+        RedRobinHttp http = new RedRobinHttp("http://localhost:7777", "token");
+        String early = http.ulid();
+        Thread.sleep(2);  // ensure ms-clock advances at least one tick
+        String late = http.ulid();
+        // First 10 chars encode the 48-bit ms timestamp. Lexicographic
+        // comparison in Crockford b32 preserves timestamp ordering.
+        String earlyTs = early.substring(0, 10);
+        String lateTs = late.substring(0, 10);
+        assertTrue(lateTs.compareTo(earlyTs) >= 0,
+                "Later ULID's ts prefix must compare >= earlier (earlyTs='"
+                        + earlyTs + "', lateTs='" + lateTs + "')");
+    }
 }
