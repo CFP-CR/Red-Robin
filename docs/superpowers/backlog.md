@@ -1,8 +1,25 @@
 # Red Robin — Backlog (v0.1.x → v0.2)
 
-Generated 2026-05-24 from in-session task tracker during the adapter event-stream + engagement-isolation work (commits `ec5dbe5` → `d949404`). These items were discovered while shipping the keystone v0.1 BLOCKER (#123) but were deliberately scoped out of the shipping commits to keep them atomic.
+Generated 2026-05-24 from in-session task tracker during the adapter event-stream + engagement-isolation work (commits `ec5dbe5` → `d949404`). Updated 2026-05-24 with current-sprint scope after critical-for-demo bugs cleared.
 
 Each entry below includes the bug source (commit / smoke session), reproduction notes, and recommended fix scope. None of these block the DEF CON RTV CFP demo (2026-05-31) unless explicitly marked **Critical for demo**.
+
+---
+
+## Current sprint scope (2026-05-24) — Rounds 1-4
+
+Decided 2026-05-24 to clear the v0.1.x hardening + docs + Layer B + obsolete-cleanup backlog before pivoting to the real-time assistant work. Each Plan runs through `writing-plans` → `auditing-plans` → `subagent-driven-development` (Opus 4.7) workflow.
+
+| Plan | Round | Items | Effort | Status |
+|---|---|---|---|---|
+| A | 1 — defensive hardening | `#125`, `#127`, `#137` | ~30 LOC, ~1.5h | Pending |
+| B | 1 — operator helper | `#131` | ~10 LOC + decision | Pending |
+| C | 2 — docs polish | `#116`, `#120`, `#111` | docs + smoke desc | Pending |
+| D | 3 — Layer B trigger investigation | `#130` | read-only audit, ~30 min | Pending |
+| E | 3 — Layer B prompt tuning (CONDITIONAL on D) | `#129` | prompt engineering, ~1-2h | Pending |
+| F | 4 — close obsoletes | `#110`, `#112` | verify + close, ~15 min | Pending |
+
+**Round 5-7 (refactors + v0.2 + infrastructure) deferred** to post-demo / separate sprint. See "Deferred — post-Round 4" section below.
 
 ---
 
@@ -79,19 +96,70 @@ Not blocking the demo, but visible operator pain points or known latent bugs.
 **Files:** `redrobin/api/lifespan_helpers.py:start_engagement` exception handler.
 **Fix:** Either (a) broaden the `except` to also catch `yaml.YAMLError` + `OSError` with `logger.warning` + wildcard fallback (consistent with current FileNotFoundError handler), OR (b) document "fail fast" as the deliberate policy and update the docstring. Pick one.
 
+### #111 — strengthen TC5 token-sanitization smoke
+**Source:** Pre-existing — Task #111 in tracker.
+**Symptom:** TC5 (token sanitization smoke from Task #115) currently checks that error logs don't include the bearer token in cleartext. The check is shallow — only matches the exact env-var value. Should also verify URL-with-?token= isn't logged, and that JAR's `onError` path doesn't leak the WS URL.
+**Files:** `adapters/cobaltstrike/tests/test_cna_smoke.md` (TC5 section); possibly extend `RedRobinHttp.sanitize_error()` / `RedRobinEventStream` logging.
+**Fix:** Audit log-emission code paths for any string that could embed the token, update TC5 smoke checklist with explicit grep patterns.
+
+### #116 — operator-setup.md: correct jdk.internal bug docs
+**Source:** Pre-existing — Task #116 in tracker.
+**Symptom:** After the JAR helper landed in #115, `docs/operator-setup.md` still contained stale guidance about the `jdk.internal` access bug that the JAR helper specifically resolves. Out-of-date docs mislead new operators.
+**Files:** `docs/operator-setup.md` (the JVM/jdk.internal section).
+**Fix:** Remove or rewrite the jdk.internal section to reflect that the JAR helper (RedRobinHttp + URLClassLoader pattern) sidesteps the access issue entirely.
+
+### #120 — helper-jar README + spec polish
+**Source:** Audit findings from #115/#119 (CNA JAR helper plan execution).
+**Symptom:** `adapters/cobaltstrike/helper-jar/README.md` and the design spec under `docs/superpowers/specs/` for the JAR helper have minor inaccuracies / outdated claims surfaced during the post-implementation audit.
+**Files:** `adapters/cobaltstrike/helper-jar/README.md`, possibly `docs/superpowers/specs/2026-05-17-cna-jar-helper-design.md`.
+**Fix:** Apply audit findings — typo fixes, refresh outdated claims, ensure README matches the shipped 1.0.2 JAR.
+
+### #110 — re-enable heartbeat fork (SUPERSEDED — to be closed in Plan F)
+**Source:** Pre-existing — filed during T11 when fork was disabled.
+**Status:** Empirically disproven 2026-05-23 during T14 smoke (#138 work) — Sleep `fork(lambda(...))` does NOT propagate captured globals into the spawned ScriptInstance. The proper pattern is `on heartbeat_5s` which runs on the main thread with full scope access. This is now the established pattern in `redrobin.cna` (Layer B verdict drain). Heartbeat fork was DISABLED in `b7c7c69` and never needs to be re-enabled — its purpose (daemon-liveness probe every 30s) is adequately covered by `redrobin_http_post` warn-on-failure inline error reporting.
+**Action in Plan F:** Mark CLOSED in task tracker with reference to the superseding pattern.
+
+### #112 — reconcile CS-version-to-Java-version claim across 3 sources (VERIFY in Plan F)
+**Source:** Pre-existing.
+**Symptom:** Three sources claim slightly different mappings between CS version and bundled Java version (operator-setup.md, the JAR helper spec, and the original audit doc). Inconsistency confuses operators choosing their CS bundle.
+**Files:** `docs/operator-setup.md`, possibly the JAR helper README + spec.
+**Action in Plan F:** Verify against Fortra's actual CS release notes for v4.12, pick the correct claim, propagate to all 3 sources. If already reconciled, mark CLOSED.
+
 ---
 
-## v0.2 — architectural cleanup
+## Deferred — post-Round 4 work (Rounds 5-7, schedule after demo)
 
-Larger refactors. Defer past v0.1.x.
+These items are real but were deliberately scoped OUT of the current sprint (2026-05-24) because they require their own focused session and don't block the DEF CON CFP demo. Each is sized at ~1-3 hours and benefits from a clean workspace.
 
-### #126 — `beacon_id` vs `bid` naming inconsistency across protocol schemas
+### Round 5 — v0.1.x refactors (~2-3h)
+
+#### #91 — v0.1.x: BOM-tolerant rules loader
+**Source:** Pre-existing (filed before current session).
+**Symptom:** YAML rules files with a UTF-8 BOM (`﻿` at file start) fail to parse cleanly. Operators editing rules in Notepad or VSCode may unknowingly add a BOM.
+**Files:** `redrobin/application/rules_loader.py` (or whichever module loads YAML rules — verify before fix).
+**Fix:** Strip BOM at read time, OR open with `encoding="utf-8-sig"` which auto-strips. Test against a BOM'd fixture.
+
+#### #109 — v0.1.x followup: handshake retry — distinguish network vs response-shape failure
+**Source:** Pre-existing.
+**Symptom:** `.cna`'s `redrobin_handshake_with_retry` treats all failure modes equally (network refused, daemon returned 4xx, bad JSON shape). Retry behavior should differentiate: retry on network errors, fail-fast on response-shape errors.
+**Files:** `adapters/cobaltstrike/redrobin.cna` (handshake retry block).
+**Fix:** Categorize the catch errors by class (ConnectException / HttpException / parse error), retry only network-class, log and stop on response-shape errors.
+
+#### #114 — v0.1.x followup: migrate `adapters/cobaltstrike/spike/` scripts to HttpClient
+**Source:** Pre-existing.
+**Symptom:** Spike (experimental) `.cna` scripts in `adapters/cobaltstrike/spike/` still use the legacy direct `import java.net.*` + URLConnection pattern. Production code migrated to RedRobinHttp helper JAR in Task #115; spikes never followed.
+**Files:** `adapters/cobaltstrike/spike/*.cna`.
+**Fix:** Refactor each spike to use `[$REDROBIN_HTTP post: ...]` pattern. Low priority — spikes are experimental and don't ship.
+
+### Round 6 — v0.2 architectural (~4-6h)
+
+#### #126 — `beacon_id` vs `bid` naming inconsistency across protocol schemas
 **Source:** T4 code review 2026-05-20
 **Symptom:** `opsec_verdict.schema.json` uses `beacon_id` (Daemon code path emits this). Sibling event schemas (`beacon_command_output`, `beacon_command_input`, `beacon_initial`, `credential_observed`, `host_observation`) all use `bid` (3 letters). Protocol-wide naming is split across event types.
 **Files:** `protocol/schemas/v0.1/events/*.schema.json` + Daemon emitters.
 **Fix:** Pick one canonical name (probably `bid` for terseness, but `beacon_id` is more self-documenting). Migrate the other side. Touches schema files + Daemon publishers + JAR parser (`VerdictEvent.beaconId`).
 
-### #135 — two `Engagement` classes with disjoint YAML schemas
+#### #135 — two `Engagement` classes with disjoint YAML schemas
 **Source:** B2 code review 2026-05-24
 **Symptom:** Two distinct classes both named `Engagement` coexist:
   1. `redrobin.domain.engagement.Engagement` — used by `EngagementService` (CLI). Fields: `.id`, `.client`. Writes YAML with `id`, `client`, `scope.in_scope`, `objectives`.
@@ -100,14 +168,33 @@ Result: `redrobin engagement new X` writes a YAML the loader can't fully consume
 **Files:** Both `Engagement` classes + `EngagementLoader` + `EngagementService.new()` template.
 **Fix:** Unify on one `Engagement` class with one YAML schema. Either migrate the writer (`EngagementService.new()` template) or the loader. Touch test fixtures that assume the current shape. Includes a `redrobin migrate engagement-yaml` step if pre-2026-05-24 YAML files need to be normalized.
 
+#### #113 — v0.2 followup: migrate `fork{}` async paths to `HttpClient.sendAsync()`
+**Source:** Pre-existing.
+**Symptom:** Several `.cna` paths still use Sleep `fork({...})` for async HTTP (now confirmed broken due to scope isolation, #134 + #110). The proper v0.2 migration is to push async to the Java side via `HttpClient.sendAsync()` rather than juggling Sleep forks.
+**Files:** `adapters/cobaltstrike/helper-jar/src/com/redrobin/aggressor/RedRobinHttp.java` (add `postAsync` returning CompletableFuture); affected `.cna` paths.
+**Fix:** Bigger architectural change. Move all async dispatch from Sleep fork() to Java ExecutorService-backed `HttpClient.sendAsync()`. Sleep callers become synchronous (or use Aggressor's `on heartbeat_Xs` pattern for polling, as already established in #134 fix).
+
+### Round 7 — infrastructure (~1h)
+
+#### #100 — CS REST API bring-up in Ansible role
+**Source:** Pre-existing.
+**Symptom:** `csrestapi` dies on droplet reboot (verified empirically multiple times during smoke 2026-05-22+). Currently manually respawned via SSH; should be systemd-unit-managed and provisioned by the Red Team Playground Ansible role.
+**Files:** `red-team-playground/ansible/roles/cobaltstrike-teamserver/` (verify path — outside this repo).
+**Fix:** Systemd unit file template + role task that installs+enables it. Tested via `terraform destroy && terraform apply` cycle.
+
+---
+
 ---
 
 ## Status of related closed tasks (for reference)
 
-- **#123** — v0.1.x BLOCKER: wire .cna to receive opsec.verdict (Layer B) events. **CLOSED** — keystone TC1+TC2+TC3 pass via beacon console + TUI. TC4 cross-check pending final verify post-B2 isolation work.
-- **#128** — T14 operator-run smoke gate. **In progress** — TC4 retry pending.
+- **#123** — v0.1.x BLOCKER: wire .cna to receive opsec.verdict (Layer B) events. **CLOSED** 2026-05-24 — keystone TC1+TC2+TC3+TC4 all pass.
+- **#128** — T14 operator-run smoke gate. **CLOSED** 2026-05-24 — full smoke validation passed.
 - **#132** — reducer no-ops when no engagement set. **CLOSED** by B2 (`8e2d280`).
+- **#133** — bare-args alias guards. **CLOSED** 2026-05-24 (`b3ed579`) — 7-case smoke verified.
+- **#134** — `$REDROBIN_HTTP null` in hooks. **CLOSED** 2026-05-24 (`b7c7c69`) — fork removed.
 - **#136** — clarify single-root episodic.db architecture. **CLOSED** — superseded by B2 implementation of per-engagement persistence + B3 docs.
+- **#138** — path-3 schema compliance. **CLOSED** 2026-05-24 (`006e83a`→`cf37d36`) — 5-commit sequence shipped ULID + RFC3339 + emit-sub refactor.
 
 ---
 
