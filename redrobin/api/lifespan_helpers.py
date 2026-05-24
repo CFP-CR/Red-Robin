@@ -21,6 +21,7 @@ import logging
 import os
 from typing import Any, Awaitable, Callable
 
+import yaml  # type: ignore[import-untyped]
 from fastapi import FastAPI
 
 from redrobin.application.config import Settings
@@ -236,6 +237,22 @@ async def start_engagement(app: FastAPI, settings: Settings) -> tuple[None, None
                 "falling back to wildcard scope",
                 engagement_slug,
                 engagements_dir,
+            )
+            engagement = None
+        except (yaml.YAMLError, OSError, UnicodeDecodeError) as exc:
+            # Broadened catch (#137) — malformed YAML, permission errors,
+            # encoding issues should NOT crash uvicorn at startup. Fall
+            # back to wildcard scope and warn loudly so the operator sees
+            # the problem in the banner / logs without losing daemon
+            # availability. FileNotFoundError stays a separate case above
+            # because its log message is specific to "file missing".
+            logger.warning(
+                "engagement slug %s present but engagement.yaml is "
+                "unreadable / malformed (%s: %s) — falling back to "
+                "wildcard scope. Fix the YAML and restart to recover.",
+                engagement_slug,
+                type(exc).__name__,
+                exc,
             )
             engagement = None
 
