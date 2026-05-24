@@ -12,7 +12,7 @@ Decided 2026-05-24 to clear the v0.1.x hardening + docs + Layer B + obsolete-cle
 
 | Plan | Round | Items | Effort | Status |
 |---|---|---|---|---|
-| A | 1 — defensive hardening | `#125`, `#127`, `#137` | ~30 LOC, ~1.5h | Pending |
+| A | 1 — defensive hardening | `#125`, `#127`, `#137` | ~30 LOC, ~1.5h | **DONE 2026-05-24** (4 commits `7a75836`→`b8be0d8`) |
 | B | 1 — operator helper | `#131` | ~10 LOC + decision | Pending |
 | C | 2 — docs polish | `#116`, `#120`, `#111` | docs + smoke desc | Pending |
 | D | 3 — Layer B trigger investigation | `#130` | read-only audit, ~30 min | Pending |
@@ -60,17 +60,11 @@ These materially affect the live demo experience or shipping correctness.
 
 Not blocking the demo, but visible operator pain points or known latent bugs.
 
-### #125 — `RedRobinEventStream.close()` on script unload
-**Source:** T11 code review 2026-05-20
-**Symptom:** `redrobin.cna` reload leaks the previous JAR's daemon thread + WebSocket. Each reload accumulates a stale `RedRobinEventStream` instance.
-**Files:** `adapters/cobaltstrike/redrobin.cna` (no `on script_unload` hook exists).
-**Fix:** Add `on script_unload { if ($REDROBIN_EVENT_STREAM !is $null) { [$REDROBIN_EVENT_STREAM close]; } }`. ~3 LOC.
+### #125 — `RedRobinEventStream.close()` on script unload (RESOLVED 2026-05-24 commit `b8be0d8`)
+Plan A T4 shipped. Added `on script_unload { if ($REDROBIN_EVENT_STREAM !is $null) { [$REDROBIN_EVENT_STREAM close]; } }` to redrobin.cna. Verified close() is idempotent (volatile shutdown flag handles repeated calls). Citation: Aggressor Script Manual (Fortra) + community precedent in harleyQu1nn/AggressorScripts.
 
-### #127 — WS endpoints don't handle `bus.subscribe()` exceptions cleanly
-**Source:** T6 code review 2026-05-20
-**Symptom:** Both `tui_ws.py:27` and `adapter_events_ws.py:31` call `queue = await bus.subscribe()` AFTER `websocket.accept()` but outside `try`. If `subscribe()` raises, `finally: bus.unsubscribe(queue)` hits `UnboundLocalError`. Pre-existing pattern; B2 didn't introduce it.
-**Files:** Both WS endpoints.
-**Fix:** Initialize `queue = None` before the call, guard `unsubscribe` with `if queue is not None`.
+### #127 — WS endpoints don't handle `bus.subscribe()` exceptions cleanly (RESOLVED 2026-05-24 commit `ae65a20`)
+Plan A T3 shipped. Both `tui_ws.py` and `adapter_events_ws.py`: initialized `queue = None` before try, moved `bus.subscribe()` inside try, guarded `finally` with `if queue is not None`. Happy path tests (6/6 WS) still green; no regressions in 187-test integration suite.
 
 ### #129 — Layer B is over-cautious WARN for benign recon
 **Source:** T14 smoke 2026-05-22 — `shell ipconfig` and `shell tasklist /v` returned Layer B WARN solely on the cmd.exe-child-spawn pattern.
@@ -90,11 +84,8 @@ Not blocking the demo, but visible operator pain points or known latent bugs.
 **Files:** `C:\Users\jcspi\redrobin-smoke\_inspect_episodic.py` (operator-local, NOT in repo).
 **Fix:** Add `sys.stdout.reconfigure(encoding="utf-8")` at top of script. Trivial one-line fix; operator can do it themselves.
 
-### #137 — broaden `start_engagement` exception handling (yaml + OSError)
-**Source:** B2 code review 2026-05-24
-**Symptom:** `lifespan_helpers.py:start_engagement` only catches `FileNotFoundError`. A malformed `engagement.yaml`, permission error, or unicode decode error crashes daemon startup with a stack trace.
-**Files:** `redrobin/api/lifespan_helpers.py:start_engagement` exception handler.
-**Fix:** Either (a) broaden the `except` to also catch `yaml.YAMLError` + `OSError` with `logger.warning` + wildcard fallback (consistent with current FileNotFoundError handler), OR (b) document "fail fast" as the deliberate policy and update the docstring. Pick one.
+### #137 — broaden `start_engagement` exception handling (RESOLVED 2026-05-24 commits `7a75836` + `c92710a`)
+Plan A T1+T2 shipped (TDD red→green). `lifespan_helpers.py:start_engagement` now catches `yaml.YAMLError`, `OSError`, `UnicodeDecodeError` in addition to `FileNotFoundError`. Same fallback (engagement=None, wildcard scope) with a distinct log line that names the exception type for diagnosis. Regression coverage: `tests/integration/test_engagement_malformed_yaml.py` (2 cases — malformed YAML + bad-UTF-8 encoding).
 
 ### #111 — strengthen TC5 token-sanitization smoke
 **Source:** Pre-existing — Task #111 in tracker.
