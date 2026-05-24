@@ -219,8 +219,12 @@ sub redrobin_gate {
 }
 
 
-# ===== Async event push (fire-and-forget, no blocking) =====
+# ===== Event push (synchronous; ~150ms via JAR timeout) =====
+# Name kept as `_async` for caller compatibility; semantics are now sync.
+# See T134 / Task #110: Sleep fork() creates an isolated ScriptInstance
+# with an empty global table, so the previous fork({...}) was broken.
 sub redrobin_push_event_async {
+    global('$REDROBIN_SESSION_ID');
     local('$type $bid $payload $body');
     ($type, $bid, $payload) = @_;
     $body = '{"spec_version":"0.1.0","id":"evt_' . [java.util.UUID randomUUID] . '","ts":"' . dstamp(ticks()) . '"' .
@@ -229,13 +233,21 @@ sub redrobin_push_event_async {
             ',"event":{"type":"' . $type . '","bid":"' . redrobin_escape_json($bid) . '","' .
             iff($type eq "beacon.command_output", "output", "raw") . '":"' . redrobin_escape_json($payload) . '"}' .
             '}';
-    fork({
-        try {
-            redrobin_http_post("/v1/events", $body);
-        } catch $e {
-            # silent — don't disrupt operator
-        }
-    }, \$body);
+    # Synchronous post. T11/T134 lesson: Sleep fork() creates an isolated
+    # ScriptInstance with an empty global table, so redrobin_http_post
+    # inside a fork loses access to $REDROBIN_HTTP. The fork was used here
+    # to avoid blocking the BEACON_OUTPUT filter / on beacon_tasked event,
+    # but blocking on a <200ms HTTP call (JAR enforces timeout) is the
+    # correct tradeoff — losing every beacon output line because the fork
+    # raises and Sleep suppresses the BEACON_OUTPUT return is catastrophic.
+    # See docs/superpowers/backlog.md #134 + #110 for the broader pattern.
+    try {
+        redrobin_http_post("/v1/events", $body);
+    } catch $e {
+        # Swallow silently — daemon outage already surfaces via
+        # redrobin_http_post's "[Red Robin] daemon connection refused" warn
+        # block. Reraising here would suppress operator beacon output.
+    }
 }
 
 
