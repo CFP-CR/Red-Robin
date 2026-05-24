@@ -14,7 +14,7 @@ Decided 2026-05-24 to clear the v0.1.x hardening + docs + Layer B + obsolete-cle
 |---|---|---|---|---|
 | A | 1 — defensive hardening | `#125`, `#127`, `#137` | ~30 LOC, ~1.5h | **DONE 2026-05-24** (4 commits `7a75836`→`b8be0d8`) |
 | B | 1 — operator helper | `#131` | ~10 LOC + decision | **DONE 2026-05-24** (commit `926e5da`) |
-| C | 2 — docs polish | `#116`, `#120`, `#111` | docs + smoke desc | Pending |
+| C | 2 — docs polish | `#116`, `#120`, `#111` | docs + smoke desc | **DONE 2026-05-24** (commits `62b5cbc` + `3147629` + `58af456` + `9667668`) |
 | D | 3 — Layer B trigger investigation | `#130` | read-only audit, ~30 min | Pending |
 | E | 3 — Layer B prompt tuning (CONDITIONAL on D) | `#129` | prompt engineering, ~1-2h | Pending |
 | F | 4 — close obsoletes | `#110`, `#112` | verify + close, ~15 min | Pending |
@@ -84,23 +84,14 @@ Plan B T1 shipped. Created `tools/inspect_episodic.py` — UTF-8-safe in-repo re
 ### #137 — broaden `start_engagement` exception handling (RESOLVED 2026-05-24 commits `7a75836` + `c92710a`)
 Plan A T1+T2 shipped (TDD red→green). `lifespan_helpers.py:start_engagement` now catches `yaml.YAMLError`, `OSError`, `UnicodeDecodeError` in addition to `FileNotFoundError`. Same fallback (engagement=None, wildcard scope) with a distinct log line that names the exception type for diagnosis. Regression coverage: `tests/integration/test_engagement_malformed_yaml.py` (2 cases — malformed YAML + bad-UTF-8 encoding).
 
-### #111 — strengthen TC5 token-sanitization smoke
-**Source:** Pre-existing — Task #111 in tracker.
-**Symptom:** TC5 (token sanitization smoke from Task #115) currently checks that error logs don't include the bearer token in cleartext. The check is shallow — only matches the exact env-var value. Should also verify URL-with-?token= isn't logged, and that JAR's `onError` path doesn't leak the WS URL.
-**Files:** `adapters/cobaltstrike/tests/test_cna_smoke.md` (TC5 section); possibly extend `RedRobinHttp.sanitize_error()` / `RedRobinEventStream` logging.
-**Fix:** Audit log-emission code paths for any string that could embed the token, update TC5 smoke checklist with explicit grep patterns.
+### #111 — strengthen token-sanitization smoke + close defensive gap (RESOLVED 2026-05-24 commits `58af456` + `9667668`)
+Plan C T3a + T3b shipped. Two-part fix. (1) Defensive (T3a, `58af456`): `redrobin_sanitize_error` in `adapters/cobaltstrike/redrobin.cna` gained a third redaction layer for `?token=<value>` / `&token=<value>` URL query params (`RedRobinEventStream` builds its WS URL as `ws://.../v1/adapters/events?token=<bearer>` per `RedRobinEventStream.java:51`; today the JAR doesn't log the URL so the leak is latent, but the regex closes the future-proofing gap). (2) Smoke (T3b, `9667668`): added new TC5 to the Layer B verdict visibility section of `adapters/cobaltstrike/tests/test_cna_smoke.md` with 5 explicit grep / Sleep probes covering Script Console, daemon log, sanitize_error sub direct-exercise, and a Bearer-header regression guard; same commit also fixes a dangling TC4 reference to the operator-local `_inspect_episodic.py` path (now points at the in-repo `tools/inspect_episodic.py` from Plan B #131). Probe 4 is the canonical operator-run validation since the .cna has no offline Sleep linter. Backlog title was misleading — original "TC5 token-sanitization" in tracker referred to a TC that was actually "Daemon offline (fail-open behavior)"; the real token-sanitization TCs live at §5 of 2026-05-14 smoke + §6 of 2026-05-17 smoke + the new TC5 of 2026-05-20 smoke shipped here.
 
-### #116 — operator-setup.md: correct jdk.internal bug docs
-**Source:** Pre-existing — Task #116 in tracker.
-**Symptom:** After the JAR helper landed in #115, `docs/operator-setup.md` still contained stale guidance about the `jdk.internal` access bug that the JAR helper specifically resolves. Out-of-date docs mislead new operators.
-**Files:** `docs/operator-setup.md` (the JVM/jdk.internal section).
-**Fix:** Remove or rewrite the jdk.internal section to reflect that the JAR helper (RedRobinHttp + URLClassLoader pattern) sidesteps the access issue entirely.
+### #116 — operator-setup.md: correct jdk.internal bug docs (RESOLVED 2026-05-24 commit `62b5cbc`)
+Plan C T1 shipped. Original framing of #116 (stale `jdk.internal` guidance) had already been resolved by `e056c28` (JAR helper documented as zero-flag) and `289f98c` (1.0.0 → 1.0.1 JAR filename purge) during the 2026-05-17 → 2026-05-20 sprint, so the JVM-flags prose at lines 202-248 of `docs/operator-setup.md` is clean: "No JVM flags required" (line 208), JAR helper + URLClassLoader architecture described (lines 209-212), and a correctly-scoped Historical note at lines 244-248. However the JAR filename references in that same section were stale at `redrobin-aggressor-http-1.0.1.jar` (4 occurrences at lines 209, 221, 229, 234) — the 2026-05-23 `0b85321` ship-commit bumped the JAR to 1.0.2 for the path-3 ulid envelope (#138), but operator-setup.md was missed in the second bump. T1 fixes that: `replace_all` 1.0.1.jar → 1.0.2.jar across all 4 occurrences. New operators following the guide now find the artifact at its actual on-disk filename.
 
-### #120 — helper-jar README + spec polish
-**Source:** Audit findings from #115/#119 (CNA JAR helper plan execution).
-**Symptom:** `adapters/cobaltstrike/helper-jar/README.md` and the design spec under `docs/superpowers/specs/` for the JAR helper have minor inaccuracies / outdated claims surfaced during the post-implementation audit.
-**Files:** `adapters/cobaltstrike/helper-jar/README.md`, possibly `docs/superpowers/specs/2026-05-17-cna-jar-helper-design.md`.
-**Fix:** Apply audit findings — typo fixes, refresh outdated claims, ensure README matches the shipped 1.0.2 JAR.
+### #120 — helper-jar README + spec polish (RESOLVED 2026-05-24 commit `3147629`)
+Plan C T2 shipped. README rewritten to match the 1.0.2 shipped JAR: kept the WHY-it-exists rationale focused on `jdk.internal.net.http.*` (the actual production reflection blocker) while pointing readers at spec §1.1 for the full audit of prior approaches that also failed access checks; added "Shipped classes (as of 1.0.2)" section documenting `RedRobinHttp` (with `ulid()` for #138), `RedRobinEventStream`, and `VerdictEvent`; added "Dependencies (vendored in `lib/`)" section calling out the org.json 20240303 runtime dependency (was missing); bumped the output filename from `1.0.0.jar` to `1.0.2.jar`; added `lib/json-20240303.jar` to the test-only run commands so `RedRobinEventStreamTest` compiles + runs. Spec at `docs/superpowers/specs/2026-05-17-cna-jar-helper-design.md` got a §13 "Post-spec additions (2026-05-17 → 2026-05-24)" audit appendix listing the shipped delta (EventStream + VerdictEvent + org.json + ulid + version bumps) with commit SHAs — spec body left intact since it's a historical design doc.
 
 ### #110 — re-enable heartbeat fork (SUPERSEDED — to be closed in Plan F)
 **Source:** Pre-existing — filed during T11 when fork was disabled.
