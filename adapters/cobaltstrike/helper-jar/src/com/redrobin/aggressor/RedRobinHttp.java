@@ -57,6 +57,47 @@ public class RedRobinHttp {
         return new Response(resp.statusCode(), resp.body());
     }
 
+    // ULID generator — used to produce wire envelope `id` values that
+    // match the v0.1 schema regex ^evt_[0-9ABCDEFGHJKMNPQRSTVWXYZ]{26}$.
+    // 48-bit ms timestamp prefix + 80-bit random suffix, Crockford-b32
+    // encoded. Spec: https://github.com/ulid/spec.
+
+    private static final char[] CROCKFORD_B32 = {
+        '0','1','2','3','4','5','6','7','8','9',
+        'A','B','C','D','E','F','G','H','J','K',
+        'M','N','P','Q','R','S','T','V','W','X','Y','Z'
+    };
+
+    private static final java.security.SecureRandom ULID_RNG = new java.security.SecureRandom();
+
+    public String ulid() {
+        long ts = System.currentTimeMillis();
+        byte[] randomness = new byte[10];  // 80 bits
+        ULID_RNG.nextBytes(randomness);
+
+        char[] out = new char[26];
+        // 10 chars for the 48-bit timestamp prefix (big-endian)
+        for (int i = 9; i >= 0; i--) {
+            out[i] = CROCKFORD_B32[(int) (ts & 0x1f)];
+            ts >>>= 5;
+        }
+        // 16 chars for the 80-bit random tail
+        int bitBuf = 0;
+        int bitsHeld = 0;
+        int outIdx = 10;
+        for (byte b : randomness) {
+            bitBuf = (bitBuf << 8) | (b & 0xff);
+            bitsHeld += 8;
+            while (bitsHeld >= 5) {
+                bitsHeld -= 5;
+                out[outIdx++] = CROCKFORD_B32[(bitBuf >>> bitsHeld) & 0x1f];
+            }
+        }
+        // 80 bits / 5 bits-per-char = 16 chars exactly, no leftover bits
+        // 10 (ts) + 16 (random) = 26 chars
+        return new String(out);
+    }
+
     public static class Response {
         public final int code;
         public final String body;
