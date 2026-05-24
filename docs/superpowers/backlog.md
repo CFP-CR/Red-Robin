@@ -15,7 +15,7 @@ Decided 2026-05-24 to clear the v0.1.x hardening + docs + Layer B + obsolete-cle
 | A | 1 — defensive hardening | `#125`, `#127`, `#137` | ~30 LOC, ~1.5h | **DONE 2026-05-24** (4 commits `7a75836`→`b8be0d8`) |
 | B | 1 — operator helper | `#131` | ~10 LOC + decision | **DONE 2026-05-24** (commit `926e5da`) |
 | C | 2 — docs polish | `#116`, `#120`, `#111` | docs + smoke desc | **DONE 2026-05-24** (commits `62b5cbc` + `3147629` + `58af456` + `9667668`) |
-| D | 3 — Layer B trigger investigation | `#130` | read-only audit, ~30 min | Pending |
+| D | 3 — Layer B trigger investigation | `#130` | read-only audit, ~30 min | **DONE 2026-05-24** (commit `83f696f`) |
 | E | 3 — Layer B prompt tuning (CONDITIONAL on D) | `#129` | prompt engineering, ~1-2h | Pending |
 | F | 4 — close obsoletes | `#110`, `#112` | verify + close, ~15 min | Pending |
 
@@ -72,11 +72,8 @@ Plan A T3 shipped. Both `tui_ws.py` and `adapter_events_ws.py`: initialized `que
 **Files:** Layer B prompt template (find in `redrobin/application/layer_b_engine.py` SYSTEM_PROMPT).
 **Fix:** Distinguish in the prompt: "the shell vehicle has a small detection cost — mention once per session, not per command" from "the payload command itself is actually risky — per-command WARN". Cross-reference Layer A's rule_id; when Layer A returned PASS, Layer B should default toward PASS unless something genuinely warrants escalation.
 
-### #130 — Layer B fires even when Layer A is silent
-**Source:** T14 smoke 2026-05-22
-**Symptom:** `shell ipconfig` and `shell tasklist /v` did NOT show "[Red Robin] novel pattern — Layer B reviewing async" but DID get Layer B WARN ~10s later. Either Layer A returned ESCALATE with a different `reason` (tier1a_gate.sleep prints "novel pattern" preamble conditionally on reason text), OR Layer B has a trigger path beyond ESCALATE.
-**Files:** `redrobin/application/verdict_pipeline.py:134` (Layer B trigger condition), `adapters/cobaltstrike/aliases/tier1a_gate.sleep` (novel-pattern preamble logic).
-**Fix:** Trace `_run_layer_b` invocations vs the Layer A reason text the alias is checking. Either fix the alias preamble to match all ESCALATE paths, OR document that Layer B can fire on other verdict types.
+### #130 — Layer B fires even when Layer A is silent (RESOLVED 2026-05-24 commit `83f696f`)
+Plan D shipped the investigation report at `docs/investigations/2026-05-24-layer-b-triggers.md`. Both #130 hypotheses ruled out: (A) the preamble's conditional at `redrobin.cna:228` is action-equality only, never reason-text-gated; (B) `_run_layer_b` has exactly one caller (`verdict_pipeline.py:139`), gated on `verdict.action == ESCALATE` — Layer B does NOT fire on `/v1/events` ingestion, the reducer, or any other path. Most likely actual root cause: client-side 200ms HTTP timeout in `RedRobinHttp.java:30,37` while the daemon completed Layer A → ESCALATE and scheduled Layer B before the response returned. The retroactive WARN reached the beacon console ~10s later via the WS event stream (`redrobin.cna:475-486`), independent of the gate POST. Backlog entry mis-cited two facts (corrected in the report): preamble lives in `redrobin.cna:229` (not `tier1a_gate.sleep`), and the preamble conditional is action-equality only (not reason-text-gated). Recommended fix scoped for a future Plan G: ~5 LOC in `redrobin.cna` to surface gate degradation to the beacon console; not implemented here. Plan E (#129) scope confirmed unchanged — pure prompt tuning at `layer_b_engine.py:SYSTEM_PROMPT`.
 
 ### #131 — `_inspect_episodic.py` crashes on Windows cp1252 (RESOLVED 2026-05-24 commit `926e5da`)
 Plan B T1 shipped. Created `tools/inspect_episodic.py` — UTF-8-safe in-repo replacement for the operator's local `_inspect_episodic.py`. Adds `sys.stdout.reconfigure(encoding="utf-8")` at start (fixes the cp1252 crash on Layer B Unicode reasons), CLI arg for DB path with `~/.redrobin/episodic.db` as the default, and an explicit missing-DB error instead of sqlite3 auto-creating an empty file. T2 updated `docs/operator-setup.md` to point at the in-repo helper.
