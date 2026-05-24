@@ -256,7 +256,60 @@ If the second line appears, TC1 PASS.
 After TC1, run:
 
 ```bash
-python C:/Users/jcspi/redrobin-smoke/_inspect_episodic.py 2>&1 | tail -20
+uv run python tools/inspect_episodic.py ~/.redrobin/engagements/<active-slug>/episodic.db 2>&1 | tail -20
 ```
 
 The MOST RECENT row should match the verdict + reason that appeared in beacon for the `mimikatz` command. Confirms beacon console output = daemon's stored verdict (no truncation, no drift).
+
+### TC5: Token sanitization across all smoke logs (added 2026-05-24, #111)
+
+Strengthens the existing token-sanitization checks. The CNA HTTP modernization smoke §5 (cp1252-era) and the CNA JAR helper smoke §6 (real-401 path) cover the HTTP request flow. This TC closes the WS URL leak vector for the Layer B event stream (`RedRobinEventStream` builds its URL as `ws://.../v1/adapters/events?token=<bearer>` — `RedRobinEventStream.java:51`).
+
+Setup:
+
+- [ ] Daemon running, .cna loaded, beacon active (as per TC1 setup).
+- [ ] In a separate terminal, capture the daemon log to a file:
+  ```bash
+  redrobin daemon start --host 127.0.0.1 --port 7777 2>&1 | tee /tmp/redrobin-daemon.log
+  ```
+  (Windows: `... | Tee-Object /tmp/redrobin-daemon.log` or any equivalent.)
+- [ ] Note the first 8 characters of your `~/.redrobin/transport.token` (read once, hold in your head — don't paste it elsewhere). Call this `<TOKEN8>`.
+
+Probes:
+
+- [ ] **Probe 1: WS URL with token=  must not appear in the Script Console.**
+  After .cna load + handshake, scroll the CS Client Script Console output. Run:
+  ```
+  grep -i 'token=' <copy of the Script Console output, exported via CS Client menu>
+  ```
+  Expected: zero matches. If present, the JAR is logging the WS URL — file a follow-up.
+
+- [ ] **Probe 2: Daemon log must not contain the raw bearer token in cleartext.**
+  ```bash
+  grep -c "<TOKEN8>" /tmp/redrobin-daemon.log
+  ```
+  Expected: `0`. The daemon's structured logger redacts authorization headers via FastAPI middleware (verified by prior smoke).
+
+- [ ] **Probe 3: `?token=<value>` query-string pattern must not appear anywhere in daemon log.**
+  ```bash
+  grep -E '[?&]token=[A-Za-z0-9_.\-]{8,}' /tmp/redrobin-daemon.log
+  ```
+  Expected: zero matches. (FastAPI logs the WS upgrade as `"GET /v1/adapters/events HTTP/1.1" 101 Switching Protocols` — query string not part of the access-log line. If matches appear, uvicorn is logging the full request URI somewhere and we need to add a redacting log filter.)
+
+- [ ] **Probe 4: Sleep `redrobin_sanitize_error` redacts URL query token.**
+  In the CS Client Script Console, exercise the sanitize sub directly:
+  ```sleep
+  $test = "java.net.URISyntaxException: Illegal character in query: ws://127.0.0.1:7777/v1/adapters/events?token=abcd1234efgh5678";
+  println(redrobin_sanitize_error($test));
+  ```
+  Expected output (verbatim): `java.net.URISyntaxException: Illegal character in query: ws://127.0.0.1:7777/v1/adapters/events?token=***REDACTED***`. If the literal `abcd1234efgh5678` is still visible, the regex didn't fire.
+
+- [ ] **Probe 5: Bearer header pattern still redacted (regression guard).**
+  In the CS Client Script Console:
+  ```sleep
+  $test2 = "Authorization: Bearer aaaaBBBBccccDDDD";
+  println(redrobin_sanitize_error($test2));
+  ```
+  Expected: `Authorization: Bearer ***REDACTED***` — confirms the existing redaction wasn't broken by the new query-token rule.
+
+Acceptance: all 5 probes return the expected redaction. Any probe leaking a real token value blocks the v0.1.x ship for #111.
