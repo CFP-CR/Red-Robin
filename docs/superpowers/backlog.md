@@ -25,16 +25,10 @@ These materially affect the live demo experience or shipping correctness.
 
 ---
 
-### #138 — path-3 observation events fail envelope + payload schema validation (400 Bad Request)
-**Source:** T14 smoke 2026-05-23 (post-#134 fix `b7c7c69`). Daemon log shows `POST /v1/events HTTP/1.1" 400 Bad Request` x3 per `shell whoami`.
-**Symptom:** Now that the fork is gone (#134 fix), events DO reach the daemon — but every one is rejected by schema validation. Four mismatches in `redrobin_push_event_async`'s wire envelope (`redrobin.cna:223-239`):
-  1. `id`: uses `[java.util.UUID randomUUID]` → format `xxxxxxxx-xxxx-...` (dashes + lowercase). Schema requires `^evt_[0-9A-Z without I/L/O/U]{26}$` (ULID Crockford-b32).
-  2. `ts`: uses `dstamp(ticks())` → `Mon May 23 18:28:36 EDT 2026` (Java Date.toString). Schema requires RFC3339 (`2026-05-23T18:28:36Z`).
-  3. `event.beacon.command_input`: missing required `operator` and `command` fields. Schema requires `{type, bid, operator, command, raw}`. Hook gives `$1=bid, $2=task_summary` only.
-  4. `event.beacon.command_output`: missing required `task_id`. Schema requires `{type, bid, task_id, output}`. Hook gives `$1=bid, $2=output` only.
-**Files:** `adapters/cobaltstrike/redrobin.cna:223-239` body construction; possibly a Java helper in `RedRobinHttp.java` for ULID generation.
-**Fix scope:** ~50-80 LOC. Switch to `[[java.time.Instant now] toString]` for ts (1-line). ULID via Java static helper (~15 LOC Java + 1 line Sleep). Refactor hooks to use proper Aggressor APIs that surface operator/command/task_id (may need `on beacon_input` for input + tracking task IDs from `on beacon_tasked`).
-**Demo impact:** NONE — `redrobin_http_post` swallows the `HttpException` from 4xx and prints a `warn(...)` in Script Console. Layer A gate + Layer B verdicts are unaffected. Path-3 (input/output telemetry → working memory + episodic) is broken; will need fix before v0.1.x ships if path-3 enrichment is critical to the operator workflow.
+### #138 — path-3 observation events fail envelope + payload schema (RESOLVED 2026-05-24 commits `006e83a`→`cf37d36`)
+**Original symptom:** After #134 unblocked POSTs to `/v1/events`, every one returned `400 Bad Request`. Four schema mismatches verified by curl: envelope `id` was Java UUID (schema wants ULID), envelope `ts` was Java `Date.toString()` (schema wants RFC3339), `beacon.command_input` was missing `operator` + `command`, `beacon.command_output` was missing `task_id`.
+**Resolution:** Five-commit subagent-driven sequence (`006e83a` ULID tests RED → `bc72cac` ULID impl GREEN → `5fce8f0` build scripts 1.0.2 → `0b85321` ship 1.0.2 JAR → `cf37d36` atomic .cna refactor). Added `RedRobinHttp.ulid()` instance method (Crockford b32, 48-bit ts + 80-bit randomness, JDK-only — `java.security.SecureRandom`). Replaced `dstamp(ticks())` with `[[java.time.Instant now] toString]`. Split monolithic `redrobin_push_event_async` into `redrobin_envelope` + `redrobin_emit_command_input` + `redrobin_emit_command_output` with schema-required fields encoded in each sub's signature. Switched `on beacon_tasked` → `on beacon_input` (gains `operator`=$2, `raw`=$3, command=first token of $3, signatures verified against vysecurity/AggressorScripts-1/All_In_One.cna). `set BEACON_OUTPUT` now surfaces `$4` (jobid from CS Aggressor — verified via `default.cna:807-810`) as `task_id`.
+**Smoke validation 2026-05-24 (operator-run):** `shell whoami` on a live beacon → daemon log shows 4× `POST /v1/events HTTP/1.1" 200 OK`, zero 400s. `jcsp\jcspi` visible in beacon console. tc4-smoke episodic.db gains rows 42+43 for Layer A ESCALATE + Layer B WARN. Working memory reducer extracted 1 credential + 3 findings from path-3 events. Script Console clean (no NPE, no daemon-non-2xx warns).
 
 ---
 
