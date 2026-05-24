@@ -652,3 +652,30 @@ If the entire JAR pattern fails (extremely unlikely given PyCobalt + DynamicTabR
 | Q3 | Multi-instance .cna loads accumulate `RedRobinHttp` instances + HttpClients | Acknowledged. Each `Unload+Load` cycle creates a new instance; the prior is GC'd when its references go away. The fork-loop accumulation is a separate issue (Task #110). |
 | Q4 | What if the JAR is missing at the expected path? | `redrobin_init_http` will throw; Sleep prints error to Script Console. Document this in operator-setup.md troubleshooting. |
 | Q5 | Should the JAR ship with a SHA-256 sidecar? | Defer to v0.2. For v0.1 we trust git's content addressing. |
+
+---
+
+## 13. Post-spec additions (2026-05-17 → 2026-05-24)
+
+This spec is a historical design document. The shipped JAR has grown
+beyond the original §4.1 layout. Subsequent work added:
+
+| Addition | Commit | Sprint context |
+|---|---|---|
+| `RedRobinEventStream` class — WS subscriber for `/v1/adapters/events` (Layer B verdicts) | `c81ede7` | 2026-05-20 adapter-event-stream plan |
+| `VerdictEvent` DTO + parser | `e16ecfa` | Same |
+| Vendored `org.json` 20240303 dependency for WS frame parsing | `533d481` | Same (build) + `b58ffe1` (1.0.1 ship) |
+| `RedRobinHttp.ulid()` instance method — schema-compliant id generator (Crockford b32, 48-bit ts + 80-bit randomness) | `bc72cac` | 2026-05-24 #138 event-schema compliance |
+| JAR version bumped 1.0.0 → 1.0.1 (add EventStream) → 1.0.2 (add ulid) | `b58ffe1` + `0b85321` | Same |
+
+§4.1 (Repository layout), §5 (Components — only documents `RedRobinHttp`),
+§7 (Java compatibility), §9 (Test plan — names only `RedRobinHttpTest`),
+and §10 (Rollback plan — cites 1.0.0) remain accurate **as a 2026-05-17
+design baseline** but should be read alongside this table when reasoning
+about the current shipped artifact. The `helper-jar/README.md` is the
+operator-facing source of truth for what 1.0.2 actually contains.
+
+The spec's core design claims — JAR pattern, URLClassLoader,
+unnamed-module access, no `--add-opens` — still hold for every class
+added since (all three live in `com.redrobin.aggressor.*` and follow the
+same reflection-safe pattern as the original `RedRobinHttp`).
