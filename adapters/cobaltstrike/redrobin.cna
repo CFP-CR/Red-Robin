@@ -471,3 +471,33 @@ on heartbeat_5s {
         }
     }
 }
+
+
+# ===== Script unload cleanup =====
+# Each .cna load creates a fresh RedRobinEventStream (Java) with a
+# daemon-thread ScheduledExecutorService + persistent WebSocket. The
+# instance is reachable only from $REDROBIN_EVENT_STREAM. On reload,
+# Sleep clears that global, but the Java instance leaks: its thread
+# keeps running, the WS stays open, and the BlockingQueue (~512KB)
+# remains in memory. Over ~10-20 .cna iterations this becomes
+# observable in JVM memory + thread dumps.
+#
+# close() (added by Task #115/Task 9 of the adapter-event-stream plan)
+# does the right teardown: shutdown flag, sendClose on the WS, then
+# scheduler.shutdownNow(). Safe to call multiple times (idempotent
+# behind the volatile shutdown flag).
+#
+# The $REDROBIN_EVENT_STREAM !is $null guard handles two edge cases:
+# (a) script_unload firing before init_event_stream ran (script load
+# failed early), (b) operator manually nulling the global for debug.
+#
+# Event-name verification: Aggressor's `on script_unload` event is
+# documented in the Cobalt Strike Aggressor Script Manual (Fortra),
+# section "Common Events", and used in community scripts (e.g.
+# harleyQu1nn/AggressorScripts/utils.cna) for the same cleanup-on-
+# reload pattern.
+on script_unload {
+    if ($REDROBIN_EVENT_STREAM !is $null) {
+        [$REDROBIN_EVENT_STREAM close];
+    }
+}
