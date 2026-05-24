@@ -17,15 +17,24 @@ These materially affect the live demo experience or shipping correctness.
 **Fix:** When args is empty, either pass a sensible default (`logonpasswords`) or short-circuit before calling `&bmimikatz`. Probably the safer move is: if args empty, BLOCK preemptively with a clear "[Red Robin] mimikatz requires a subcommand — use e.g. `mimikatz logonpasswords`" message.
 **Scope:** ~10-20 LOC in the alias + a smoke test case for bare `mimikatz`.
 
-### #134 — `$REDROBIN_HTTP null` at `redrobin.cna:83` when called from `BEACON_OUTPUT` / `on beacon_tasked` hooks
-**Source:** T14 smoke 2026-05-22, Script Console errors `[!] Attempted to call a non-static method on a null reference at redrobin.cna:83` firing 2s after `blog()` to beacon.
-**Symptom:** `sub redrobin_http_post` body has `[$REDROBIN_HTTP post: $path, $body]`. When called from `set BEACON_OUTPUT { redrobin_push_event_async(...); }` or `on beacon_tasked { redrobin_push_event_async(...); }`, `$REDROBIN_HTTP` resolves to `null`. Same scope-isolation flavor as the fork() issue (#110) but in Aggressor hook context. Net effect: path-3 observation events (`beacon.command_input` / `beacon.command_output`) NEVER reach the daemon, so working memory + episodic.db don't see beacon outputs.
-**Files:** `adapters/cobaltstrike/redrobin.cna:83` (HTTP post line), plus the hook bodies at `~308-318`.
-**Fix candidates:**
-  1. Mirror the `on heartbeat_5s` workaround: queue events into a Java-side static queue, drain on a Sleep heartbeat tick that has access to globals.
-  2. Re-declare `global('$REDROBIN_HTTP $REDROBIN_URL $REDROBIN_TOKEN');` inside the hook bodies explicitly (cheapest if it works; verify empirically).
-  3. Cache the JAR instance in a Java static accessor (`RedRobinHttp.getInstance()`) and have the hook bodies call that.
-**Scope:** Try #2 first (1-line fix each in `set BEACON_OUTPUT` + `on beacon_tasked` bodies). If that doesn't propagate, fall back to #1.
+### #134 — `$REDROBIN_HTTP null` at `redrobin.cna:83` (RESOLVED 2026-05-24 in commit `b7c7c69`)
+**Original symptom:** `[!] Attempted to call a non-static method on a null reference at redrobin.cna:83` firing 2s after every beacon-output blog. Beacon output was completely suppressed because Sleep's filter semantics treat a raise inside `set BEACON_OUTPUT { ... }` as "filter aborted" → the body's `return $2;` never executes.
+**Actual root cause (verified):** NOT the hook scope. The hooks themselves (`set BEACON_OUTPUT`, `on beacon_tasked`) run on the main script thread with full global visibility. The bug was an internal `fork({...}, \$body)` inside `redrobin_push_event_async` at lines 232-238 that captured only `$body`, not `$REDROBIN_HTTP`. Inside the fork's isolated ScriptInstance scope, `redrobin_http_post`'s `global('$REDROBIN_HTTP ...')` lookup returned null. Same root cause as Task #110 (heartbeat fork) + T11 (Layer B verdict fork).
+**Fix (commit `b7c7c69`):** removed the internal `fork({...})` entirely; `redrobin_push_event_async` now POSTs synchronously. Cost: up to ~200ms blocking per beacon event (JAR enforces HTTP timeout). Acceptable for v0.1; filable as v0.2 if mass-enum workloads expose visible latency. The catch/swallow stays in place so daemon outages don't break beacon UX.
+**Follow-on bug surfaced:** see #138 — the events DO now reach the daemon, but get 400 Bad Request because the wire envelope (id, ts) and event payloads (operator/command/task_id missing) don't match the v0.1 schemas. Path-3 telemetry is broken at the schema layer; demo unaffected because errors are swallowed at the HttpException catch.
+
+---
+
+### #138 — path-3 observation events fail envelope + payload schema validation (400 Bad Request)
+**Source:** T14 smoke 2026-05-23 (post-#134 fix `b7c7c69`). Daemon log shows `POST /v1/events HTTP/1.1" 400 Bad Request` x3 per `shell whoami`.
+**Symptom:** Now that the fork is gone (#134 fix), events DO reach the daemon — but every one is rejected by schema validation. Four mismatches in `redrobin_push_event_async`'s wire envelope (`redrobin.cna:223-239`):
+  1. `id`: uses `[java.util.UUID randomUUID]` → format `xxxxxxxx-xxxx-...` (dashes + lowercase). Schema requires `^evt_[0-9A-Z without I/L/O/U]{26}$` (ULID Crockford-b32).
+  2. `ts`: uses `dstamp(ticks())` → `Mon May 23 18:28:36 EDT 2026` (Java Date.toString). Schema requires RFC3339 (`2026-05-23T18:28:36Z`).
+  3. `event.beacon.command_input`: missing required `operator` and `command` fields. Schema requires `{type, bid, operator, command, raw}`. Hook gives `$1=bid, $2=task_summary` only.
+  4. `event.beacon.command_output`: missing required `task_id`. Schema requires `{type, bid, task_id, output}`. Hook gives `$1=bid, $2=output` only.
+**Files:** `adapters/cobaltstrike/redrobin.cna:223-239` body construction; possibly a Java helper in `RedRobinHttp.java` for ULID generation.
+**Fix scope:** ~50-80 LOC. Switch to `[[java.time.Instant now] toString]` for ts (1-line). ULID via Java static helper (~15 LOC Java + 1 line Sleep). Refactor hooks to use proper Aggressor APIs that surface operator/command/task_id (may need `on beacon_input` for input + tracking task IDs from `on beacon_tasked`).
+**Demo impact:** NONE — `redrobin_http_post` swallows the `HttpException` from 4xx and prints a `warn(...)` in Script Console. Layer A gate + Layer B verdicts are unaffected. Path-3 (input/output telemetry → working memory + episodic) is broken; will need fix before v0.1.x ships if path-3 enrichment is critical to the operator workflow.
 
 ---
 
