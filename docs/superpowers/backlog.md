@@ -13,7 +13,7 @@ Decided 2026-05-24 to clear the v0.1.x hardening + docs + Layer B + obsolete-cle
 | Plan | Round | Items | Effort | Status |
 |---|---|---|---|---|
 | A | 1 — defensive hardening | `#125`, `#127`, `#137` | ~30 LOC, ~1.5h | **DONE 2026-05-24** (4 commits `7a75836`→`b8be0d8`) |
-| B | 1 — operator helper | `#131` | ~10 LOC + decision | Pending |
+| B | 1 — operator helper | `#131` | ~10 LOC + decision | **DONE 2026-05-24** (commit `926e5dab70c42654cec1c2ebbeac152ab6255eaf`) |
 | C | 2 — docs polish | `#116`, `#120`, `#111` | docs + smoke desc | Pending |
 | D | 3 — Layer B trigger investigation | `#130` | read-only audit, ~30 min | Pending |
 | E | 3 — Layer B prompt tuning (CONDITIONAL on D) | `#129` | prompt engineering, ~1-2h | Pending |
@@ -78,11 +78,8 @@ Plan A T3 shipped. Both `tui_ws.py` and `adapter_events_ws.py`: initialized `que
 **Files:** `redrobin/application/verdict_pipeline.py:134` (Layer B trigger condition), `adapters/cobaltstrike/aliases/tier1a_gate.sleep` (novel-pattern preamble logic).
 **Fix:** Trace `_run_layer_b` invocations vs the Layer A reason text the alias is checking. Either fix the alias preamble to match all ESCALATE paths, OR document that Layer B can fire on other verdict types.
 
-### #131 — `_inspect_episodic.py` crashes on Windows cp1252
-**Source:** T14 smoke 2026-05-22, `UnicodeEncodeError: '→'` from print statements when Layer B reason contains `→`.
-**Symptom:** PowerShell's default cp1252 encoding crashes the operator helper script on common Unicode chars from Layer B reasoning.
-**Files:** `C:\Users\jcspi\redrobin-smoke\_inspect_episodic.py` (operator-local, NOT in repo).
-**Fix:** Add `sys.stdout.reconfigure(encoding="utf-8")` at top of script. Trivial one-line fix; operator can do it themselves.
+### #131 — `_inspect_episodic.py` crashes on Windows cp1252 (RESOLVED 2026-05-24 commit `926e5dab70c42654cec1c2ebbeac152ab6255eaf`)
+Plan B T1 shipped. Created `tools/inspect_episodic.py` — UTF-8-safe in-repo replacement for the operator's local `_inspect_episodic.py`. Adds `sys.stdout.reconfigure(encoding="utf-8")` at start (fixes the cp1252 crash on Layer B Unicode reasons), CLI arg for DB path with `~/.redrobin/episodic.db` as the default, and an explicit missing-DB error instead of sqlite3 auto-creating an empty file. T2 updated `docs/operator-setup.md` to point at the in-repo helper.
 
 ### #137 — broaden `start_engagement` exception handling (RESOLVED 2026-05-24 commits `7a75836` + `c92710a`)
 Plan A T1+T2 shipped (TDD red→green). `lifespan_helpers.py:start_engagement` now catches `yaml.YAMLError`, `OSError`, `UnicodeDecodeError` in addition to `FileNotFoundError`. Same fallback (engagement=None, wildcard scope) with a distinct log line that names the exception type for diagnosis. Regression coverage: `tests/integration/test_engagement_malformed_yaml.py` (2 cases — malformed YAML + bad-UTF-8 encoding).
