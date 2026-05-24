@@ -207,7 +207,9 @@ javac --release 11 -cp "build/classes;lib/json-20240303.jar;lib/junit-platform-c
 java -jar lib/junit-platform-console-standalone-1.10.0.jar --class-path "build/classes;lib/json-20240303.jar;build/test-classes" --scan-class-path 2>&1 | tail -15
 ```
 
-Expected: 14 tests successful (the previous 9 + the 5 new ULID tests). 0 failed.
+Expected: 10 tests successful (the previous 5 RedRobinHttpTest cases + the 5 new ULID tests added in Task 1). 0 failed.
+
+(The existing helper-jar suite total includes RedRobinEventStreamTest's 4 cases — those run too — so the FULL JUnit run will show 14 successful overall. RedRobinHttpTest alone is 10/10 after this commit.)
 
 If any ULID test fails (e.g., a generated id contains `I` or `L` because the alphabet array had a typo), debug before committing.
 
