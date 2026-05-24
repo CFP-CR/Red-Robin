@@ -4,7 +4,7 @@
 
 **Goal:** Close three independently-scoped defensive-coding gaps surfaced during prior code reviews and smoke sessions: `#125` (RedRobinEventStream resource leak on .cna unload), `#127` (WS endpoints' `bus.subscribe()` exception path leaves `queue` undefined), `#137` (daemon crashes hard on malformed `engagement.yaml`). All three are pre-existing latent issues that don't surface in normal operation but represent production-grade hygiene gaps the codebase should close before v0.1 ship.
 
-**Architecture:** Three independent fixes, three atomic commits (one per logical change per operator preference). The fixes touch three different files (`.cna`, Python WS endpoints, Python lifespan helper) with no cross-dependencies, so they execute as serial TDD-style tasks in a single subagent-driven plan.
+**Architecture:** Three independent fixes covering three logical changes. The fixes touch four different files (`.cna`, two Python WS endpoints, Python lifespan helper) with no cross-dependencies, so they execute as serial tasks in a single subagent-driven plan. **Final commit count: 4** — T1 (#137 test RED) + T2 (#137 fix GREEN) + T3 (#127 fix) + T4 (#125 fix). T1+T2 is the standard TDD red/green pair, counting as one logical change for #137. T5 is operator smoke (no commit).
 
 **Tech Stack:** Sleep/Aggressor (`.cna` for #125), FastAPI WebSocket endpoints (Python for #127), pydantic-settings + yaml (Python for #137), pytest (regression coverage for #137).
 
@@ -439,6 +439,8 @@ grep -n "^on heartbeat_5s\|^on script_unload\|# ===== " adapters/cobaltstrike/re
 Expected: an `on heartbeat_5s` block exists near the tail; no `on script_unload` exists yet.
 
 - [ ] **Step 2: Add the unload hook**
+
+**Event-name citation (verified):** Aggressor's `on script_unload` event is documented in the Cobalt Strike Aggressor Script Manual (Fortra), section "Common Events", and used in community scripts like `harleyQu1nn/AggressorScripts/utils.cna` for the same cleanup-on-reload pattern. Fires when the Script Manager unloads or reloads a script.
 
 Append the following block AFTER the closing `}` of the `on heartbeat_5s` hook (search for the line that just contains `}` directly closing that block — you can `grep -n "^}" adapters/cobaltstrike/redrobin.cna | tail -5` to find candidates, but the on-heartbeat closer is the last top-level `}` of the file as it stands today):
 
