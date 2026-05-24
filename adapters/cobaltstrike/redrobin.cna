@@ -219,34 +219,63 @@ sub redrobin_gate {
 }
 
 
-# ===== Event push (synchronous; ~150ms via JAR timeout) =====
-# Name kept as `_async` for caller compatibility; semantics are now sync.
-# See T134 / Task #110: Sleep fork() creates an isolated ScriptInstance
-# with an empty global table, so the previous fork({...}) was broken.
-sub redrobin_push_event_async {
-    global('$REDROBIN_SESSION_ID');
-    local('$type $bid $payload $body');
-    ($type, $bid, $payload) = @_;
-    $body = '{"spec_version":"0.1.0","id":"evt_' . [java.util.UUID randomUUID] . '","ts":"' . dstamp(ticks()) . '"' .
-            ',"source":{"adapter":"cs-aggressor","version":"1.0.0","engagement_id":"unknown"' .
-            iff(strlen($REDROBIN_SESSION_ID) > 0, ',"adapter_session_id":"' . $REDROBIN_SESSION_ID . '"', "") . '}' .
-            ',"event":{"type":"' . $type . '","bid":"' . redrobin_escape_json($bid) . '","' .
-            iff($type eq "beacon.command_output", "output", "raw") . '":"' . redrobin_escape_json($payload) . '"}' .
-            '}';
-    # Synchronous post. T11/T134 lesson: Sleep fork() creates an isolated
-    # ScriptInstance with an empty global table, so redrobin_http_post
-    # inside a fork loses access to $REDROBIN_HTTP. The fork was used here
-    # to avoid blocking the BEACON_OUTPUT filter / on beacon_tasked event,
-    # but blocking on a <200ms HTTP call (JAR enforces timeout) is the
-    # correct tradeoff — losing every beacon output line because the fork
-    # raises and Sleep suppresses the BEACON_OUTPUT return is catastrophic.
-    # See docs/superpowers/backlog.md #134 + #110 for the broader pattern.
+# ===== Envelope helper (private, called by emit subs below) =====
+# Builds the v0.1 wire envelope shell around a pre-built event JSON. The
+# event-body construction lives in the per-type emit subs because each
+# event type has different required fields (verified 2026-05-24 against
+# protocol/schemas/v0.1/events/*.schema.json + curl probes returning
+# explicit envelope_errors / event_errors).
+sub redrobin_envelope {
+    global('$REDROBIN_HTTP $REDROBIN_SESSION_ID');
+    local('$event_json');
+    $event_json = $1;
+    return '{"spec_version":"0.1.0",' .
+           '"id":"evt_' . [$REDROBIN_HTTP ulid] . '",' .
+           '"ts":"' . [[java.time.Instant now] toString] . '",' .
+           '"source":{"adapter":"cs-aggressor","version":"1.0.0","engagement_id":"unknown"' .
+           iff(strlen($REDROBIN_SESSION_ID) > 0, ',"adapter_session_id":"' . $REDROBIN_SESSION_ID . '"', "") . '},' .
+           '"event":' . $event_json .
+           '}';
+}
+
+# ===== Event emit subs (one per schema type) =====
+# Each emit sub is synchronous (per #134 fix b7c7c69 — no internal fork()
+# since the fork's isolated scope lost access to $REDROBIN_HTTP). Each
+# wraps its HTTP POST in try/catch so daemon outages or 4xx never bubble
+# out to suppress operator beacon output via Sleep filter semantics.
+#
+# Schema sources verified by curl 2026-05-24:
+#   beacon.command_input  requires {type, bid, operator, command, raw}
+#   beacon.command_output requires {type, bid, task_id, output}
+
+sub redrobin_emit_command_input {
+    local('$bid $operator $command $raw $event_json $body');
+    ($bid, $operator, $command, $raw) = @_;
+    $event_json = '{"type":"beacon.command_input",' .
+                  '"bid":"' . redrobin_escape_json($bid) . '",' .
+                  '"operator":"' . redrobin_escape_json($operator) . '",' .
+                  '"command":"' . redrobin_escape_json($command) . '",' .
+                  '"raw":"' . redrobin_escape_json($raw) . '"}';
+    $body = redrobin_envelope($event_json);
     try {
         redrobin_http_post("/v1/events", $body);
     } catch $e {
-        # Swallow silently — daemon outage already surfaces via
-        # redrobin_http_post's "[Red Robin] daemon connection refused" warn
-        # block. Reraising here would suppress operator beacon output.
+        # Swallow silently — see #134 commit b7c7c69 rationale.
+    }
+}
+
+sub redrobin_emit_command_output {
+    local('$bid $task_id $output $event_json $body');
+    ($bid, $task_id, $output) = @_;
+    $event_json = '{"type":"beacon.command_output",' .
+                  '"bid":"' . redrobin_escape_json($bid) . '",' .
+                  '"task_id":"' . redrobin_escape_json($task_id) . '",' .
+                  '"output":"' . redrobin_escape_json($output) . '"}';
+    $body = redrobin_envelope($event_json);
+    try {
+        redrobin_http_post("/v1/events", $body);
+    } catch $e {
+        # Swallow silently — see #134 commit b7c7c69 rationale.
     }
 }
 
@@ -294,7 +323,7 @@ sub redrobin_init_http {
     global('$REDROBIN_HTTP');
     local('$jar_path $jar_url $loader $cls $string_cls $ctor');
 
-    $jar_path = script_resource() . '/jars/redrobin-aggressor-http-1.0.1.jar';
+    $jar_path = script_resource() . '/jars/redrobin-aggressor-http-1.0.2.jar';
     $jar_url = [[[new java.io.File: $jar_path] toURI] toURL];
     $loader = [new java.net.URLClassLoader: @($jar_url)];
 
@@ -314,7 +343,7 @@ sub redrobin_init_event_stream {
     global('$REDROBIN_EVENT_STREAM');
     local('$jar_path $json_jar_path $jar_url $json_url $loader $cls $string_cls $ctor');
 
-    $jar_path = script_resource() . '/jars/redrobin-aggressor-http-1.0.1.jar';
+    $jar_path = script_resource() . '/jars/redrobin-aggressor-http-1.0.2.jar';
     $json_jar_path = script_resource() . '/jars/json-20240303.jar';
     $jar_url = [[[new java.io.File: $jar_path] toURI] toURL];
     $json_url = [[[new java.io.File: $json_jar_path] toURI] toURL];
@@ -342,14 +371,32 @@ include(script_resource("aliases/popup_beacon.sleep"));
 
 
 # ===== Path 3 — Output observation (passthrough-safe filter hook) =====
+# Aggressor BEACON_OUTPUT signature ($1=bid, $2=output, $3=ts, $4=jobid):
+#   default.cna line 805 comment: "beaconid, whatever: meh too, timestamp, jobid"
+#   default.cna line 808 implementation: `$jid = $4`
+# We surface $4 as task_id; if CS didn't assign one (e.g., for output
+# without a backing job), default to "" — the schema requires the field
+# but allows any string value.
 set BEACON_OUTPUT {
-    redrobin_push_event_async("beacon.command_output", $1, $2);
+    local('$task_id');
+    $task_id = iff($4 !is $null, $4, "");
+    redrobin_emit_command_output($1, $task_id, $2);
     return $2;
 }
 
-# Tasking observation event — fires when a task is encoded for the beacon
-on beacon_tasked {
-    redrobin_push_event_async("beacon.command_input", $1, $2);
+# Operator-input observation event (Aggressor `on beacon_input`):
+#   $1 = beacon ID
+#   $2 = operator nickname (verified vysecurity/AggressorScripts-1)
+#   $3 = command line typed by operator (raw)
+#   $4 = timestamp (unused)
+# Replaces an earlier `on beacon_tasked` handler that gave us only
+# ($1=bid, $2=task_summary) — missing the operator + command fields
+# required by the v0.1 schema for beacon.command_input. See #138.
+on beacon_input {
+    local('@parts $command');
+    @parts = split(' ', $3);
+    $command = iff(size(@parts) > 0, @parts[0], "");
+    redrobin_emit_command_input($1, $2, $command, $3);
 }
 
 
