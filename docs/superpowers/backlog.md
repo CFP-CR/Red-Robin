@@ -10,12 +10,19 @@ Each entry below includes the bug source (commit / smoke session), reproduction 
 
 These materially affect the live demo experience or shipping correctness.
 
-### #133 — bare `mimikatz` alias fails dispatch (`&bmimikatz` requires subcommand)
-**Source:** T14 smoke 2026-05-22, Script Console showed `[!] Function call &bmimikatz failed: argument command is missing at tier1a_gate.sleep:49`
-**Symptom:** Operator types `mimikatz` (no subcommand). Layer A "novel pattern" line prints, Layer B BLOCK verdict surfaces, BUT the beacon never actually receives the mimikatz task. The dispatch failed before reaching the beacon. UX looks like it worked (BLOCK shown), but the command never executed.
-**Files:** `adapters/cobaltstrike/aliases/tier1a_gate.sleep:48-50` (`&bmimikatz($1, %p['args'])` with empty `%p['args']`).
-**Fix:** When args is empty, either pass a sensible default (`logonpasswords`) or short-circuit before calling `&bmimikatz`. Probably the safer move is: if args empty, BLOCK preemptively with a clear "[Red Robin] mimikatz requires a subcommand — use e.g. `mimikatz logonpasswords`" message.
-**Scope:** ~10-20 LOC in the alias + a smoke test case for bare `mimikatz`.
+### #133 — bare-args alias guards (RESOLVED 2026-05-24 commit `b3ed579`)
+**Original symptom:** Operator types `mimikatz` (no subcommand). Layer A "novel pattern" + Layer B BLOCK verdicts surface but `&bmimikatz($1, "")` is rejected by CS Aggressor with `[!] Function call &bmimikatz failed: argument command is missing`. Beacon never executes. UX misleading (verdicts appear as if it dispatched), Layer A/B wasted on input that couldn't run anyway.
+**Audit found same vulnerability in 18 other aliases** (tier1a_gate.sleep: kerberos_ticket_use, psexec, wmi, winrm, jump, spawn, bypassuac, elevate, inject, dllinject, psinject; tier1b_wrapper.sleep: shell, powershell, powerpick, execute-assembly, inline-execute, run, execute). dcsync already had its own guard; hashdump/logonpasswords/getsystem/screenshot/keylogger/screenwatch are zero-args. tier2 browserpivot/socks deferred (bare-call may be valid — proxy stop/list semantics).
+**Resolution:** Added DRY helper `redrobin_alias_require_args($bid, $cmd, $args)` in tier1a_gate.sleep (loaded first by redrobin.cna so visible to tier1b). Uses Sleep's full-string-anchored `ismatch '\s*'` to detect empty/whitespace-only. On rejection: `berror($bid, "[Red Robin] " . $cmd . " requires arguments. Type 'help " . $cmd . "' in the beacon console for usage.")` + return false (caller skips both gate AND dispatch). Wrapped 19 alias bodies with the guard. dcsync's existing custom guard preserved. Cost: ~35 LOC total across 2 files.
+**Smoke validation 2026-05-24 (operator-run, 7 cases):**
+  - A `mimikatz` (bare): red guard message + cero POST /v1/verdict/quick ✓
+  - B `shell` (bare): same ✓
+  - C `spawn` (bare): same ✓
+  - D `mimikatz logonpasswords`: guard pass → Layer A returned BLOCK by Sigma rule T1003.001 (rules engine working) ✓
+  - E `shell whoami`: guard pass → Layer A novel pattern → Layer B WARN → dispatch → beacon output ✓
+  - F `getsystem` (zero-args): guard NOT invoked (correct), Layer A/B flow normal ✓
+  - G `hashdump` (zero-args): guard NOT invoked, Layer A → Layer B BLOCK normal ✓
+**Bonus observations** (not bugs): Layer A Sigma rules block specific subcommands directly (e.g. `mimikatz logonpasswords` → T1003.001 BLOCK without Layer B), Layer B references engagement-summary context (`5+ shell whoami instances per episode summary`) and cross-command memory (`near-identical telemetry to already-blocked mimikatz`). v0.1 memory + summary loop functioning end-to-end.
 
 ### #134 — `$REDROBIN_HTTP null` at `redrobin.cna:83` (RESOLVED 2026-05-24 in commit `b7c7c69`)
 **Original symptom:** `[!] Attempted to call a non-static method on a null reference at redrobin.cna:83` firing 2s after every beacon-output blog. Beacon output was completely suppressed because Sleep's filter semantics treat a raise inside `set BEACON_OUTPUT { ... }` as "filter aborted" → the body's `return $2;` never executes.
