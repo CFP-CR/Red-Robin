@@ -280,12 +280,13 @@ If the daemon goes down, the WS connection drops; the JAR reconnects with
 exponential backoff (up to 60 s). Verdicts published during the gap are
 NOT replayed — check `episodic.db` for the historical record:
 
-```powershell
-python C:\Users\jcspi\redrobin-smoke\_inspect_episodic.py
+```bash
+uv run python tools/inspect_episodic.py
 ```
 
-(That helper script is in the engagement root, created during the
-2026-05-18 smoke session — copy it to new engagements as needed.)
+(Helper lives at `tools/inspect_episodic.py` in the repo. It defaults to
+`~/.redrobin/episodic.db`; pass an explicit path to inspect a per-engagement DB,
+e.g. `uv run python tools/inspect_episodic.py ~/.redrobin/engagements/<slug>/episodic.db`.)
 
 ## 6. Start the daemon
 
