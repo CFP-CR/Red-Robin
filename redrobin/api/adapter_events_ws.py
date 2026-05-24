@@ -28,9 +28,11 @@ async def adapter_events_ws(websocket: WebSocket, token: str = Query(...)) -> No
         return
     await websocket.accept()
     bus = websocket.app.state.event_bus
-    queue = await bus.subscribe()
+    queue = None  # Defensive: ensure `queue` is defined before the
+                  # try/finally even if bus.subscribe() raises (#127).
 
     try:
+        queue = await bus.subscribe()
         while True:
             event = await queue.get()
             if event.get("_type") == "_close":
@@ -40,4 +42,5 @@ async def adapter_events_ws(websocket: WebSocket, token: str = Query(...)) -> No
     except WebSocketDisconnect:
         logger.info("adapter events WS disconnected")
     finally:
-        await bus.unsubscribe(queue)
+        if queue is not None:
+            await bus.unsubscribe(queue)

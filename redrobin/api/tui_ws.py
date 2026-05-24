@@ -24,9 +24,11 @@ async def tui_ws(websocket: WebSocket, token: str = Query(...)) -> None:
         return
     await websocket.accept()
     bus = websocket.app.state.event_bus
-    queue = await bus.subscribe()
+    queue = None  # Defensive: ensure `queue` is defined before the
+                  # try/finally even if bus.subscribe() raises (#127).
 
     try:
+        queue = await bus.subscribe()
         snapshot_payload = await _build_initial_snapshot(websocket.app)
         await websocket.send_json(
             {"type": "working_memory_snapshot", "payload": snapshot_payload}
@@ -40,7 +42,8 @@ async def tui_ws(websocket: WebSocket, token: str = Query(...)) -> None:
     except WebSocketDisconnect:
         logger.info("TUI WebSocket client disconnected")
     finally:
-        await bus.unsubscribe(queue)
+        if queue is not None:
+            await bus.unsubscribe(queue)
 
 
 async def _build_initial_snapshot(app) -> dict:
