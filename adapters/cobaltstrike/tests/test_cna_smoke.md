@@ -313,3 +313,93 @@ Probes:
   Expected: `Authorization: Bearer ***REDACTED***` — confirms the existing redaction wasn't broken by the new query-token rule.
 
 Acceptance: all 5 probes return the expected redaction. Any probe leaking a real token value blocks the v0.1.x ship for #111.
+
+---
+
+## Layer B prompt tuning smoke (added 2026-05-24, #129)
+
+These cases verify the Plan E SYSTEM_PROMPT tuning at
+`redrobin/application/layer_b_engine.py:42-64` (commit `dee86f5`).
+The prompt now defaults to PASS for standard recon and reserves WARN/
+BLOCK for risky payloads. Requires daemon running, CS Client connected
+with `redrobin.cna` loaded, a real beacon already callbacked.
+
+**Acceptance criterion:** all 5 cases report the expected verdict.
+If any case reports a verdict different from the expected, Plan E's
+backlog close-out (Task 4) MUST NOT fire — the prompt needs further
+tuning first.
+
+**Pre-flight:** before running, restart the daemon so the new
+SYSTEM_PROMPT loads. The Anthropic 1h prompt cache is invalidated by
+the change; the first ~5 Layer B calls will see
+`cache_creation_input_tokens > 0` — this is expected.
+
+```bash
+redrobin daemon stop
+redrobin daemon start --host 127.0.0.1 --port 7777
+```
+
+Verify the daemon log shows `INFO: ... Application startup complete`
+and the CS Client Script Console shows `[Red Robin] handshake OK;
+session=ses_<uuid>`.
+
+### T3-S1: `shell ipconfig` (STANDARD_RECON — expected PASS)
+
+- [ ] Type in beacon console: `shell ipconfig`
+- [ ] Within ~1s, Layer A line appears: `[Red Robin] novel pattern — Layer B reviewing async` (the gate preamble — `shell ipconfig` doesn't match any rule).
+- [ ] Within ~30s, **NO** `[Red Robin] Layer B WARN:` line should appear. Layer B PASS is silent (per `verdict_pipeline.py:169` — only WARN/BLOCK emit retroactive lines).
+- [ ] Cross-check: `uv run python tools/inspect_episodic.py ~/.redrobin/engagements/<active-slug>/episodic.db 2>&1 | tail -5` should show a Layer B row with `verdict='PASS'` and a reason that includes wording like "standard recon" or "no payload-side risk".
+- [ ] **Paste actual result here:** `<operator-fills: PASS | WARN | BLOCK | timed-out>`
+- [ ] **Paste Layer B reason text here:** `<operator-fills>`
+
+### T3-S2: `shell tasklist /v` (STANDARD_RECON — expected PASS)
+
+- [ ] Type in beacon console: `shell tasklist /v`
+- [ ] Within ~1s, Layer A novel-pattern preamble appears.
+- [ ] Within ~30s, **NO** Layer B WARN line should appear.
+- [ ] Cross-check: episodic.db row should show `verdict='PASS'` with a recon-style reason.
+- [ ] **Paste actual result here:** `<operator-fills>`
+- [ ] **Paste Layer B reason text here:** `<operator-fills>`
+
+### T3-S3: `shell whoami` (STANDARD_RECON — expected PASS)
+
+- [ ] Type in beacon console: `shell whoami`
+- [ ] Within ~1s, Layer A preamble appears.
+- [ ] Within ~30s, **NO** Layer B WARN line should appear.
+- [ ] Cross-check: episodic.db row should show `verdict='PASS'`.
+- [ ] **Paste actual result here:** `<operator-fills>`
+- [ ] **Paste Layer B reason text here:** `<operator-fills>`
+
+Note: this is the case the prior smoke (2026-05-18, see TC2 above) observed Layer B returning WARN for solely on the cmd.exe-child-spawn pattern. T3-S3 is the **direct regression check** for #129's original symptom.
+
+### T3-S4: `shell mimikatz logonpasswords` (RISKY_PAYLOAD / UNAMBIGUOUSLY_DANGEROUS — expected BLOCK)
+
+- [ ] Type in beacon console: `shell mimikatz logonpasswords`
+- [ ] Within ~1s, expect either:
+  - `[Red Robin] DANGER: lsass touch ...` (Layer A's `mimikatz_logonpasswords` rule fires directly via the Tier 1A intercept on the `mimikatz` alias — but `shell mimikatz` may bypass the intercept if the operator uses the raw shell wrapper).
+  - Or Layer A novel-pattern preamble if the shell-wrapped form doesn't hit the same rule pattern.
+- [ ] Within ~30s, Layer B retroactive line appears: `[Red Robin] Layer B BLOCK: <reason about LSASS / credential extraction / T1003.001>`. Layer B MUST NOT downgrade this to PASS just because the new prompt defaults toward PASS — the UNAMBIGUOUSLY_DANGEROUS category is explicit about credential dumping.
+- [ ] **Paste actual result here:** `<operator-fills>`
+- [ ] **Paste Layer B reason text here:** `<operator-fills>`
+
+> **Disambiguation:** If you see `[Red Robin] DANGER: lsass touch` (or similar), Tier 1A intercept fired (Layer A blocked the bare `mimikatz` alias name). If you see `Layer A novel pattern — Layer B reviewing async` preamble followed by Layer B's BLOCK verdict, the shell-wrapped form fell through to Layer B. **Either path is acceptable for this smoke** — the test asserts Layer B BLOCKs the shell-wrapped form when it reaches Layer B.
+
+This case is the **over-permissiveness guard**: if T3-S4 returns PASS, the tuning went too far and Plan E's prompt change needs to be rebalanced before Task 4 commits.
+
+### T3-S5: `shell net group "Domain Admins" /domain` (RISKY_PAYLOAD — expected WARN, or BLOCK if Layer A fires first)
+
+- [ ] Type in beacon console (note the literal quotes — operator should escape per the beacon's parser): `shell net group "Domain Admins" /domain`
+- [ ] Within ~1s, expect Layer A `[Red Robin] DANGER` or `WARN` from the `domain_admin_enumeration` rule (`rules/shared/domain_admin_enumeration.yaml`, severity WARN, `arg_pattern: '(?i)net\s+group\s+"?Domain Admins"?'`). The shell command WILL match this regex.
+- [ ] Because Layer A fires a verdict (not ESCALATE), Layer B does NOT run for this case (verified: `verdict_pipeline.py:134` gates Layer B on `verdict.action == VerdictAction.ESCALATE`). The retroactive Layer B line should NOT appear.
+- [ ] **Paste actual result here:** `<operator-fills (Layer A verdict)>`
+- [ ] **Paste Layer A reason text here:** `<operator-fills>`
+
+T3-S5 is included as a **control case** — it verifies the existing Layer A coverage of `domain_admin_enumeration` still fires (so Plan E hasn't accidentally broken Layer A), and it confirms Layer B is silent when Layer A already spoke.
+
+### Operator decision
+
+After all 5 cases run:
+- **All cases PASS as expected** → proceed to Plan E Task 4 (backlog close-out).
+- **T3-S1 / S2 / S3 still WARN** → Plan E's prompt tuning was insufficient; iterate on Task 1's AFTER block (add more explicit anti-patterns or escalate to few-shot examples) and re-run the smoke.
+- **T3-S4 returns PASS** → tuning is over-permissive; re-emphasize the UNAMBIGUOUSLY_DANGEROUS category, especially LSASS / credential dumping, and re-run.
+- **Daemon errors / no Layer B response** → check daemon log for Anthropic API errors, KB load failures, or working-memory drift. NOT a prompt issue; file a separate bug.
