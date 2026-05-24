@@ -42,11 +42,39 @@ sub redrobin_alias_parse {
     return %(args => $args, raw => $cmd . " " . $args);
 }
 
+# ===== Empty-args guard for aliases that require operator-supplied args =====
+# Call BEFORE redrobin_gate so:
+#   - Empty-args input doesn't waste a Layer A/B verdict round-trip (a Claude
+#     API call for a command the underlying &b<cmd> would reject anyway)
+#   - Operator gets an instant, clear error in the beacon console
+#   - Avoids the cryptic "argument command is missing" error from CS Aggressor's
+#     internal handlers (e.g., mimikatz_doLocal rejected &bmimikatz with empty
+#     args — see #133 root cause verified during T14 smoke 2026-05-22)
+#
+# Returns true when args is non-empty (caller should proceed to the gate).
+# Returns false when args is empty/whitespace-only (berror has already
+# surfaced the guidance to the operator; caller should NOT dispatch).
+#
+# Sleep ismatch is full-string anchored (per redrobin.cna:181-182 docs), so
+# the regex `\s*` matches "" OR whitespace-only as the entire input — exactly
+# the rejection cases we want to catch.
+sub redrobin_alias_require_args {
+    local('$bid $cmd $args');
+    ($bid, $cmd, $args) = @_;
+    if ($args ismatch '\\s*') {
+        berror($bid, "[Red Robin] " . $cmd . " requires arguments. Type 'help " . $cmd . "' in the beacon console for usage.");
+        return false;
+    }
+    return true;
+}
+
 alias mimikatz {
     local('%p');
     %p = redrobin_alias_parse("mimikatz", @_);
-    if (redrobin_gate($1, "mimikatz", %p['raw'])) {
-        &bmimikatz($1, %p['args']);
+    if (redrobin_alias_require_args($1, "mimikatz", %p['args'])) {
+        if (redrobin_gate($1, "mimikatz", %p['raw'])) {
+            &bmimikatz($1, %p['args']);
+        }
     }
 }
 
@@ -79,56 +107,70 @@ alias logonpasswords {
 alias kerberos_ticket_use {
     local('%p');
     %p = redrobin_alias_parse("kerberos_ticket_use", @_);
-    if (redrobin_gate($1, "kerberos_ticket_use", %p['raw'])) {
-        &bkerberos_ticket_use($1, %p['args']);
+    if (redrobin_alias_require_args($1, "kerberos_ticket_use", %p['args'])) {
+        if (redrobin_gate($1, "kerberos_ticket_use", %p['raw'])) {
+            &bkerberos_ticket_use($1, %p['args']);
+        }
     }
 }
 
 alias psexec {
     local('%p');
     %p = redrobin_alias_parse("psexec", @_);
-    if (redrobin_gate($1, "psexec", %p['raw'])) {
-        &bpsexec($1, %p['args']);
+    if (redrobin_alias_require_args($1, "psexec", %p['args'])) {
+        if (redrobin_gate($1, "psexec", %p['raw'])) {
+            &bpsexec($1, %p['args']);
+        }
     }
 }
 
 alias wmi {
     local('%p');
     %p = redrobin_alias_parse("wmi", @_);
-    if (redrobin_gate($1, "wmi", %p['raw'])) {
-        &bwmi($1, %p['args']);
+    if (redrobin_alias_require_args($1, "wmi", %p['args'])) {
+        if (redrobin_gate($1, "wmi", %p['raw'])) {
+            &bwmi($1, %p['args']);
+        }
     }
 }
 
 alias winrm {
     local('%p');
     %p = redrobin_alias_parse("winrm", @_);
-    if (redrobin_gate($1, "winrm", %p['raw'])) {
-        &bwinrm($1, %p['args']);
+    if (redrobin_alias_require_args($1, "winrm", %p['args'])) {
+        if (redrobin_gate($1, "winrm", %p['raw'])) {
+            &bwinrm($1, %p['args']);
+        }
     }
 }
 
 alias jump {
     local('%p');
     %p = redrobin_alias_parse("jump", @_);
-    if (redrobin_gate($1, "jump", %p['raw'])) {
-        &bjump($1, %p['args']);
+    if (redrobin_alias_require_args($1, "jump", %p['args'])) {
+        if (redrobin_gate($1, "jump", %p['raw'])) {
+            &bjump($1, %p['args']);
+        }
     }
 }
 
 alias spawn {
     local('%p');
     %p = redrobin_alias_parse("spawn", @_);
-    if (redrobin_gate($1, "spawn", %p['raw'])) {
-        &bspawn($1, %p['args']);
+    if (redrobin_alias_require_args($1, "spawn", %p['args'])) {
+        if (redrobin_gate($1, "spawn", %p['raw'])) {
+            &bspawn($1, %p['args']);
+        }
     }
 }
 
 alias bypassuac {
     local('%p');
     %p = redrobin_alias_parse("bypassuac", @_);
-    if (redrobin_gate($1, "bypassuac", %p['raw'])) {
-        &bbypassuac($1, %p['args']);
+    if (redrobin_alias_require_args($1, "bypassuac", %p['args'])) {
+        if (redrobin_gate($1, "bypassuac", %p['raw'])) {
+            &bbypassuac($1, %p['args']);
+        }
     }
 }
 
@@ -141,31 +183,39 @@ alias getsystem {
 alias elevate {
     local('%p');
     %p = redrobin_alias_parse("elevate", @_);
-    if (redrobin_gate($1, "elevate", %p['raw'])) {
-        &belevate($1, %p['args']);
+    if (redrobin_alias_require_args($1, "elevate", %p['args'])) {
+        if (redrobin_gate($1, "elevate", %p['raw'])) {
+            &belevate($1, %p['args']);
+        }
     }
 }
 
 alias inject {
     local('%p');
     %p = redrobin_alias_parse("inject", @_);
-    if (redrobin_gate($1, "inject", %p['raw'])) {
-        &binject($1, %p['args']);
+    if (redrobin_alias_require_args($1, "inject", %p['args'])) {
+        if (redrobin_gate($1, "inject", %p['raw'])) {
+            &binject($1, %p['args']);
+        }
     }
 }
 
 alias dllinject {
     local('%p');
     %p = redrobin_alias_parse("dllinject", @_);
-    if (redrobin_gate($1, "dllinject", %p['raw'])) {
-        &bdllinject($1, %p['args']);
+    if (redrobin_alias_require_args($1, "dllinject", %p['args'])) {
+        if (redrobin_gate($1, "dllinject", %p['raw'])) {
+            &bdllinject($1, %p['args']);
+        }
     }
 }
 
 alias psinject {
     local('%p');
     %p = redrobin_alias_parse("psinject", @_);
-    if (redrobin_gate($1, "psinject", %p['raw'])) {
-        &bpsinject($1, %p['args']);
+    if (redrobin_alias_require_args($1, "psinject", %p['args'])) {
+        if (redrobin_gate($1, "psinject", %p['raw'])) {
+            &bpsinject($1, %p['args']);
+        }
     }
 }
