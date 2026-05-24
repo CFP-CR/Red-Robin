@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-VERSION="1.0.1"
+VERSION="1.0.2"
 JSON_JAR="lib/json-20240303.jar"
 JAR_NAME="redrobin-aggressor-http-${VERSION}.jar"
 JUNIT="lib/junit-platform-console-standalone-1.10.0.jar"
