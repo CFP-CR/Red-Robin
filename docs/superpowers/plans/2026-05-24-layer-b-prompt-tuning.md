@@ -60,6 +60,8 @@
 
 9. **The T14 source incident's actual Layer B reason text** was not recoverable from `~/.redrobin/engagements/tc4-smoke/episodic.db` (verified 2026-05-24 — `episodes` table contains 74 rows; the oldest preserved row is from 2026-05-24 14:05, and no rows mention "cmd.exe child" or `ipconfig`/`tasklist`. The T14 smoke session's rows were rotated or were stored in a different per-engagement DB.) The plan therefore relies on the backlog's textual description ("cmd.exe-child-spawn pattern") to drive the prompt change, and leaves an OPTIONAL pre-Task-1 step where the operator may paste a recent over-cautious Layer B reason to refine the wording further. If the operator pastes a concrete reason, Task 1's AFTER block can be adjusted before commit; otherwise the AFTER block ships as written.
 
+10. **`wmic.exe` is intentionally EXCLUDED from STANDARD_RECON allow-list (added by audit fix M1).** Although `wmic os get` / `wmic computersystem get` are common operator habits, `wmic.exe` is deprecated by Microsoft (Windows 11 22H2+) and is a well-known LOLBIN (Sigma `proc_creation_win_wmic_*` rule family, MITRE T1047) that is heavily hunted by EDR. The audit found that defaulting `wmic` to PASS would push Layer B over the line on detection cost. `Get-ComputerInfo` and `Get-CimInstance` (both on the STANDARD_RECON allow-list) cover the same use cases at a much lower detection cost. The LLM should treat a `wmic`-prefixed command as RISKY_PAYLOAD by default — not enumerated explicitly in the prompt, but the absence from STANDARD_RECON combined with the LLM's general LOLBIN training is expected to be sufficient.
+
 **Risk note:** This is **production code** — the LLM's downstream behavior is opaque, and the SYSTEM_PROMPT change is the **only** behavioral lever. Two failure modes:
 - **Over-permissive:** Layer B becomes a rubber stamp; a genuinely risky command (e.g., a clever encoded `whoami /all` variant that drops into credential discovery, or a `shell powershell -enc ...` blob) gets PASS because the LLM weighed the new "default to PASS" directive too heavily. Mitigation: the explicit `RISKY_PAYLOAD` and `UNAMBIGUOUSLY_DANGEROUS` categories in the new prompt name credential dumping, privilege escalation, persistence, lateral movement, and destructive ops as WARN/BLOCK triggers. Smoke case T3-S4 (`shell mimikatz logonpasswords`) tests this — expected BLOCK.
 - **Under-permissive (regression to current behavior):** the LLM ignores the new directive and continues to WARN on recon. Mitigation: the prompt names ten specific recon commands explicitly, which gives the LLM concrete anchor points. Smoke case T3-S1 / S2 / S3 / S5 (the four recon cases) tests this — expected PASS.
@@ -163,35 +165,77 @@ Place the command into ONE of three categories and respond accordingly:
    operator runs in the first minutes of any engagement. These commands
    have low and well-understood detection cost and are expected in nearly
    every engagement. Treat the following as STANDARD_RECON by default:
-   `ipconfig`, `tasklist` (with or without `/v` / `/svc`), `whoami` (with or
-   without `/all` / `/groups` / `/priv`), `hostname`, `systeminfo`, `ver`,
-   `set`, `route print`, `arp -a`, `netstat -ano`, `net view`, `net user`,
-   `net localgroup`, `query user`, `qwinsta`, `wmic os get`,
-   `wmic computersystem get`, `dir` / `ls`, `where`, `type` / `cat` of a
-   user-readable file, `findstr` / `Select-String`, `Get-Process`,
-   `Get-Service`, `Get-ChildItem`, `Get-Location`, `Get-LocalUser`,
-   `Get-LocalGroup`, `Get-NetIPAddress`, `Get-NetTCPConnection`,
-   `Get-NetRoute`, `Get-ComputerInfo`. Return PASS with a one-sentence
-   reason such as "standard recon — no payload-side risk".
+   - `ipconfig`
+   - `tasklist` (with or without `/v` / `/svc`)
+   - `whoami` (with or without `/all` / `/groups` / `/priv`)
+   - `hostname`
+   - `systeminfo`
+   - `ver`
+   - `set`
+   - `route print`
+   - `arp -a`
+   - `netstat -ano`
+   - `net view`
+   - `net user`
+   - `net localgroup`
+   - `query user`
+   - `qwinsta`
+   - `klist` (Kerberos ticket listing)
+   - `nslookup`
+   - `Resolve-DnsName`
+   - `tracert`
+   - `pathping`
+   - `ping` (single target)
+   - `dir` / `ls`
+   - `where`
+   - `type` / `cat` of a user-readable file
+   - `findstr` / `Select-String`
+   - `Get-Process`
+   - `Get-Service`
+   - `Get-ChildItem`
+   - `Get-Location`
+   - `Get-LocalUser`
+   - `Get-LocalGroup`
+   - `Get-NetIPAddress`
+   - `Get-NetTCPConnection`
+   - `Get-NetRoute`
+   - `Get-ComputerInfo`
+   - `Get-CimInstance` (preferred replacement for deprecated `wmic`)
+
+   Return PASS with a one-sentence reason such as "standard recon — no
+   payload-side risk".
 
 2. **RISKY_PAYLOAD → WARN.** The payload itself carries a meaningful
    detection cost or operational risk beyond the vehicle. Examples:
    credential discovery via `net group "Domain Admins"`, kerberoasting
-   precursors (`setspn -q`), AMSI-visible powershell that loads a known-bad
-   cmdlet (`Invoke-Mimikatz`, `Invoke-Kerberoast`, `Invoke-DCSync`),
-   AppLocker bypass primitives (`rundll32 url.dll`, `regsvr32 /i`,
-   `mshta`), service enumeration in a way that pings every host on the
-   subnet, large `net view /domain` sweeps. Return WARN with a reason
-   that names the specific risky element (not the vehicle), and include
-   1-2 lower-noise alternatives in `suggestions`.
+   precursors (`setspn -q`), AppLocker bypass primitives (`rundll32
+   url.dll`, `regsvr32 /i`, `mshta`), service enumeration in a way that
+   pings every host on the subnet, large `net view /domain` sweeps.
+   Return WARN with a reason that names the specific risky element (not
+   the vehicle), and include 1-2 lower-noise alternatives in
+   `suggestions`.
+
+   **AMSI-visible credential cmdlets:** AMSI-visible powershell that loads
+   a known-bad cmdlet (`Invoke-Mimikatz`, `Invoke-Kerberoast`,
+   `Invoke-DCSync`) — WARN by default; if the engagement summary or KB
+   chunks indicate AMSI is enabled or EDR is active, **escalate to BLOCK**
+   since reaching Layer B implies a successful bypass and credential theft
+   is imminent.
 
 3. **UNAMBIGUOUSLY_DANGEROUS → BLOCK.** The command is near-certain
    detection, ROE-violating, or destructive. Examples: LSASS dump via
    mimikatz / procdump / nanodump that the existing Layer A rules
    somehow didn't catch (rare — usually a typo'd variant), `vssadmin
    delete shadows`, `wevtutil cl`, `reg add ... \\Run` persistence
-   without prior approval, dropping a service binary on a host outside
-   the engagement scope, `Set-MpPreference -DisableRealtimeMonitoring`.
+   without prior approval, `sc create <remotehost> binPath=...` /
+   `New-Service -ComputerName <remotehost>` (remote service install)
+   without explicit operator approval in the engagement summary,
+   `Set-MpPreference -DisableRealtimeMonitoring`,
+   `Add-MpPreference -ExclusionPath` / `-ExclusionProcess` /
+   `-ExclusionExtension` (Defender exclusion, T1562.001),
+   `Stop-Service WinDefend` / `sc stop WinDefend` (T1562.001),
+   `bcdedit /set {default} testsigning on` (T1553.006 — driver signature
+   bypass), `fsutil usn deletejournal` (anti-forensics).
    Return BLOCK with a reason and 1-2 safer alternatives.
 
 # When uncertain
@@ -235,7 +279,7 @@ cd C:/Users/jcspi/Documents/dev-projects/Red-Robin
 .venv/Scripts/python.exe -c "from redrobin.application.layer_b_engine import SYSTEM_PROMPT; print(len(SYSTEM_PROMPT), 'chars; first line:', SYSTEM_PROMPT.splitlines()[0])"
 ```
 
-Expected: prints a character count >= 2500 (the new prompt is ~3.3KB vs. ~860 bytes before) and the first line `You are Red Robin, an OPSEC advisor for a red team operator using Cobalt Strike.`. Zero ImportError / SyntaxError.
+Expected: prints a character count >= 3500 (the new prompt is ~4KB+ vs. ~860 bytes before, after the audit-fix expansions to the recon list + EDR-tamper block) and the first line `You are Red Robin, an OPSEC advisor for a red team operator using Cobalt Strike.`. Zero ImportError / SyntaxError.
 
 If the import fails with a syntax error, the most likely cause is an unescaped triple-quote inside the new prompt — re-check the closing `"""` placement and the embedded markdown code fences. The Python triple-quoted string contains a literal `` ```json `` opening and a literal closing `` ``` ``; these are NOT Python syntax, just text inside the string, so they do not require escaping. Verify by reading the file's last few lines after the Edit.
 
@@ -281,11 +325,23 @@ This commit retunes the SYSTEM_PROMPT in three ways:
   3. A three-category taxonomy with an allow-list:
      - STANDARD_RECON → PASS (ipconfig, tasklist, whoami, hostname,
        systeminfo, net view, net user, route print, arp -a, netstat,
-       Get-Process, Get-Service, etc. — ~25 names total).
+       nslookup, Resolve-DnsName, tracert, pathping, ping, klist,
+       Get-Process, Get-Service, Get-ComputerInfo, Get-CimInstance,
+       etc. — ~30 names total). `wmic` is INTENTIONALLY excluded
+       (deprecated by Microsoft, well-known LOLBIN T1047, heavily
+       hunted by EDR — operators should use Get-ComputerInfo /
+       Get-CimInstance instead).
      - RISKY_PAYLOAD → WARN (credential discovery, kerberoasting
-       precursors, AMSI-visible powershell, AppLocker bypass primitives).
+       precursors, AppLocker bypass primitives). AMSI-visible
+       credential cmdlets (Invoke-Mimikatz / Invoke-Kerberoast /
+       Invoke-DCSync) are WARN by default but escalate to BLOCK when
+       the engagement summary / KB chunks indicate AMSI is enabled or
+       EDR is active — reaching Layer B implies a successful bypass.
      - UNAMBIGUOUSLY_DANGEROUS → BLOCK (LSASS dump, vssadmin delete
-       shadows, wevtutil cl, persistence keys, EDR-tamper).
+       shadows, wevtutil cl, persistence keys, remote service install
+       without explicit approval, EDR-tamper: Defender exclusions,
+       Stop-Service WinDefend, bcdedit testsigning, fsutil usn
+       deletejournal).
 
   4. "When uncertain → prefer PASS" closing directive — Layer A is the
      noisy gate; Layer B is the calm second opinion.
@@ -413,11 +469,56 @@ def test_prompt_names_specific_recon_commands():
         "route print",
         "arp -a",
         "netstat",
+        "nslookup",
+        "tracert",
+        "klist",
     )
     for cmd in recon_commands:
         assert cmd in SYSTEM_PROMPT, (
             f"recon command {cmd!r} missing from STANDARD_RECON allow-list"
         )
+
+
+def test_prompt_blocks_edr_tamper():
+    """The UNAMBIGUOUSLY_DANGEROUS category must explicitly name the
+    EDR-tamper / anti-forensics patterns added in audit fix M2. These
+    are well-known T1562.001 / T1553.006 patterns that should never
+    fall through to PASS."""
+    edr_tamper_phrases = (
+        "Add-MpPreference -ExclusionPath",
+        "Stop-Service WinDefend",
+        "bcdedit /set {default} testsigning on",
+        "fsutil usn deletejournal",
+    )
+    for phrase in edr_tamper_phrases:
+        assert phrase in SYSTEM_PROMPT, (
+            f"EDR-tamper / anti-forensics phrase {phrase!r} missing from "
+            f"UNAMBIGUOUSLY_DANGEROUS — Layer B would not BLOCK this"
+        )
+
+
+def test_prompt_does_not_pass_wmic():
+    """`wmic.exe` is deprecated by Microsoft (Win11 22H2+) and is a
+    well-known LOLBIN (Sigma `proc_creation_win_wmic_*` family, MITRE
+    T1047). The audit fix M1 removed `wmic os get` /
+    `wmic computersystem get` from STANDARD_RECON; this test ensures
+    `wmic` does not appear in the allow-list anchor area. (It may still
+    appear elsewhere in the prompt as a RISKY_PAYLOAD reference if a
+    future tuning adds it explicitly.)"""
+    # Find the STANDARD_RECON anchor and the block of text that follows it
+    # up to the next category (RISKY_PAYLOAD). That block is the allow-list.
+    standard_recon_idx = SYSTEM_PROMPT.find("STANDARD_RECON")
+    risky_payload_idx = SYSTEM_PROMPT.find("RISKY_PAYLOAD")
+    assert standard_recon_idx != -1, "STANDARD_RECON anchor not found"
+    assert risky_payload_idx != -1, "RISKY_PAYLOAD anchor not found"
+    assert risky_payload_idx > standard_recon_idx, (
+        "STANDARD_RECON must appear before RISKY_PAYLOAD in the prompt"
+    )
+    allow_list_block = SYSTEM_PROMPT[standard_recon_idx:risky_payload_idx]
+    assert "wmic" not in allow_list_block.lower(), (
+        "`wmic` must NOT appear in the STANDARD_RECON allow-list — "
+        "it is a deprecated LOLBIN (T1047, Sigma proc_creation_win_wmic_*)"
+    )
 
 
 def test_prompt_response_format_is_unchanged():
@@ -473,11 +574,13 @@ cd C:/Users/jcspi/Documents/dev-projects/Red-Robin
 .venv/Scripts/pytest.exe tests/unit/test_layer_b_engine_prompt.py -v
 ```
 
-Expected: all 7 tests PASS. Each assertion maps to a load-bearing phrase the Task 1 AFTER block contains verbatim:
+Expected: all 9 tests PASS. Each assertion maps to a load-bearing phrase the Task 1 AFTER block contains verbatim:
 - `test_prompt_states_default_pass_directive` → matches `"Default to PASS"` and `"materially dangerous"`
 - `test_prompt_distinguishes_shell_vehicle_from_payload` → matches `"shell vehicle"`, `"cmd.exe"`, `"Do NOT WARN"`
 - `test_prompt_uses_three_category_taxonomy` → matches the three category labels
-- `test_prompt_names_specific_recon_commands` → matches each of the 9 recon command names
+- `test_prompt_names_specific_recon_commands` → matches each of the 12 recon command names (incl. nslookup, tracert, klist)
+- `test_prompt_blocks_edr_tamper` → matches the 4 EDR-tamper / anti-forensics phrases (M2 audit fix)
+- `test_prompt_does_not_pass_wmic` → asserts `wmic` is NOT inside the STANDARD_RECON allow-list block (M1 audit fix)
 - `test_prompt_response_format_is_unchanged` → matches `'"PASS" | "WARN" | "BLOCK"'` and asserts ESCALATE is absent
 - `test_prompt_includes_when_uncertain_prefer_pass` → matches `"When uncertain"` + `"prefer PASS"`
 - `test_prompt_acknowledges_engagement_context_override` → matches `"engagement"` (case-insensitive)
@@ -491,7 +594,7 @@ cd C:/Users/jcspi/Documents/dev-projects/Red-Robin
 .venv/Scripts/pytest.exe tests/unit/ -v 2>&1 | tail -15
 ```
 
-Expected: same pre-Task-1 unit-test count plus the 7 new prompt tests; zero new failures. If anything else fails, the Task 1 edit accidentally touched non-SYSTEM_PROMPT code — revert and re-do.
+Expected: same pre-Task-1 unit-test count plus the 9 new prompt tests; zero new failures. If anything else fails, the Task 1 edit accidentally touched non-SYSTEM_PROMPT code — revert and re-do.
 
 - [ ] **Step 4: Commit**
 
@@ -506,7 +609,7 @@ with_cache and never see the SYSTEM_PROMPT content, so a future commit
 that reverts or weakens the Plan E tuning would not be caught by CI —
 the regression would only surface during a live beacon smoke.
 
-This commit adds 7 regression cases that import SYSTEM_PROMPT directly
+This commit adds 9 regression cases that import SYSTEM_PROMPT directly
 and assert on the load-bearing structural phrases:
 
   1. "Default to PASS" + "materially dangerous" — the default-
@@ -515,13 +618,21 @@ and assert on the load-bearing structural phrases:
      payload distinction that addresses the T14 observation verbatim.
   3. The three category labels: STANDARD_RECON, RISKY_PAYLOAD,
      UNAMBIGUOUSLY_DANGEROUS.
-  4. The 9 explicit recon command names in the allow-list (ipconfig,
+  4. The 12 explicit recon command names in the allow-list (ipconfig,
      tasklist, whoami, hostname, systeminfo, net view, route print,
-     arp -a, netstat) — these map directly to operator smoke cases.
-  5. The JSON response shape is unchanged: PASS | WARN | BLOCK only,
+     arp -a, netstat, nslookup, tracert, klist) — these map directly
+     to operator smoke cases.
+  5. The 4 EDR-tamper / anti-forensics phrases (Add-MpPreference
+     -ExclusionPath, Stop-Service WinDefend, bcdedit testsigning,
+     fsutil usn deletejournal) are present in UNAMBIGUOUSLY_DANGEROUS
+     (audit fix M2).
+  6. `wmic` is NOT inside the STANDARD_RECON allow-list block —
+     deprecated LOLBIN (T1047), should not default to PASS (audit
+     fix M1).
+  7. The JSON response shape is unchanged: PASS | WARN | BLOCK only,
      with ESCALATE explicitly absent (Layer-A-only verdict).
-  6. "When uncertain → prefer PASS" tiebreaker.
-  7. Engagement-context awareness (the LLM should read the engagement
+  8. "When uncertain → prefer PASS" tiebreaker.
+  9. Engagement-context awareness (the LLM should read the engagement
      summary before applying defaults).
 
 Behavioral validation is OPERATOR SMOKE (Task 3) — Claude's actual
@@ -619,6 +730,8 @@ Note: this is the case the prior smoke (2026-05-18, see TC2 above) observed Laye
 - [ ] Within ~30s, Layer B retroactive line appears: `[Red Robin] Layer B BLOCK: <reason about LSASS / credential extraction / T1003.001>`. Layer B MUST NOT downgrade this to PASS just because the new prompt defaults toward PASS — the UNAMBIGUOUSLY_DANGEROUS category is explicit about credential dumping.
 - [ ] **Paste actual result here:** `<operator-fills>`
 - [ ] **Paste Layer B reason text here:** `<operator-fills>`
+
+> **Disambiguation:** If you see `[Red Robin] DANGER: lsass touch` (or similar), Tier 1A intercept fired (Layer A blocked the bare `mimikatz` alias name). If you see `Layer A novel pattern — Layer B reviewing async` preamble followed by Layer B's BLOCK verdict, the shell-wrapped form fell through to Layer B. **Either path is acceptable for this smoke** — the test asserts Layer B BLOCKs the shell-wrapped form when it reaches Layer B.
 
 This case is the **over-permissiveness guard**: if T3-S4 returns PASS, the tuning went too far and Plan E's prompt change needs to be rebalanced before Task 4 commits.
 
@@ -752,7 +865,7 @@ Replace the entire 5-line block with:
 
 ```markdown
 ### #129 — Layer B is over-cautious WARN for benign recon (RESOLVED 2026-05-24 commit `<T1 SHA>`)
-Plan E shipped a tuned SYSTEM_PROMPT at `redrobin/application/layer_b_engine.py:42-64`. The new prompt (1) defaults to PASS unless the payload command itself is materially dangerous, (2) explicitly states `cmd.exe spawned by beacon is NOT a per-command signal — do NOT WARN solely on the vehicle`, (3) introduces a three-category taxonomy (STANDARD_RECON → PASS / RISKY_PAYLOAD → WARN / UNAMBIGUOUSLY_DANGEROUS → BLOCK) with ~25 explicit STANDARD_RECON command names (ipconfig, tasklist, whoami, hostname, systeminfo, net view, route print, arp -a, netstat, Get-Process, Get-Service, ...), (4) closes with "when uncertain → prefer PASS", (5) preserves engagement-context override so an EDR-confirmed engagement can lift recon items toward WARN. Interface unchanged: `_parse_verdict` still maps PASS/WARN/BLOCK only; ESCALATE remains Layer-A-only. The backlog's "cross-reference Layer A's rule_id" suggestion was rejected as out-of-scope: Layer B never receives Layer A's rule_id (`verdict_pipeline.py:151-191` forwards only `command`+`raw` to `evaluate`), and Layer B only fires on Layer A ESCALATE (`verdict_pipeline.py:134`) — "Layer A returned PASS" never reaches Layer B. Regression coverage: `tests/unit/test_layer_b_engine_prompt.py` (7 assertions on prompt-structure phrases). Behavioral validation: operator smoke `T3-S1..S5` in `adapters/cobaltstrike/tests/test_cna_smoke.md` confirms STANDARD_RECON cases return PASS and UNAMBIGUOUSLY_DANGEROUS cases return BLOCK before this close-out fires.
+Plan E shipped a tuned SYSTEM_PROMPT at `redrobin/application/layer_b_engine.py:42-64`. The new prompt (1) defaults to PASS unless the payload command itself is materially dangerous, (2) explicitly states `cmd.exe spawned by beacon is NOT a per-command signal — do NOT WARN solely on the vehicle`, (3) introduces a three-category taxonomy (STANDARD_RECON → PASS / RISKY_PAYLOAD → WARN / UNAMBIGUOUSLY_DANGEROUS → BLOCK) with ~30 explicit STANDARD_RECON command names (ipconfig, tasklist, whoami, hostname, systeminfo, net view, route print, arp -a, netstat, nslookup, tracert, klist, Get-Process, Get-Service, Get-ComputerInfo, Get-CimInstance, ...) — `wmic` is INTENTIONALLY excluded (deprecated LOLBIN T1047), (4) AMSI-visible credential cmdlets (Invoke-Mimikatz/Kerberoast/DCSync) WARN by default but escalate to BLOCK under AMSI/EDR-confirmed context, (5) UNAMBIGUOUSLY_DANGEROUS adds EDR-tamper / anti-forensics phrases (Add-MpPreference exclusions, Stop-Service WinDefend, bcdedit testsigning, fsutil usn deletejournal) + reframes the "outside engagement scope" bullet as `sc create <remotehost>` / `New-Service -ComputerName <remotehost>` (detectable patterns), (6) closes with "when uncertain → prefer PASS", (7) preserves engagement-context override so an EDR-confirmed engagement can lift recon items toward WARN. Interface unchanged: `_parse_verdict` still maps PASS/WARN/BLOCK only; ESCALATE remains Layer-A-only. The backlog's "cross-reference Layer A's rule_id" suggestion was rejected as out-of-scope: Layer B never receives Layer A's rule_id (`verdict_pipeline.py:151-191` forwards only `command`+`raw` to `evaluate`), and Layer B only fires on Layer A ESCALATE (`verdict_pipeline.py:134`) — "Layer A returned PASS" never reaches Layer B. Regression coverage: `tests/unit/test_layer_b_engine_prompt.py` (9 assertions on prompt-structure phrases — including `test_prompt_blocks_edr_tamper` and `test_prompt_does_not_pass_wmic`). Behavioral validation: operator smoke `T3-S1..S5` in `adapters/cobaltstrike/tests/test_cna_smoke.md` confirms STANDARD_RECON cases return PASS and UNAMBIGUOUSLY_DANGEROUS cases return BLOCK before this close-out fires.
 ```
 
 Replace `<T1 SHA>` with the actual SHA.
@@ -857,4 +970,14 @@ The plan ONLY changes the contents of the `SYSTEM_PROMPT` string constant. If a 
 
 **Cross-Task-2 / Task-1 dependency:** Task 2's assertions check for phrases that must exist verbatim in Task 1's AFTER block. The plan explicitly notes that if the operator amends the AFTER block during Task 1 Step 1 (optional refinement), the corresponding assertions in Task 2 must also be updated. ✓
 
-Ready for audit.
+**Audit refinements applied (audit dispatch over commit `2b12c22`, 2026-05-24):** 4 MAJOR + 4 MINOR findings from the `/auditing-plans` review were applied as a single follow-up commit:
+- **M1** — `wmic os get` / `wmic computersystem get` removed from STANDARD_RECON allow-list (deprecated LOLBIN, MITRE T1047, Sigma `proc_creation_win_wmic_*` rule family, heavily EDR-hunted). Rationale woven into Verified Fact #10. `Get-ComputerInfo` / `Get-CimInstance` cover the same use cases at lower detection cost.
+- **M2** — UNAMBIGUOUSLY_DANGEROUS expanded with 4 EDR-tamper / anti-forensics phrases: `Add-MpPreference -ExclusionPath` / `-ExclusionProcess` / `-ExclusionExtension` (T1562.001), `Stop-Service WinDefend` / `sc stop WinDefend` (T1562.001), `bcdedit /set {default} testsigning on` (T1553.006 — driver signature bypass), `fsutil usn deletejournal` (anti-forensics).
+- **M3** — AMSI-visible credential cmdlets (Invoke-Mimikatz / Invoke-Kerberoast / Invoke-DCSync) reclassified with a conditional clause: WARN by default; escalate to BLOCK when engagement summary / KB chunks indicate AMSI is enabled or EDR is active (reaching Layer B implies a successful bypass — credential theft imminent).
+- **M4** — "Dropping a service binary on a host outside the engagement scope" bullet reframed to a detectable pattern: `sc create <remotehost> binPath=...` / `New-Service -ComputerName <remotehost>` without explicit operator approval in the engagement summary.
+- **m1** — STANDARD_RECON allow-list expanded with `nslookup`, `Resolve-DnsName`, `tracert`, `pathping`, `ping` (single target), `klist` (Kerberos ticket listing).
+- **m2** — STANDARD_RECON allow-list reformatted from a flowing paragraph to a bulleted list (one command per line) for maintainability and clean diffs.
+- **m3** — Disambiguation note added to T3-S4 smoke case explaining that either Tier 1A intercept path (`[Red Robin] DANGER: lsass touch`) or shell-wrapped fall-through to Layer B is acceptable — the test asserts Layer B BLOCKs when reached.
+- **m4** — Regression tests updated: `test_prompt_names_specific_recon_commands` adds `nslookup` / `tracert` / `klist` to the asserted list (12 total). Two NEW tests added: `test_prompt_blocks_edr_tamper` (asserts the 4 M2 phrases present) and `test_prompt_does_not_pass_wmic` (asserts `wmic` is NOT in the STANDARD_RECON allow-list block). Total prompt-regression test count: 9.
+
+Ready for execution.
