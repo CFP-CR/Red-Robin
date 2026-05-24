@@ -27,6 +27,7 @@
 |---|---|---|
 | `tools/inspect_episodic.py` | Create | UTF-8-safe inspect helper, mirrors operator's local script + fixes unicode bug |
 | `docs/operator-setup.md` | Modify | Update reference to point at `tools/inspect_episodic.py` (in-repo, not personal path) |
+| `docs/superpowers/backlog.md` | Modify | Close out `#131` (status table row + entry heading + body) with Task 1 commit SHA |
 
 ---
 
@@ -202,23 +203,41 @@ Spec: docs/superpowers/plans/2026-05-24-inspect-helper-utf8.md"
 grep -n "_inspect_episodic\|inspect_episodic\|redrobin-smoke" docs/operator-setup.md
 ```
 
-Expected: at least one reference to the old `C:\Users\jcspi\redrobin-smoke\_inspect_episodic.py` path (added during the engagement-isolation B3 docs work).
+Expected: exactly **one** occurrence to update at `docs/operator-setup.md:284` (verified 2026-05-24 — `python C:\Users\jcspi\redrobin-smoke\_inspect_episodic.py`), embedded in a `powershell` code block at lines 283-285 with a follow-up parenthetical at lines 287-288.
 
-- [ ] **Step 2: Replace the reference**
+Other matches in specs/prior plans/backlog are historical artifacts — out of scope.
 
-Find the line(s) that say something like:
+- [ ] **Step 2: Replace lines 283-288 as a unit**
+
+The current block at `docs/operator-setup.md:283-288` is:
 
 ```markdown
+` ` `powershell
 python C:\Users\jcspi\redrobin-smoke\_inspect_episodic.py
+` ` `
+
+(That helper script is in the engagement root, created during the
+2026-05-18 smoke session — copy it to new engagements as needed.)
 ```
 
-Replace each occurrence with:
+Both the code block AND the parenthetical sentence need to be replaced as a unit — leaving the "engagement root" sentence intact while the code block points at `tools/` would create contradictory guidance.
+
+Replace with (use the Edit tool — anchor on the unique `_inspect_episodic.py` token):
 
 ```markdown
-python tools/inspect_episodic.py
+` ` `bash
+uv run python tools/inspect_episodic.py
+` ` `
+
+(Helper lives at `tools/inspect_episodic.py` in the repo. It defaults to
+`~/.redrobin/episodic.db`; pass an explicit path to inspect a per-engagement DB,
+e.g. `uv run python tools/inspect_episodic.py ~/.redrobin/engagements/<slug>/episodic.db`.)
 ```
 
-If the surrounding context says "the helper script is in the engagement root", update it to: "the helper script is at `tools/inspect_episodic.py` in the repo. Run it from the repo root."
+Rationale for each change:
+- `powershell` → `bash` — matches the rest of the file's snippet conventions (the surrounding `uv run` snippets are tagged `bash`).
+- `python` → `uv run python` — uses the project's environment-managed interpreter (consistent with `Section 6` directly below).
+- "engagement root" → "`tools/` in the repo" — the new architecture (root DB at `~/.redrobin/episodic.db` per `#136`) makes the old "copy to engagements" instruction obsolete.
 
 - [ ] **Step 3: Commit**
 
@@ -234,6 +253,65 @@ The new helper accepts an optional path arg, so the snippet now
 runs from the repo root with no manual DB copy required.
 
 Backlog: pairs with #131 resolution at tools/inspect_episodic.py."
+```
+
+---
+
+## Task 3: Close out `#131` in the backlog
+
+Matches the pattern Plan A used for `#125`/`#127`/`#137` — close-out lives in the same PR so the backlog stays honest.
+
+**Files:**
+- Modify: `docs/superpowers/backlog.md`
+
+- [ ] **Step 1: Capture the Task 1 commit SHA**
+
+After Task 1's commit lands, capture its SHA. Pass it as `<TASK1_SHA>` below.
+
+- [ ] **Step 2: Update the scope table row (line 16)**
+
+Find:
+```markdown
+| B | 1 — operator helper | `#131` | ~10 LOC + decision | Pending |
+```
+
+Replace with:
+```markdown
+| B | 1 — operator helper | `#131` | ~10 LOC + decision | **DONE 2026-05-24** (commit `<TASK1_SHA>`) |
+```
+
+- [ ] **Step 3: Replace the `#131` entry (lines 81-85)**
+
+Find the existing heading + body at `backlog.md:81-85`:
+
+```markdown
+### #131 — `_inspect_episodic.py` crashes on Windows cp1252
+**Source:** T14 smoke 2026-05-22, `UnicodeEncodeError: '→'` from print statements when Layer B reason contains `→`.
+**Symptom:** PowerShell's default cp1252 encoding crashes the operator helper script on common Unicode chars from Layer B reasoning.
+**Files:** `C:\Users\jcspi\redrobin-smoke\_inspect_episodic.py` (operator-local, NOT in repo).
+**Fix:** Add `sys.stdout.reconfigure(encoding="utf-8")` at top of script. Trivial one-line fix; operator can do it themselves.
+```
+
+Replace with:
+
+```markdown
+### #131 — `_inspect_episodic.py` crashes on Windows cp1252 (RESOLVED 2026-05-24 commit `<TASK1_SHA>`)
+Plan B T1 shipped. Created `tools/inspect_episodic.py` — UTF-8-safe in-repo replacement for the operator's local `_inspect_episodic.py`. Adds `sys.stdout.reconfigure(encoding="utf-8")` at start (fixes the cp1252 crash on Layer B Unicode reasons), CLI arg for DB path with `~/.redrobin/episodic.db` as the default, and an explicit missing-DB error instead of sqlite3 auto-creating an empty file. T2 updated `docs/operator-setup.md` to point at the in-repo helper.
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add docs/superpowers/backlog.md
+git commit -m "docs(backlog): mark #131 RESOLVED — UTF-8-safe inspect helper
+
+Plan B T3 — backlog hygiene. Tasks 1+2 shipped tools/inspect_episodic.py
+and updated docs/operator-setup.md to reference it. Pattern matches the
+close-outs for #125/#127/#137 from Plan A: status table row flipped to
+DONE with the Task 1 SHA, entry heading updated to RESOLVED, body
+rewritten to summarize what shipped.
+
+Spec: docs/superpowers/plans/2026-05-24-inspect-helper-utf8.md"
 ```
 
 ---
