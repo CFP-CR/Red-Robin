@@ -16,7 +16,7 @@ free-text branch.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 
 
@@ -174,3 +174,19 @@ class ContextSummary:
     text: str
     window_size: int
     created_at: datetime = field(default_factory=datetime.now)
+
+
+def working_memory_to_snapshot(wm: WorkingMemory) -> dict:
+    """Serialize a :class:`WorkingMemory` to the WS ``working_memory_snapshot``
+    payload dict — the inverse of
+    ``redrobin.tui.snapshot_adapter.working_memory_from_snapshot``.
+
+    Single source of truth for BOTH the connect-time snapshot
+    (``tui_ws._build_initial_snapshot``) and the reducer's live re-emit
+    (#146). ``asdict`` emits every field with dataclass field names as keys
+    (nested dataclasses → nested dicts), which is exactly what the adapter's
+    ``.get()`` calls read; ``repo.save()`` already persists via ``asdict``.
+    Lives in ``domain`` so the reducer (application) and tui_ws (api) can both
+    import it without crossing the presentation-layer boundary.
+    """
+    return asdict(wm)
