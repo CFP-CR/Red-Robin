@@ -185,6 +185,7 @@ class VerdictPipeline:
         await self._on_retroactive(
             correlation_id=source_event_id,
             beacon_id=beacon_id,
+            command=command,
             original_verdict=original_action.value,
             new_verdict=retro.action.value,
             reason=retro.reason,
@@ -195,6 +196,7 @@ class VerdictPipeline:
         *,
         correlation_id: str,
         beacon_id: str,
+        command: str = "",
         original_verdict: str,
         new_verdict: str,
         reason: str,
@@ -214,6 +216,7 @@ class VerdictPipeline:
                 "payload": {
                     "correlation_id": correlation_id,
                     "beacon_id": beacon_id,
+                    "command": command,
                     "verdict": new_verdict,
                     "previous_verdict": original_verdict,
                     "reason": reason,
