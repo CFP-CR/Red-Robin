@@ -116,7 +116,15 @@ def cmd_engagement_new(args: argparse.Namespace) -> int:
     _load_env_for_cli()
     from redrobin.cli_helpers.engagement_cmd import make_service, run_new
 
-    return run_new(svc=make_service(), slug=args.slug, client=args.client)
+    return run_new(
+        svc=make_service(),
+        slug=args.slug,
+        client=args.client,
+        name=args.name,
+        in_scope=args.in_scope,
+        out_of_scope=args.out_of_scope,
+        summary=args.summary,
+    )
 
 
 def cmd_engagement_use(args: argparse.Namespace) -> int:
@@ -264,6 +272,26 @@ def build_parser() -> argparse.ArgumentParser:
     new_eng = eng_sub.add_parser("new")
     new_eng.add_argument("slug")
     new_eng.add_argument("--client", default=None)
+    new_eng.add_argument("--name", default=None, help="Friendly engagement name")
+    new_eng.add_argument(
+        "--in-scope",
+        action="append",
+        default=None,
+        dest="in_scope",
+        help="In-scope host/IP/CIDR (repeatable; comma-separated allowed)",
+    )
+    new_eng.add_argument(
+        "--out-of-scope",
+        action="append",
+        default=None,
+        dest="out_of_scope",
+        help="Out-of-scope host/IP/CIDR (repeatable; comma-separated allowed)",
+    )
+    new_eng.add_argument(
+        "--summary",
+        default=None,
+        help="Short engagement summary surfaced to Layer B",
+    )
     new_eng.set_defaults(func=cmd_engagement_new)
 
     use_eng = eng_sub.add_parser("use")

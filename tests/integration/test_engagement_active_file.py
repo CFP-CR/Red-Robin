@@ -38,11 +38,9 @@ def test_daemon_reads_active_engagement_file(isolated_root):
     # 2. Start daemon - env var is NOT set; daemon must fall back to file.
     app = create_app()
     with TestClient(app):
-        # 3. Lifespan ran; engagement should be resolved.
-        # The Engagement dataclass returned by EngagementLoader exposes
-        # ``.slug`` (not ``.id``); the loader maps the on-disk YAML key
-        # ``id`` written by EngagementService into ``slug`` via its
-        # fallback (``data.get("slug", slug)``).
+        # 3. Lifespan ran; engagement should be resolved. As of Plan H (#135)
+        #    the writer emits `slug` directly (one unified schema), so this no
+        #    longer relies on the loader's id->slug fallback.
         assert app.state.engagement is not None
         assert app.state.engagement.slug == "tc4-smoke"
         assert app.state.engagement_id == "tc4-smoke"

@@ -22,7 +22,8 @@ from pathlib import Path
 
 import yaml  # type: ignore[import-untyped]
 
-from redrobin.domain.engagement import Engagement, validate_slug
+from redrobin.application.engagement_loader import Engagement
+from redrobin.domain.engagement import validate_slug
 from redrobin.domain.memory import WorkingMemory
 from redrobin.infrastructure.filesystem import redrobin_root
 from redrobin.infrastructure.persistence.working_memory_repo import WorkingMemoryRepo
@@ -46,33 +47,52 @@ class EngagementService:
         validate_slug(slug)
         return self._engagements_dir() / slug
 
-    def new(self, slug: str, *, client: str = "") -> Engagement:
+    def new(
+        self,
+        slug: str,
+        *,
+        name: str = "",
+        client: str = "",
+        in_scope: list[str] | None = None,
+        out_of_scope: list[str] | None = None,
+        summary: str = "",
+    ) -> Engagement:
         validate_slug(slug)
         path = self._path_for(slug)
         if path.exists():
             raise EngagementError(f"engagement {slug!r} already exists at {path}")
         path.mkdir(parents=True, exist_ok=True)
 
+        eng = Engagement(
+            slug=slug,
+            name=name or slug,
+            in_scope=list(in_scope or []),
+            out_of_scope=list(out_of_scope or []),
+            summary=summary,
+            client=client,
+        )
+        # #135: write the schema the daemon's EngagementLoader consumes
+        # (top-level slug/name/in_scope/out_of_scope/summary). The old template
+        # emitted `id` + a nested `scope:` block + dead keys
+        # (objectives/current_phase/...) that nothing reads from engagement.yaml,
+        # so the loader silently loaded empty scope -> deny-all.
         template = {
-            "id": slug,
-            "client": client,
-            "scope": {
-                "in_scope": [],
-                "out_of_scope": [],
-            },
-            "objectives": [],
-            "current_phase": "not_started",
-            "kill_chain_status": {},
-            "rules_of_engagement": [],
+            "slug": eng.slug,
+            "name": eng.name,
+            "client": eng.client,
+            "in_scope": eng.in_scope,
+            "out_of_scope": eng.out_of_scope,
+            "summary": eng.summary,
         }
         (path / ENGAGEMENT_YAML).write_text(yaml.safe_dump(template, sort_keys=False))
 
-        # Initialize empty working memory
+        # Initialize empty working memory (objectives/phase/etc. live HERE, not
+        # in engagement.yaml).
         WorkingMemoryRepo(path / "working_memory.json").save(
             WorkingMemory(engagement_id=slug, client=client)
         )
 
-        return Engagement(id=slug, client=client)
+        return eng
 
     def use(self, slug: str) -> None:
         path = self._path_for(slug)

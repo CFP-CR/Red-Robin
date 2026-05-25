@@ -1,25 +1,18 @@
-"""redrobin/domain/engagement.py — Engagement metadata + YAML schema."""
+"""redrobin/domain/engagement.py — engagement slug validation.
+
+The ``Engagement`` data model lives in
+:mod:`redrobin.application.engagement_loader` — a single source of truth shared
+by the writer (:meth:`EngagementService.new`) and the daemon loader
+(:meth:`EngagementLoader.load`). Before Plan H there were TWO ``Engagement``
+classes with disjoint YAML schemas (#135); this module now keeps only the
+slug-validation rule both layers depend on.
+"""
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
 
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
-
-
-@dataclass
-class EngagementScope:
-    in_scope: list[str] = field(default_factory=list)
-    out_of_scope: list[str] = field(default_factory=list)
-
-
-@dataclass
-class Engagement:
-    id: str  # slug, e.g., "acme-q2-2026"
-    client: str = ""
-    scope: EngagementScope = field(default_factory=EngagementScope)
-    rules_of_engagement: list[str] = field(default_factory=list)
 
 
 def validate_slug(slug: str) -> None:

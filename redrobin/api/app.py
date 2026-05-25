@@ -119,6 +119,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         ),
         version=_version,
         adapter_names=list(app.state.cs_adapters.keys()),
+        scope_empty=getattr(app.state, "scope_empty", False),
     )
     print(_banner, file=sys.stderr, flush=True)
 

@@ -259,6 +259,7 @@ async def start_engagement(app: FastAPI, settings: Settings) -> tuple[None, None
     if engagement is None:
         scope = ScopeEnforcer(in_scope=["*"], out_of_scope=[])
         app.state.engagement = None
+        app.state.scope_empty = False
     else:
         scope = ScopeEnforcer(
             in_scope=engagement.in_scope, out_of_scope=engagement.out_of_scope
@@ -267,6 +268,22 @@ async def start_engagement(app: FastAPI, settings: Settings) -> tuple[None, None
         # Keep app.state.engagement_id consistent with the loaded slug so the
         # working-memory reducer + downstream consumers see a single ID.
         app.state.engagement_id = engagement.slug
+        # #142: an engagement with empty in_scope is fail-closed deny-all — the
+        # gate will BLOCK every targeted command (jump/psexec/wmi/winrm/...) as
+        # out-of-scope. That's the correct safe posture, but it MUST be loud, not
+        # silent. Surface it via state (banner) + a WARNING log.
+        app.state.scope_empty = not engagement.in_scope
+        if app.state.scope_empty:
+            logger.warning(
+                "engagement %r loaded with EMPTY in_scope - every targeted "
+                "command (jump/psexec/wmi/winrm/link) will be BLOCKED as "
+                "out-of-scope. Set scope: `redrobin engagement new <slug> "
+                "--in-scope <host/cidr>` or edit %s/%s/engagement.yaml and "
+                "restart the daemon.",
+                engagement.slug,
+                engagements_dir,
+                engagement.slug,
+            )
 
     app.state.scope = scope
 
