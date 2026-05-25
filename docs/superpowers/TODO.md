@@ -24,7 +24,7 @@ Live tracker of **open work**. Resolved history + deep per-issue detail live in 
 
 ### Plan J · P2 · robustness
 - [ ] **#145** — kerberos finding false-positive (fires on `Cached Tickets: (0)`).
-- [ ] **#147** — Inspector "LESSONS" is just the latest verdict — mislabeled + not accumulated. *(TUI; could fold into Plan I.)*
+- [ ] **#147** — Inspector "LESSONS" is just the latest verdict — mislabeled + not accumulated. *(Investigated 2026-05-25, **deferred from Plan I**: real lessons live in `longterm`/`episodic` DBs that are NOT in the WM snapshot and are never streamed to the TUI → needs a NEW lessons-streaming pipe, not the Plan I snapshot re-emit. Stays its own task here in J. Full root cause → [backlog.md](./backlog.md) #147.)*
 - [ ] **#91** — rules loader fails on UTF-8 BOM → open with `utf-8-sig`.
 - [ ] **#109** — `.cna` handshake retry should distinguish network vs response-shape failure.
 - [ ] **#149** — reducer lands only `Host Name` from `systeminfo` (drops OS / domain / NIC IPs).
