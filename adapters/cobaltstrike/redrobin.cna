@@ -76,32 +76,20 @@ sub redrobin_load_token {
 # semantics preserved per caller contract).
 sub redrobin_http_post {
     global('$REDROBIN_HTTP $REDROBIN_URL $REDROBIN_TOKEN');
-    local('$path $body $retry $err');
-    ($path, $body, $retry) = @_;
+    local('$path $body $err');
+    ($path, $body) = @_;
 
     try {
         return [$REDROBIN_HTTP post: $path, $body];
     } catch $e {
         $err = redrobin_sanitize_error($e);
-        # Stale / idle-closed keep-alive (#144): the first POST after an idle gap
-        # hits a dead pooled connection. Retry ONCE so attempt 2 gets a fresh one.
-        # GATED on $retry: this helper is SHARED with the NON-idempotent /v1/events
-        # posts and the handshake (own retry) — only the read-only verdict query
-        # opts in. Blindly retrying events would duplicate episodes/findings.
-        if ($retry && ($err hasmatch 'ConnectException' || $err hasmatch 'reset' || $err hasmatch 'closed' || $err hasmatch 'GOAWAY' || $err hasmatch 'EOF')) {
-            try {
-                return [$REDROBIN_HTTP post: $path, $body];
-            } catch $e2 {
-                $err = redrobin_sanitize_error($e2);
-            }
-        }
-        if ($err hasmatch 'ConnectException' || $err hasmatch 'refused') {
+        if ($err ismatch '.*(ConnectException|refused).*') {
             warn("[Red Robin] daemon connection refused at " . $REDROBIN_URL . " — is the daemon running?");
-        } else if ($err hasmatch 'HttpTimeout' || $err hasmatch 'timed out') {
+        } else if ($err ismatch '.*(HttpTimeout|timed out).*') {
             warn("[Red Robin] daemon timeout at " . $REDROBIN_URL . " (>200ms) — slow network or overloaded daemon");
-        } else if ($err hasmatch 'UnknownHost') {
+        } else if ($err ismatch '.*UnknownHost.*') {
             warn("[Red Robin] cannot resolve daemon host in " . $REDROBIN_URL);
-        } else if ($err hasmatch 'HttpException') {
+        } else if ($err ismatch '.*HttpException.*') {
             warn("[Red Robin] daemon returned non-2xx for " . $path . " — see daemon log");
         } else {
             warn("[Red Robin] HTTP error: " . $err);
@@ -201,26 +189,27 @@ sub redrobin_query_quick {
         $body .= ',"integrity_level":"' . $il . '"';
     }
     $body .= '}';
-    $response = redrobin_http_post("/v1/verdict/quick", $body, true);
+    $response = redrobin_http_post("/v1/verdict/quick", $body);
     if ($response eq "") {
         return %(action => "UNAVAILABLE", reason => "daemon unreachable -- command NOT vetted");
     }
 
-    # Crude JSON parse — extract action field via Sleep hasmatch (substring).
-    # ismatch (used previously) is full-string anchored and never matched
-    # the daemon's JSON wrapper, silently falling through to PASS — a
-    # latent bug that turned the pre-flight gate into a no-op.
-    if ($response hasmatch '"action":"BLOCK"') {
+    # STATELESS parse. Sleep's hasmatch is a STATEFUL iterator (caches its Matcher by
+    # string-value+pattern, toggles true/false across successive identical strings) — used
+    # as a one-shot boolean it intermittently returned false on identical BLOCK responses
+    # -> fail-open (#144, confirmed by operator smoke 2026-05-25). ismatch is a single
+    # full-anchored match (stateless); the '.*...*' wrap lets the whole JSON line match.
+    if ($response ismatch '.*"action":"BLOCK".*') {
         local('$reason');
-        if ($response hasmatch '"reason":"([^"]+)"') { $reason = matched()[0]; }
+        if ($response ismatch '.*"reason":"([^"]+)".*') { $reason = matched()[0]; }
         else { $reason = "see daemon log"; }
         return %(action => "BLOCK", reason => $reason);
-    } else if ($response hasmatch '"action":"WARN"') {
+    } else if ($response ismatch '.*"action":"WARN".*') {
         local('$reason');
-        if ($response hasmatch '"reason":"([^"]+)"') { $reason = matched()[0]; }
+        if ($response ismatch '.*"reason":"([^"]+)".*') { $reason = matched()[0]; }
         else { $reason = ""; }
         return %(action => "WARN", reason => $reason);
-    } else if ($response hasmatch '"action":"ESCALATE"') {
+    } else if ($response ismatch '.*"action":"ESCALATE".*') {
         return %(action => "ESCALATE", reason => "Layer B reviewing");
     } else {
         return %(action => "PASS", reason => "");
@@ -334,7 +323,7 @@ sub redrobin_handshake_with_retry {
     $attempt = 1;
     while ($attempt <= 3) {
         $response = redrobin_http_post("/v1/adapters/connect", $manifest_json);
-        if ($response hasmatch '"adapter_session_id":"(ses_[^"]+)"') {
+        if ($response ismatch '.*"adapter_session_id":"(ses_[^"]+)".*') {
             $REDROBIN_SESSION_ID = matched()[0];
             println("[Red Robin] handshake OK; session=" . $REDROBIN_SESSION_ID);
             return;
