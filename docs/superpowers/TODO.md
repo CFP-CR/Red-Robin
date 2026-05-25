@@ -8,19 +8,11 @@ Live tracker of **open work**. Resolved history + deep per-issue detail live in 
 ---
 
 ## Now / Next
-**Plan H (P0)** — make `engagement new` usable. *(Not started — branch off `dev-juan`.)*
+**Plan I (P1)** — TUI live state (#146 / #139 / #140 / #143). *(Not started — branch off `dev-juan`; needs a live beacon for the smoke.)*
 
 ---
 
-## Open — Plans H–K
-
-### Plan H · P0 · usability blocker — `engagement new`
-> `engagement new` writes a YAML the daemon loader can't consume → empty scope → strict ROE blocks every targeted command. Detail: [backlog.md](./backlog.md) (#135, #142).
-- [ ] **#135** — unify the two `Engagement` schemas (CLI writer ↔ daemon loader) onto one YAML shape.
-- [ ] **#142** — loud warn (banner/log/response) when an engagement loads with empty `in_scope`.
-- [ ] CLI flags `--in-scope / --out-of-scope / --summary / --name` on `engagement new`.
-- [ ] one-shot migration of the 3 broken on-disk YAMLs (`acme-q2-2026`, `spiedra-test`, `tc4-smoke`).
-- **Accept:** `engagement new` + a `jump` works with no hand-editing; loud warn if scope empty. *(CLI/daemon — no live beacon needed.)*
+## Open — Plans I–K
 
 ### Plan I · P1 · core operator UX — TUI live state
 > Today 2/3 TUI panels are dead. Detail: [backlog.md](./backlog.md) (#139/#140/#143/#146).
@@ -48,11 +40,12 @@ Live tracker of **open work**. Resolved history + deep per-issue detail live in 
 - [ ] **#151** — `.cna` sends `source.engagement_id: "unknown"` on path-2 events.
 - [ ] **#154** — daemon-synced danger list at handshake (hardens Plan G's offline fail-closed).
 
-**Sequence:** P0 (H) → P1 (I) → P2 (J) → P3 (K). "Done" = production-grade + smoke green, not a date.
+**Sequence:** P1 (I) → P2 (J) → P3 (K). "Done" = production-grade + smoke green, not a date. *(P0 done: Plans G + H.)*
 
 ---
 
 ## Recently shipped
+- **Plan H** (#135 + #142) ✅ 2026-05-25 — `engagement new` writes loader-consumable YAML (unified the two `Engagement` schemas) + `--in-scope/--out-of-scope/--summary/--name` flags + empty-scope now loud (daemon WARN + banner + CLI notice), fail-closed. Merged to `dev-juan` via PR #1. [detail](./backlog.md)
 - **Plan G** (#141 + #144) ✅ 2026-05-25 — gate fail-open fixed (root cause: Sleep `hasmatch` stateful iterator → stateless `ismatch`); Layer B retro carries the real command. [detail](./backlog.md)
 - **Plans A–F** ✅ 2026-05-24 — defensive hardening, docs polish, Layer B trigger audit + prompt tuning, obsolete cleanup (#125/#127/#137/#131/#116/#120/#111/#130/#129/#110/#112).
 - **#133 / #134 / #138** ✅ 2026-05-24 — bare-args guards, `$REDROBIN_HTTP` null fix, path-3 schema compliance.
