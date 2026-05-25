@@ -96,6 +96,27 @@ def render_inspector(
         sections.append("  (none yet)")
     sections.append("")
 
+    # CREDENTIALS/FINDINGS are reducer-projection sections with intentionally
+    # English-only (non-i18n) titles, like SCOPE/ROE/KILL CHAIN above.
+    sections.append(f"CREDENTIALS ({len(wm.credentials)})")
+    for cred in wm.credentials:
+        sections.append(
+            f"  {cred.domain}\\{cred.username} "
+            f"hash={cred.ntlm_hash or '-'} src={cred.source_beacon_id or '-'}"
+        )
+    if not wm.credentials:
+        sections.append("  (none captured)")
+    sections.append("")
+
+    sections.append(f"FINDINGS ({len(wm.findings)})")
+    for finding in wm.findings:
+        sections.append(
+            f"  [{finding.kind}] {finding.summary} (src={finding.source_beacon_id or '-'})"
+        )
+    if not wm.findings:
+        sections.append("  (none yet)")
+    sections.append("")
+
     sections.append(f"{labels.tui.lessons} ({len(episodic_lessons)})")
     for lesson in episodic_lessons:
         sections.append(f"  • {lesson}")

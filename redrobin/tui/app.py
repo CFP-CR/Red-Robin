@@ -96,9 +96,12 @@ def _render_sessions(state: TUIState) -> str:
     lines = []
     for s in sessions:
         if isinstance(s, dict):
-            ident = s.get("id") or s.get("name") or "?"
-            host = s.get("host") or "-"
-            lines.append(f"  {ident:<14} {host}")
+            # Session serializes as beacon_id/hostname/user/integrity (#143).
+            ident = s.get("beacon_id") or "?"
+            host = s.get("hostname") or "-"
+            user = s.get("user") or "-"
+            integ = s.get("integrity") or "-"
+            lines.append(f"  {ident:<14} {host:<18} {user} [{integ}]")
         else:
             lines.append(f"  {s}")
     return "\n".join(lines)

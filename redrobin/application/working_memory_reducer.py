@@ -34,7 +34,13 @@ from collections.abc import Callable
 from typing import Any
 
 from redrobin.application.event_bus import EventBus
-from redrobin.domain.memory import Credential, Finding, Host, Session
+from redrobin.domain.memory import (
+    Credential,
+    Finding,
+    Host,
+    Session,
+    working_memory_to_snapshot,
+)
 from redrobin.infrastructure.persistence.episodic_repo import EpisodicRepo
 from redrobin.infrastructure.persistence.working_memory_repo import WorkingMemoryRepo
 
@@ -96,25 +102,49 @@ class WorkingMemoryReducer:
                 if evt.get("_type") == "_close":
                     return
                 try:
-                    self._dispatch(evt)
+                    mutated = self._dispatch(evt)
                 except Exception:
                     logger.exception(
                         "reducer failed to process event type=%s", evt.get("type")
                     )
+                    mutated = False
+                if mutated:
+                    await self._publish_snapshot()
         finally:
             await self._bus.unsubscribe(sub)
 
-    def _dispatch(self, evt: dict[str, Any]) -> None:
+    async def _publish_snapshot(self) -> None:
+        """Publish a COMPLETE working_memory_snapshot to the bus so connected
+        TUI clients update live (#146). One re-emit per handled event (not per
+        repo.save), full snapshot (not a delta) — payloads are tiny. Safe from
+        loops: the reducer also receives this event, but ``working_memory_snapshot``
+        is not in ``_dispatch``'s table so it is ignored (returns False)."""
+        try:
+            wm = self._repo.load()
+        except FileNotFoundError:
+            return
+        await self._bus.publish(
+            {"type": "working_memory_snapshot", "payload": working_memory_to_snapshot(wm)}
+        )
+
+    def _dispatch(self, evt: dict[str, Any]) -> bool:
+        """Dispatch one event to its handler. Returns True if the event was a
+        handled (working-memory-mutating) type, so ``run()`` knows to re-emit
+        the snapshot."""
         etype = evt.get("type")
         payload_raw = evt.get("payload")
         payload: dict[str, Any] = payload_raw if isinstance(payload_raw, dict) else {}
         if etype == "beacon.command_output":
             self._on_beacon_command_output(payload)
+            return True
         elif etype == "beacon.initial":
             self._on_beacon_initial(payload)
+            return True
         elif etype == "opsec.verdict":
             self._on_verdict(payload)
+            return True
         # else: silently ignore — the bus is fan-out, not all events are for us.
+        return False
 
     def _on_beacon_command_output(self, payload: dict[str, Any]) -> None:
         output = str(payload.get("output", ""))

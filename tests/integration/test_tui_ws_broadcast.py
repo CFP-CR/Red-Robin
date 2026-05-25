@@ -55,3 +55,21 @@ def test_two_ws_clients_both_receive(app_client):
         assert ea["type"] == "opsec.verdict"
         assert eb["type"] == "opsec.verdict"
         assert ea == eb
+
+
+def test_ws_initial_snapshot_carries_all_fields(app_client):
+    """#139: the connect-time snapshot must include the fields that used to be
+    dropped (scope/objectives/kill_chain/accounts/etc.), not just the 5
+    collections."""
+    app, client = app_client
+    token = get_or_create_token()
+    with client.websocket_connect(f"/v1/tui?token={token}") as ws:
+        first = ws.receive_json()
+        payload = first["payload"]
+        for key in (
+            "client", "scope_in_scope", "scope_out_of_scope", "objectives",
+            "current_phase", "kill_chain_status", "rules_of_engagement",
+            "accounts", "defenses_observed", "tools_used",
+            "hosts", "credentials", "findings", "sessions",
+        ):
+            assert key in payload, f"snapshot missing {key}"

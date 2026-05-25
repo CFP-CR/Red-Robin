@@ -133,3 +133,37 @@ def test_objectives_are_rehydrated_with_milestones():
     assert obj.goal == "Compromise DC"
     assert obj.progress_pct == 60
     assert obj.milestones == ["got foothold", "lateral to WEB"]
+
+
+def test_to_snapshot_round_trips_all_fields():
+    """#139: working_memory_to_snapshot must be the complete inverse of
+    working_memory_from_snapshot — every WorkingMemory field survives the
+    round-trip (the connect-time snapshot used to drop 9 of 14)."""
+    from redrobin.domain.memory import (
+        Account, Credential, Finding, Host, Objective, Session, ToolUsage,
+        WorkingMemory, working_memory_to_snapshot,
+    )
+    from redrobin.tui.snapshot_adapter import working_memory_from_snapshot
+
+    wm = WorkingMemory(
+        engagement_id="acme-q2",
+        client="Acme Corp",
+        scope_in_scope=["10.0.0.0/24"],
+        scope_out_of_scope=["10.0.0.1"],
+        objectives=[Objective(id="o1", goal="DC", progress_pct=40, milestones=["foothold"])],
+        current_phase="lateral",
+        kill_chain_status={"recon": "complete"},
+        rules_of_engagement=["no DoS"],
+        hosts=[Host(name="DC01", os="Win2022")],
+        accounts=[Account(name="corp\\svc", kind="ntlm")],
+        defenses_observed=["CrowdStrike"],
+        tools_used=[ToolUsage(name="nanodump", used_on="DC01", used_at="2026-05-10")],
+        credentials=[Credential(domain="CORP", username="admin", ntlm_hash="a" * 32)],
+        findings=[Finding(kind="opsec_block", summary="blocked mimikatz")],
+        sessions=[Session(beacon_id="B-1", hostname="DC01", user="corp\\admin", integrity="High")],
+    )
+
+    snap = working_memory_to_snapshot(wm)
+    assert isinstance(snap, dict)
+    rebuilt = working_memory_from_snapshot(snap)
+    assert rebuilt == wm

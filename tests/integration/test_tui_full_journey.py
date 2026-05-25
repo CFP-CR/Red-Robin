@@ -22,6 +22,15 @@ from redrobin.tui.state import TUIState
 from redrobin.tui.ws_client import handle_message
 
 
+def _recv_verdict(ws):
+    """Receive WS frames, skipping the working_memory_snapshot re-emits (#146),
+    returning the first opsec.verdict frame."""
+    while True:
+        frame = ws.receive_json()
+        if frame.get("type") == "opsec.verdict":
+            return frame
+
+
 @pytest.fixture
 def pty_input():
     with create_pipe_input() as inp:
@@ -210,7 +219,7 @@ def test_roundtrip_layer_b_correction_mutates_layer_a_in_place(daemon):
                 },
             },
         )
-        _drive_handle(state, json.dumps(ws.receive_json()))
+        _drive_handle(state, json.dumps(_recv_verdict(ws)))
 
         # Retroactive correction with the same correlation_id.
         client.portal.call(
@@ -226,7 +235,7 @@ def test_roundtrip_layer_b_correction_mutates_layer_a_in_place(daemon):
                 },
             },
         )
-        _drive_handle(state, json.dumps(ws.receive_json()))
+        _drive_handle(state, json.dumps(_recv_verdict(ws)))
 
     # Two frames received, but the second one mutated the first in place.
     assert len(state.events) == 1

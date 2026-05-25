@@ -470,3 +470,32 @@ Per project rule, this operator-smoke procedure IS the acceptance artifact for `
 ### Acceptance
 
 ALL steps must pass on a live beacon. This section re-runs to green after any future gate or `.cna` change.
+
+---
+
+## Plan I -- TUI live-state smoke (#146 / #139 / #140 / #143)
+
+Live-beacon acceptance for the TUI live-state cluster. Run on a live Cobalt Strike beacon, daemon on `localhost:7777`, `redrobin.cna` freshly unloaded then reloaded, an engagement with non-empty scope, and the TUI connected (`redrobin tui`). The daemon-side (#146/#139/#140 + the beacon.initial consumer) is unit/integration-tested; this smoke is the ONLY acceptance for the `.cna` `beacon.initial` emit (#143-c2, no offline Sleep linter).
+
+### 1. Setup
+- [ ] Daemon running; engagement active with a non-empty `in_scope`.
+- [ ] One active beacon already checked in BEFORE loading the `.cna`.
+- [ ] In Script Manager: unload `redrobin.cna`, then reload it. Confirm `[Red Robin] handshake OK`.
+- [ ] Launch / connect the TUI (`redrobin tui`).
+
+### 2. #143 backfill (pre-existing beacon)
+- [ ] On `.cna` (re)load, the TUI **Sessions** panel populates with the already-connected beacon -- showing its id + hostname + user + integrity -- NOT "(no active sessions)".
+- [ ] Daemon log shows `POST /v1/events ... 200` for a `beacon.initial`; the engagement `working_memory.json` gains a `sessions` entry.
+
+### 3. #143 new check-in
+- [ ] Spawn / relink a NEW beacon. Within ~1s it appears in the Sessions panel.
+
+### 4. #146 + #139 + #140 live updates (no reconnect)
+- [ ] Run `shell whoami`, then a credential-yielding command (e.g. a hashdump in the lab). WITHOUT reconnecting the TUI, the Working Memory panel + Memory Inspector (Ctrl+I) update live.
+- [ ] Inspector shows real scope / objectives / phase (not defaults) -- proving #139 (full snapshot) + #146 (live re-emit).
+
+### 5. #140 findings/credentials
+- [ ] The Inspector shows a **CREDENTIALS** section with the captured credential and a **FINDINGS** section with any opsec_block / kerberos findings.
+
+### Acceptance
+ALL steps pass on a live beacon. The AI inspects daemon-side artifacts (`working_memory.json` sessions/credentials/findings; daemon log `200`s for `beacon.initial`). This section re-runs to green after any future TUI / `.cna` change.
