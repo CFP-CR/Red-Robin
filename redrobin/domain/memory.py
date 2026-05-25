@@ -188,5 +188,10 @@ def working_memory_to_snapshot(wm: WorkingMemory) -> dict:
     ``.get()`` calls read; ``repo.save()`` already persists via ``asdict``.
     Lives in ``domain`` so the reducer (application) and tui_ws (api) can both
     import it without crossing the presentation-layer boundary.
+
+    PRECONDITION: every WorkingMemory field must stay JSON-native (str/int/
+    list/dict) — the result is sent over the TUI WebSocket via ``send_json``,
+    which encodes without a ``default=`` fallback. A future ``datetime`` field
+    would persist to disk (repo.save uses ``default=str``) but raise at WS send.
     """
     return asdict(wm)

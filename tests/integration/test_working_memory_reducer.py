@@ -222,6 +222,42 @@ async def test_unknown_event_type_is_ignored(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_reducer_republishes_snapshot_after_mutation(tmp_path):
+    """#146: after handling a mutating event the reducer must publish a
+    complete working_memory_snapshot back to the bus so the TUI updates live."""
+    bus = EventBus()
+    repo = _new_repo(tmp_path, "eng-reemit")
+    # A second subscriber stands in for a connected TUI client.
+    observer = await bus.subscribe()
+    _, task = await _start_reducer(bus, repo, "eng-reemit")
+    try:
+        await bus.publish(
+            {
+                "type": "beacon.command_output",
+                "payload": {
+                    "bid": "B-9",
+                    "output": "Username: CORP\\admin\nNTLM: " + ("a" * 32) + ":" + ("b" * 32) + "\n",
+                },
+            }
+        )
+        snapshot = None
+        for _ in range(50):
+            await asyncio.sleep(0.02)
+            try:
+                evt = observer.get_nowait()
+            except Exception:
+                continue
+            if evt.get("type") == "working_memory_snapshot":
+                snapshot = evt
+                break
+        assert snapshot is not None, "reducer did not re-publish a snapshot"
+        creds = snapshot["payload"]["credentials"]
+        assert any(c["username"] == "admin" and c["domain"] == "CORP" for c in creds)
+    finally:
+        await _drain(bus, task)
+
+
+@pytest.mark.asyncio
 async def test_lifespan_starts_reducer_task(tmp_path, monkeypatch):
     monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     monkeypatch.setenv("REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json"))
