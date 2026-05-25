@@ -20,6 +20,7 @@ def format_banner(
     engagement_name: str | None,
     version: str,
     adapter_names: list[str],
+    scope_empty: bool = False,
 ) -> str:
     """Return a multi-line banner summarising the resolved daemon config.
 
@@ -49,6 +50,12 @@ def format_banner(
     lines.append(f"  Root:       {settings.root}")
     if engagement_name:
         lines.append(f"  Engagement: {engagement_name}")
+        if scope_empty:
+            lines.append(
+                "  Scope:      EMPTY - WARNING: every targeted command will be "
+                'BLOCKED (out-of-scope). Set scope via "redrobin engagement new '
+                '--in-scope ..." or edit engagement.yaml + restart.'
+            )
     else:
         lines.append(
             '  Engagement: (none) - WARNING: verdicts will NOT be persisted. '

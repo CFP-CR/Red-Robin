@@ -44,3 +44,26 @@ def test_banner_shows_missing_keys_as_missing(monkeypatch):
         version="0.1.1", adapter_names=[],
     )
     assert "MISSING" in banner  # for at least one key
+
+
+def test_banner_warns_when_scope_empty(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
+    s = Settings()
+    banner = format_banner(
+        settings=s, rules_count=3, engagement_name="acme",
+        version="0.1.1", adapter_names=[], scope_empty=True,
+    )
+    assert "EMPTY" in banner
+    assert "BLOCKED" in banner
+
+
+def test_banner_no_scope_warning_when_scoped(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
+    s = Settings()
+    banner = format_banner(
+        settings=s, rules_count=3, engagement_name="acme",
+        version="0.1.1", adapter_names=[], scope_empty=False,
+    )
+    assert "EMPTY" not in banner
