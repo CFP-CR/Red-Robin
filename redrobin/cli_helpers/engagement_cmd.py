@@ -57,6 +57,14 @@ def run_new(
         return 1
     print(f"[+] Created engagement {eng.slug}")
     print(f"[+] Edit {redrobin_root()}/engagements/{eng.slug}/engagement.yaml")
+    if not eng.in_scope:
+        print(
+            "[!] No in-scope targets set - targeted commands (jump/psexec/wmi/"
+            "winrm/link) will be BLOCKED as out-of-scope until you set scope. "
+            "Re-run with --in-scope <host/cidr>, or edit the engagement.yaml "
+            "above.",
+            file=sys.stderr,
+        )
     return 0
 
 
