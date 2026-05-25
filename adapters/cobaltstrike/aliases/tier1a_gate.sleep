@@ -72,7 +72,7 @@ alias mimikatz {
     local('%p');
     %p = redrobin_alias_parse("mimikatz", @_);
     if (redrobin_alias_require_args($1, "mimikatz", %p['args'])) {
-        if (redrobin_gate($1, "mimikatz", %p['raw'])) {
+        if (redrobin_gate($1, "mimikatz", %p['raw'], true)) {
             &bmimikatz($1, %p['args']);
         }
     }
@@ -81,7 +81,7 @@ alias mimikatz {
 alias dcsync {
     local('%p @parts');
     %p = redrobin_alias_parse("dcsync", @_);
-    if (redrobin_gate($1, "dcsync", %p['raw'])) {
+    if (redrobin_gate($1, "dcsync", %p['raw'], true)) {
         @parts = split(' ', %p['args']);
         if (size(@parts) >= 2) {
             &bdcsync($1, @parts[0], @parts[1]);
@@ -93,13 +93,13 @@ alias dcsync {
 }
 
 alias hashdump {
-    if (redrobin_gate($1, "hashdump", "hashdump")) {
+    if (redrobin_gate($1, "hashdump", "hashdump", true)) {
         &bhashdump($1);
     }
 }
 
 alias logonpasswords {
-    if (redrobin_gate($1, "logonpasswords", "logonpasswords")) {
+    if (redrobin_gate($1, "logonpasswords", "logonpasswords", true)) {
         &blogonpasswords($1);
     }
 }
@@ -108,7 +108,7 @@ alias kerberos_ticket_use {
     local('%p');
     %p = redrobin_alias_parse("kerberos_ticket_use", @_);
     if (redrobin_alias_require_args($1, "kerberos_ticket_use", %p['args'])) {
-        if (redrobin_gate($1, "kerberos_ticket_use", %p['raw'])) {
+        if (redrobin_gate($1, "kerberos_ticket_use", %p['raw'], true)) {
             &bkerberos_ticket_use($1, %p['args']);
         }
     }
@@ -118,7 +118,7 @@ alias psexec {
     local('%p');
     %p = redrobin_alias_parse("psexec", @_);
     if (redrobin_alias_require_args($1, "psexec", %p['args'])) {
-        if (redrobin_gate($1, "psexec", %p['raw'])) {
+        if (redrobin_gate($1, "psexec", %p['raw'], true)) {
             &bpsexec($1, %p['args']);
         }
     }
@@ -128,7 +128,7 @@ alias wmi {
     local('%p');
     %p = redrobin_alias_parse("wmi", @_);
     if (redrobin_alias_require_args($1, "wmi", %p['args'])) {
-        if (redrobin_gate($1, "wmi", %p['raw'])) {
+        if (redrobin_gate($1, "wmi", %p['raw'], true)) {
             &bwmi($1, %p['args']);
         }
     }
@@ -138,7 +138,7 @@ alias winrm {
     local('%p');
     %p = redrobin_alias_parse("winrm", @_);
     if (redrobin_alias_require_args($1, "winrm", %p['args'])) {
-        if (redrobin_gate($1, "winrm", %p['raw'])) {
+        if (redrobin_gate($1, "winrm", %p['raw'], true)) {
             &bwinrm($1, %p['args']);
         }
     }
@@ -148,7 +148,7 @@ alias jump {
     local('%p');
     %p = redrobin_alias_parse("jump", @_);
     if (redrobin_alias_require_args($1, "jump", %p['args'])) {
-        if (redrobin_gate($1, "jump", %p['raw'])) {
+        if (redrobin_gate($1, "jump", %p['raw'], true)) {
             &bjump($1, %p['args']);
         }
     }
@@ -158,7 +158,7 @@ alias spawn {
     local('%p');
     %p = redrobin_alias_parse("spawn", @_);
     if (redrobin_alias_require_args($1, "spawn", %p['args'])) {
-        if (redrobin_gate($1, "spawn", %p['raw'])) {
+        if (redrobin_gate($1, "spawn", %p['raw'], true)) {
             &bspawn($1, %p['args']);
         }
     }
@@ -168,14 +168,14 @@ alias bypassuac {
     local('%p');
     %p = redrobin_alias_parse("bypassuac", @_);
     if (redrobin_alias_require_args($1, "bypassuac", %p['args'])) {
-        if (redrobin_gate($1, "bypassuac", %p['raw'])) {
+        if (redrobin_gate($1, "bypassuac", %p['raw'], true)) {
             &bbypassuac($1, %p['args']);
         }
     }
 }
 
 alias getsystem {
-    if (redrobin_gate($1, "getsystem", "getsystem")) {
+    if (redrobin_gate($1, "getsystem", "getsystem", true)) {
         &bgetsystem($1);
     }
 }
@@ -184,7 +184,7 @@ alias elevate {
     local('%p');
     %p = redrobin_alias_parse("elevate", @_);
     if (redrobin_alias_require_args($1, "elevate", %p['args'])) {
-        if (redrobin_gate($1, "elevate", %p['raw'])) {
+        if (redrobin_gate($1, "elevate", %p['raw'], true)) {
             &belevate($1, %p['args']);
         }
     }
@@ -194,7 +194,7 @@ alias inject {
     local('%p');
     %p = redrobin_alias_parse("inject", @_);
     if (redrobin_alias_require_args($1, "inject", %p['args'])) {
-        if (redrobin_gate($1, "inject", %p['raw'])) {
+        if (redrobin_gate($1, "inject", %p['raw'], true)) {
             &binject($1, %p['args']);
         }
     }
@@ -204,7 +204,7 @@ alias dllinject {
     local('%p');
     %p = redrobin_alias_parse("dllinject", @_);
     if (redrobin_alias_require_args($1, "dllinject", %p['args'])) {
-        if (redrobin_gate($1, "dllinject", %p['raw'])) {
+        if (redrobin_gate($1, "dllinject", %p['raw'], true)) {
             &bdllinject($1, %p['args']);
         }
     }
@@ -214,7 +214,7 @@ alias psinject {
     local('%p');
     %p = redrobin_alias_parse("psinject", @_);
     if (redrobin_alias_require_args($1, "psinject", %p['args'])) {
-        if (redrobin_gate($1, "psinject", %p['raw'])) {
+        if (redrobin_gate($1, "psinject", %p['raw'], true)) {
             &bpsinject($1, %p['args']);
         }
     }

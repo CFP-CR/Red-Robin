@@ -230,9 +230,17 @@ sub redrobin_query_quick {
 
 # ===== Central gate sub (called by every alias body) =====
 sub redrobin_gate {
-    local('$bid $cmd $raw $verdict');
-    ($bid, $cmd, $raw) = @_;
+    local('$bid $cmd $raw $dangerous $verdict');
+    ($bid, $cmd, $raw, $dangerous) = @_;
     $verdict = redrobin_query_quick($bid, $cmd, $raw);
+    if ($verdict['action'] eq "UNAVAILABLE") {
+        if ($dangerous) {
+            berror($bid, "[Red Robin] gate UNAVAILABLE (daemon unreachable) -- BLOCKING " . $cmd . " (dangerous, cannot verify). Retry once the daemon is reachable.");
+            return false;
+        }
+        berror($bid, "[Red Robin] gate UNAVAILABLE (daemon unreachable) -- " . $cmd . " NOT vetted, proceeding. Check the daemon.");
+        return true;
+    }
     if ($verdict['action'] eq "BLOCK") {
         berror($bid, "[Red Robin] DANGER: " . $verdict['reason']);
         return false;
