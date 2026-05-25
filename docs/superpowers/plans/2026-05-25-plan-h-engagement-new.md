@@ -24,13 +24,18 @@
 | `redrobin/api/lifespan_helpers.py` | daemon engagement load | WARN + set `app.state.scope_empty` when a loaded engagement has empty `in_scope` (#142) |
 | `redrobin/application/startup_banner.py` | startup banner | `format_banner` gains `scope_empty` → renders an EMPTY-SCOPE warning line |
 | `redrobin/api/app.py` | lifespan wiring | pass `scope_empty=app.state.scope_empty` to `format_banner` |
-| `tests/integration/test_engagement_new_roundtrip.py` | #135 regression | CREATE — writer output must round-trip through the loader |
+| `tests/integration/test_engagement_new_roundtrip.py` | #135 regression | CREATE — writer output must round-trip through the loader (+ guard `init`'s template) |
 | `tests/unit/test_engagement_cmd.py` | CLI helper | CREATE — `_csv_list` flatten + empty-scope notice |
 | `tests/integration/test_engagement_new_flags.py` | CLI flags + acceptance | CREATE — `engagement new --in-scope` → loader → usable scope (the #135 acceptance) |
 | `tests/integration/test_engagement_empty_scope_warn.py` | #142 | CREATE — empty-scope engagement boots with `scope_empty` flag + WARN |
-| `tests/unit/test_startup_banner.py` | banner | CREATE (or append) — `scope_empty=True` renders the warning line |
+| `tests/integration/test_startup_banner.py` | banner | **APPEND** (file already exists) — `scope_empty=True` renders the warning line |
 
-**Note (verified):** the only importers of the dead domain `Engagement`/`EngagementScope` are `engagement_service.py:25` (return type) and the `EngagementScope` definition itself; `tests/unit/test_engagement_service.py` imports only `validate_slug`. The loader `Engagement` is imported by `lifespan_helpers.py:29` (type hint, reads `.in_scope/.out_of_scope/.slug/.name`) — all fields preserved, so lifespan needs no change in Task 1. `inspector.py`'s `rules_of_engagement` is `WorkingMemory.rules_of_engagement`, NOT the engagement model — untouched.
+**Audit notes (verified against the codebase 2026-05-25):**
+- **Layering OK:** `engagement_service` importing `Engagement` from `engagement_loader` is intra-`application` (same layer) — the `importlinter.cfg` `layers` contract only restricts cross-layer direction, and no `forbidden` contract applies. No import-linter violation.
+- The only importers of the dead domain `Engagement`/`EngagementScope` are `engagement_service.py:25` (return type) + the `EngagementScope` def itself; `tests/unit/test_engagement_service.py` imports only `validate_slug`. The loader `Engagement` is imported by `lifespan_helpers.py:29` (reads `.in_scope/.out_of_scope/.slug/.name`) — all fields preserved, so lifespan needs no change in Task 1.
+- `objectives/current_phase/kill_chain_status/rules_of_engagement` are read ONLY as `WorkingMemory` fields (working_memory.json), never from engagement.yaml — safe to drop from the writer template.
+- **Second writer:** `init_cmd._ENGAGEMENT_TEMPLATE` (`init_cmd.py:47-59`) ALSO writes engagement.yaml and ALREADY uses the loader schema (top-level `slug`/`in_scope`). Task 1 does NOT need to touch it, but Task 1's test file adds a regression guard so it can't silently regress.
+- `tests/integration/test_startup_banner.py` already exists with 3 keyword-only `format_banner` calls — adding `scope_empty: bool = False` (keyword-only, default) is backward-compatible; append the new tests there.
 
 ---
 
@@ -96,6 +101,23 @@ def test_new_writes_top_level_keys_not_nested_scope(tmp_path):
     assert data["in_scope"] == ["corp.acme.local"]
     assert "scope" not in data  # no nested scope block
     assert "id" not in data     # loader never read `id`
+
+
+def test_init_template_stays_loader_consumable(tmp_path):
+    """init_cmd writes the DEFAULT engagement.yaml via _ENGAGEMENT_TEMPLATE — a
+    SECOND writer. It already uses the loader schema; this guard fails if it
+    ever regresses to a loader-incompatible shape (reintroducing #135 via init)."""
+    from redrobin.application.engagement_loader import EngagementLoader
+    from redrobin.cli_helpers.init_cmd import _ENGAGEMENT_TEMPLATE
+
+    eng_dir = tmp_path / "engagements" / "op-default"
+    eng_dir.mkdir(parents=True)
+    (eng_dir / "engagement.yaml").write_text(
+        _ENGAGEMENT_TEMPLATE.format(slug="op-default")
+    )
+    eng = EngagementLoader(engagements_root=tmp_path / "engagements").load("op-default")
+    assert eng.slug == "op-default"
+    assert eng.in_scope  # template ships a non-empty example scope
 ```
 
 - [ ] **Step 2: Run it to verify it fails**
@@ -465,7 +487,7 @@ git commit -m "feat(cli): add --name/--in-scope/--out-of-scope/--summary to enga
 - Modify: `redrobin/api/lifespan_helpers.py:259-271` (set `app.state.scope_empty` + WARN)
 - Modify: `redrobin/application/startup_banner.py:16-23,50-56` (add `scope_empty` param + line)
 - Modify: `redrobin/api/app.py:114-122` (pass `scope_empty`)
-- Test: `tests/integration/test_engagement_empty_scope_warn.py` (create), `tests/unit/test_startup_banner.py` (create)
+- Test: `tests/integration/test_engagement_empty_scope_warn.py` (create), `tests/integration/test_startup_banner.py` (create)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -526,42 +548,35 @@ def test_no_engagement_flag_false(isolated_root):
         assert app.state.scope_empty is False
 ```
 
-Create `tests/unit/test_startup_banner.py`:
+Append to `tests/integration/test_startup_banner.py` (the file ALREADY exists with 3 `format_banner` tests + imports `format_banner`/`Settings`; match its `Settings()` + `monkeypatch` style, add no new imports):
 
 ```python
-"""Banner surfaces an empty-scope warning (Plan H #142)."""
-from __future__ import annotations
-
-from redrobin.application.startup_banner import format_banner
-from redrobin.infrastructure.config import Settings
-
-
-def _banner(**kw):
-    defaults = dict(
-        settings=Settings(),
-        rules_count=3,
-        engagement_name="Acme Q2",
-        version="0.1.0",
-        adapter_names=[],
+def test_banner_warns_when_scope_empty(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
+    s = Settings()
+    banner = format_banner(
+        settings=s, rules_count=3, engagement_name="acme",
+        version="0.1.1", adapter_names=[], scope_empty=True,
     )
-    defaults.update(kw)
-    return format_banner(**defaults)
+    assert "EMPTY" in banner
+    assert "BLOCKED" in banner
 
 
-def test_banner_warns_when_scope_empty():
-    out = _banner(scope_empty=True)
-    assert "EMPTY" in out
-    assert "BLOCKED" in out
-
-
-def test_banner_no_scope_warning_when_scoped():
-    out = _banner(scope_empty=False)
-    assert "EMPTY" not in out
+def test_banner_no_scope_warning_when_scoped(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
+    s = Settings()
+    banner = format_banner(
+        settings=s, rules_count=3, engagement_name="acme",
+        version="0.1.1", adapter_names=[], scope_empty=False,
+    )
+    assert "EMPTY" not in banner
 ```
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `uv run pytest tests/integration/test_engagement_empty_scope_warn.py tests/unit/test_startup_banner.py -v`
+Run: `uv run pytest tests/integration/test_engagement_empty_scope_warn.py tests/integration/test_startup_banner.py -v`
 Expected: FAIL — `AttributeError: ... 'scope_empty'` (state never set) and `TypeError: format_banner() got an unexpected keyword argument 'scope_empty'`.
 
 - [ ] **Step 3: Set `scope_empty` + WARN in the lifespan**
@@ -656,13 +671,13 @@ In `redrobin/api/app.py`, replace the `format_banner(...)` call (lines 114-122) 
 
 - [ ] **Step 6: Run the Task 3 tests + the lifespan/scope suite**
 
-Run: `uv run pytest tests/integration/test_engagement_empty_scope_warn.py tests/unit/test_startup_banner.py tests/integration/test_engagement_scope.py tests/integration/test_engagement_active_file.py -v`
+Run: `uv run pytest tests/integration/test_engagement_empty_scope_warn.py tests/integration/test_startup_banner.py tests/integration/test_engagement_scope.py tests/integration/test_engagement_active_file.py -v`
 Expected: all PASS.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add redrobin/api/lifespan_helpers.py redrobin/application/startup_banner.py redrobin/api/app.py tests/integration/test_engagement_empty_scope_warn.py tests/unit/test_startup_banner.py
+git add redrobin/api/lifespan_helpers.py redrobin/application/startup_banner.py redrobin/api/app.py tests/integration/test_engagement_empty_scope_warn.py tests/integration/test_startup_banner.py
 git commit -m "feat(daemon): warn loudly on empty-scope engagement at load + banner (#142)"
 ```
 
@@ -707,29 +722,30 @@ Append to `tests/integration/test_engagement_new_flags.py`:
 
 ```python
 def test_new_then_boot_yields_usable_scope(tmp_path, monkeypatch):
-    """#135 acceptance: `engagement new --in-scope` + `use` -> daemon loads a
-    REAL scope, so a targeted in-scope command PASSES and an out-of-scope one
-    BLOCKS. No hand-editing of engagement.yaml."""
+    """#135 acceptance: `engagement new --in-scope` -> daemon loads a REAL
+    scope, so an in-scope target PASSES and an out-of-scope one BLOCKS, with no
+    hand-editing of engagement.yaml. Uses REDROBIN_ENGAGEMENT_SLUG for
+    deterministic daemon resolution (no init/.env/.active_engagement noise)."""
     from fastapi.testclient import TestClient
 
     monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path / ".redrobin"))
     monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
-    monkeypatch.delenv("REDROBIN_ENGAGEMENT_SLUG", raising=False)
+    monkeypatch.setenv("REDROBIN_ENGAGEMENT_SLUG", "acme")
     from redrobin.cli import main
 
-    assert main(["init", "--non-interactive"]) == 0
+    # `engagement new` runs ensure_layout() itself - no `init` needed.
     assert main(["engagement", "new", "acme", "--in-scope", "10.10.0.0/16"]) == 0
-    assert main(["engagement", "use", "acme"]) == 0
 
     from redrobin.api.app import create_app
 
     app = create_app()
     with TestClient(app):
+        assert app.state.engagement is not None
         assert app.state.scope_empty is False
         scope = app.state.scope
-        assert scope.check(["10.10.0.5"]) is None          # in-scope -> PASS
-        assert scope.check(["8.8.8.8"]) is not None         # out-of-scope -> BLOCK
+        assert scope.check(["10.10.0.5"]) is None       # in-scope -> PASS
+        assert scope.check(["8.8.8.8"]) is not None      # out-of-scope -> BLOCK
 ```
 
 - [ ] **Step 2: Run them to verify they fail**
