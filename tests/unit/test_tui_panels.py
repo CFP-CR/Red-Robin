@@ -90,3 +90,26 @@ def test_render_working_memory_uses_spanish_labels():
     wm = WorkingMemory(engagement_id="x")
     out = render_working_memory(wm, _labels("es"))
     assert "FASE" in out
+
+
+def test_render_sessions_uses_session_field_names():
+    """#143: a serialized Session has keys beacon_id/hostname/user/integrity,
+    NOT id/name/host — the panel must read the real keys or it shows '?'."""
+    from redrobin.tui.app import _render_sessions
+    from redrobin.tui.state import TUIState
+
+    state = TUIState()
+    state.snapshot["sessions"] = [
+        {"beacon_id": "B-42", "hostname": "DC01", "user": "CORP\\admin", "integrity": "High"}
+    ]
+    out = _render_sessions(state)
+    assert "B-42" in out
+    assert "DC01" in out
+    assert "?" not in out
+
+
+def test_render_sessions_empty():
+    from redrobin.tui.app import _render_sessions
+    from redrobin.tui.state import TUIState
+
+    assert _render_sessions(TUIState()) == "(no active sessions)"
