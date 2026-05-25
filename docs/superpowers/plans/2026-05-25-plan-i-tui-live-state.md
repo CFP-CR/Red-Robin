@@ -485,54 +485,11 @@ git -C "C:/Users/jcspi/Documents/dev-projects/Red-Robin" commit -m "fix(tui): Se
 
 **Files:**
 - Modify: `adapters/cobaltstrike/redrobin.cna` (new emit sub + `on beacon_initial` + `beacons()` backfill + manifest `events_emitted`)
-- Test: `tests/integration/test_working_memory_reducer.py` (append — daemon consumes the wire shape)
+- (No new test — daemon side already covered; see below.)
 
-NO offline Sleep linter for the `.cna` — the emit is validated by the live-beacon smoke in Task 6. The daemon-side test here locks the wire-shape contract the `.cna` must satisfy (the `beacon.initial` schema requires all 8 fields incl. `arch` enum + integer `pid`/`ppid`, `additionalProperties:false` → a wrong shape 400s and the session never appears).
+**Daemon-side contract already locked (audit 2026-05-25) — NO new test needed:** the reducer mapping is covered by `tests/integration/test_working_memory_reducer.py::test_beacon_initial_writes_session`, and the FULL 8-field wire shape through `/v1/events` (incl. `arch` enum + integer `pid`/`ppid`, `additionalProperties:false` — the exact schema contract the `.cna` must satisfy) is covered by `tests/e2e/test_events_to_memory_journey.py::test_post_events_canonical_beacon_initial_creates_session`. The `.cna` emit (the actual gap) has NO offline Sleep linter → its ONLY acceptance is the live-beacon smoke in Task 6.
 
-- [ ] **Step 1: Write the failing daemon-side wire-shape test**
-
-Append to `tests/integration/test_working_memory_reducer.py`:
-
-```python
-@pytest.mark.asyncio
-async def test_beacon_initial_wire_shape_creates_session(tmp_path):
-    """#143: the reducer must turn a beacon.initial wire payload (the exact
-    shape the .cna emits) into a Session keyed by bid, mapping
-    bid->beacon_id, host->hostname, integrity_level->integrity."""
-    bus = EventBus()
-    repo = _new_repo(tmp_path, "eng-sess")
-    _, task = await _start_reducer(bus, repo, "eng-sess")
-    try:
-        await bus.publish(
-            {
-                "type": "beacon.initial",
-                "payload": {
-                    "type": "beacon.initial",
-                    "bid": "B-7", "host": "DC01", "user": "CORP\\admin",
-                    "integrity_level": "High", "arch": "x64", "pid": 4321, "ppid": 700,
-                },
-            }
-        )
-        sessions = []
-        for _ in range(50):
-            await asyncio.sleep(0.02)
-            sessions = repo.load().sessions
-            if sessions:
-                break
-        assert any(
-            s.beacon_id == "B-7" and s.hostname == "DC01" and s.integrity == "High"
-            for s in sessions
-        )
-    finally:
-        await _drain(bus, task)
-```
-
-- [ ] **Step 2: Run it to verify it passes ALREADY (daemon side exists) — this is a contract guard**
-
-Run: `uv run pytest tests/integration/test_working_memory_reducer.py::test_beacon_initial_wire_shape_creates_session -v`
-Expected: PASS immediately (the reducer's `_on_beacon_initial` already handles this shape). This test exists to PIN the wire contract the `.cna` must emit, and to fail loudly if the reducer mapping ever regresses. (It is not red-first because the `.cna` — the actual gap — has no Python test harness; its acceptance is the Task 6 smoke.)
-
-- [ ] **Step 3: Add the `beacon.initial` emit sub to the `.cna`**
+- [ ] **Step 1: Add the `beacon.initial` emit sub to the `.cna`**
 
 In `adapters/cobaltstrike/redrobin.cna`, add this sub immediately after `sub redrobin_emit_command_output { ... }` (around line 305):
 
@@ -581,7 +538,7 @@ sub redrobin_emit_beacon_initial {
 }
 ```
 
-- [ ] **Step 4: Add the `on beacon_initial` handler**
+- [ ] **Step 2: Add the `on beacon_initial` handler**
 
 In `adapters/cobaltstrike/redrobin.cna`, immediately after the existing `on beacon_input { ... }` block (ends ~line 425), add:
 
@@ -592,9 +549,9 @@ on beacon_initial {
 }
 ```
 
-- [ ] **Step 5: Backfill pre-existing beacons on load**
+- [ ] **Step 3: Backfill pre-existing beacons on load**
 
-In `adapters/cobaltstrike/redrobin.cna`, find where the handshake completes on load (after `redrobin_handshake_with_retry()` is called during script init). Immediately AFTER the handshake call, add:
+In `adapters/cobaltstrike/redrobin.cna`, the script body calls `redrobin_handshake_with_retry();` at **line 388** (top-level, NOT inside an `on ready`; verified by audit). Immediately AFTER that line-388 call, add:
 
 ```sleep
 # Backfill beacon.initial for beacons that checked in BEFORE this .cna loaded
@@ -605,9 +562,9 @@ foreach $_rr_b (beacons()) {
 }
 ```
 
-(If the handshake is invoked inside an `on ready {...}` or the script body, place the backfill in the same scope right after it, so `$REDROBIN_SESSION_ID` is set and the envelope carries it.)
+(This runs after the handshake has set `$REDROBIN_SESSION_ID`, so the backfilled events carry the adapter session id in their envelope.)
 
-- [ ] **Step 6: Declare `beacon.initial` in the handshake manifest**
+- [ ] **Step 4: Declare `beacon.initial` in the handshake manifest**
 
 In `adapters/cobaltstrike/redrobin.cna`, in `redrobin_handshake_with_retry`'s `$manifest_json`, change the `events_emitted` array (line ~319-320) from:
 
@@ -623,15 +580,12 @@ to:
                      '"host.observation","credential.observed","beacon.initial"],"events_consumed":["opsec.verdict"],' .
 ```
 
-- [ ] **Step 7: Run the daemon-side contract test (still green)**
+- [ ] **Step 5: Sanity-check the daemon contract is still green, then commit**
 
-Run: `uv run pytest tests/integration/test_working_memory_reducer.py -v`
-Expected: all PASS. (The `.cna` itself is verified in Task 6's live smoke.)
-
-- [ ] **Step 8: Commit**
+Run: `uv run pytest tests/integration/test_working_memory_reducer.py tests/e2e/test_events_to_memory_journey.py -v` (the EXISTING guards that lock the beacon.initial contract the `.cna` targets — no new test added by this task). The `.cna` itself is verified in Task 6's live smoke.
 
 ```bash
-git -C "C:/Users/jcspi/Documents/dev-projects/Red-Robin" add adapters/cobaltstrike/redrobin.cna tests/integration/test_working_memory_reducer.py
+git -C "C:/Users/jcspi/Documents/dev-projects/Red-Robin" add adapters/cobaltstrike/redrobin.cna
 git -C "C:/Users/jcspi/Documents/dev-projects/Red-Robin" commit -m "feat(cna): emit beacon.initial on check-in + backfill existing beacons (#143)"
 ```
 
@@ -678,7 +632,7 @@ git -C "C:/Users/jcspi/Documents/dev-projects/Red-Robin" commit -m "test(cna): a
 - #147 → DEFERRED (documented in backlog.md + TODO.md Plan J; needs a new lessons-streaming path). ✓
 - Live-beacon smoke (the `.cna` is the only smoke-gated piece) → Task 6. ✓
 
-**Placeholder scan:** no TBD/TODO; every code step shows complete code; the `.cna` step gives the full sub + the exact manifest edit. The one "passes already" step (Task 5 Step 2) is intentional + explained (it's a contract guard for the schema the `.cna` must emit, since the `.cna` has no Python harness).
+**Placeholder scan:** no TBD/TODO; every code step shows complete code; the `.cna` step gives the full sub + the exact manifest edit. Task 5 adds NO new test — the daemon-side `beacon.initial` contract is already locked by existing reducer + e2e tests; the `.cna` (the gap) is smoke-gated in Task 6.
 
 **Type/name consistency:** `working_memory_to_snapshot` defined in `domain/memory.py` (Task 1) is imported by `tui_ws.py` (Task 1) and `working_memory_reducer.py` (Task 2) — same name. It is the inverse of `working_memory_from_snapshot` (verified by the round-trip test). `_dispatch` returns `bool` (Task 2) and `run()` consumes that bool — matching. Session keys `beacon_id/hostname/user/integrity` are produced by `asdict(Session)` (domain) and read by `_render_sessions` (Task 4) — matching. The `.cna` emits the 8 schema fields the reducer's `_on_beacon_initial` reads (`bid/host/user/integrity_level`) + the 3 the schema gate requires (`arch/pid/ppid`) — matching.
 
