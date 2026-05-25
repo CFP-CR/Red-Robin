@@ -129,4 +129,4 @@ def test_inspector_empty_credentials_and_findings():
     assert "CREDENTIALS (0)" in out
     assert "(none captured)" in out
     assert "FINDINGS (0)" in out
-    assert "(none yet)" in out
+    assert "FINDINGS (0)\n  (none yet)" in out

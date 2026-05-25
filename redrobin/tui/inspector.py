@@ -96,6 +96,8 @@ def render_inspector(
         sections.append("  (none yet)")
     sections.append("")
 
+    # CREDENTIALS/FINDINGS are reducer-projection sections with intentionally
+    # English-only (non-i18n) titles, like SCOPE/ROE/KILL CHAIN above.
     sections.append(f"CREDENTIALS ({len(wm.credentials)})")
     for cred in wm.credentials:
         sections.append(
