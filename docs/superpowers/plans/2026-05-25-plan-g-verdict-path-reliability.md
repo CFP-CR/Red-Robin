@@ -14,6 +14,8 @@
 
 **Verification model:** Task 1 (#141) is unit-tested. Tasks 2–3 (`.cna`) have NO offline Sleep linter — they are validated ONLY by the operator-smoke in Task 4 against a LIVE beacon. This is mandatory and non-negotiable: this session proved 393 green unit tests coexisted with the gate failing open.
 
+> ⚠️ **POST-IMPLEMENTATION CORRECTION (2026-05-25):** The stale-keep-alive root-cause hypothesis stated as fact below (Architecture #144, "Why no JAR", Task 2 retry-once) was **DISPROVEN by the Task 4 smoke**. The real cause was Sleep `hasmatch` statefulness, and the retry was reverted. The shipped fix is in **Task 5 + Root-Cause Correction** at the end of this plan — read that for what actually landed.
+
 ---
 
 ## File Structure
@@ -240,8 +242,9 @@ git -C C:/Users/jcspi/Documents/dev-projects/Red-Robin commit -m "fix(cna): retr
 ### Task 3: #144 (B+C) — danger-aware fail-closed gate
 
 **Files:**
-- Modify: `adapters/cobaltstrike/redrobin.cna:217-231` (`redrobin_gate`)
+- Modify: `adapters/cobaltstrike/redrobin.cna` (`redrobin_gate` — line numbers shifted by Task 2; read first)
 - Modify: `adapters/cobaltstrike/aliases/tier1a_gate.sleep` (16 `redrobin_gate(...)` call sites)
+- Modify: `adapters/cobaltstrike/aliases/popup_beacon.sleep` (2 GUI items call `redrobin_query_quick` DIRECTLY — must also fail-closed on `UNAVAILABLE`; surfaced by Task 2 quality review)
 
 - [ ] **Step 1: Add the `$dangerous` parameter + UNAVAILABLE handling to `redrobin_gate`**
 
@@ -297,11 +300,23 @@ Expected: `16`
 Run: `grep -c "redrobin_gate(" adapters/cobaltstrike/aliases/tier1b_wrapper.sleep`
 Expected: `7` (all WITHOUT `true`)
 
+- [ ] **Step 3b: Fail-closed the GUI popup path (`popup_beacon.sleep`)** — surfaced by Task 2 quality review.
+
+`adapters/cobaltstrike/aliases/popup_beacon.sleep` has TWO GUI right-click items ("Make Token (gated)" and "Run Mimikatz") that call `redrobin_query_quick` DIRECTLY (NOT via `redrobin_gate`) and do `if ($verdict['action'] eq "BLOCK") { berror } else { <execute> }`. Both are dangerous → on the new `UNAVAILABLE` they must also fail-closed. In EACH of the two items, insert an `else if` branch between the `BLOCK` branch and the `else` execute branch:
+
+```sleep
+            } else if ($verdict['action'] eq "UNAVAILABLE") {
+                berror($1, "[Red Robin] gate UNAVAILABLE (daemon unreachable) -- BLOCKING <CMD> (dangerous, cannot verify). Retry when the daemon is reachable.");
+            } else {
+```
+
+where `<CMD>` is `make_token` for the Make-Token item and `mimikatz` for the Run-Mimikatz item. Leave the BLOCK branch and the execute branch unchanged.
+
 - [ ] **Step 4: Commit**
 
 ```bash
-git -C C:/Users/jcspi/Documents/dev-projects/Red-Robin add adapters/cobaltstrike/redrobin.cna adapters/cobaltstrike/aliases/tier1a_gate.sleep
-git -C C:/Users/jcspi/Documents/dev-projects/Red-Robin commit -m "fix(cna): danger-aware fail-closed gate on daemon-unavailable (#144)"
+git -C C:/Users/jcspi/Documents/dev-projects/Red-Robin add adapters/cobaltstrike/redrobin.cna adapters/cobaltstrike/aliases/tier1a_gate.sleep adapters/cobaltstrike/aliases/popup_beacon.sleep
+git -C C:/Users/jcspi/Documents/dev-projects/Red-Robin commit -m "fix(cna): danger-aware fail-closed gate + GUI popup on daemon-unavailable (#144)"
 ```
 
 ---
@@ -356,4 +371,29 @@ git -C C:/Users/jcspi/Documents/dev-projects/Red-Robin commit -m "test(cna): add
 
 **Type/name consistency:** `UNAVAILABLE` is produced in `redrobin_query_quick` (Task 2 Step 2) and consumed in `redrobin_gate` (Task 3 Step 1) — matching string. `$dangerous` 4th arg set in tier1a (Task 3 Step 2), read in `redrobin_gate` (Task 3 Step 1). `command` kwarg added in `_on_retroactive` (Task 1 Step 3) and passed by `_run_layer_b` (Task 1 Step 4) — matching name.
 
-**Deferred (NOT in this plan):** raising the JAR 200ms cap + daemon-synced danger list (#154); both are P3 hardenings — the retry-once + fail-closed make them unnecessary for correctness.
+**Deferred (NOT in this plan):** raising the JAR 200ms cap + daemon-synced danger list (#154); both are P3 hardenings — the fail-closed posture makes them unnecessary for correctness.
+
+---
+
+## Task 5 + Root-Cause Correction (2026-05-25) — added post-implementation
+
+**What happened:** Tasks 1-3 were implemented and committed (`e68c01e`, `c5a3f9f`, `7acd5a3`); BOTH the spec-compliance and code-quality reviewers PASSED them. The Task 4 operator-smoke then **FAILED**: `mimikatz logonpasswords` still executed ~50% of the time in a near-perfect BLOCK/EXEC alternation. The retry-once + UNAVAILABLE fail-closed did NOT fix the fail-open.
+
+**Real root cause (found by instrumenting, not guessing):** A debug `blog` of the raw `/v1/verdict/quick` response inside `redrobin_query_quick` showed the response was ALWAYS the correct, byte-identical full BLOCK JSON (`len=494`). The daemon and the HTTP round-trip were never the problem. The bug was the PARSE: **Sleep's `hasmatch` operator is a STATEFUL ITERATOR.** It caches a `java.util.regex.Matcher` keyed by (subject-string-value, pattern) and advances it on each call -- so evaluating `$response hasmatch '"action":"BLOCK"'` on successive IDENTICAL BLOCK responses returns `true`, then `false` (the consumed region has no further match), then `true`... The gate read that toggling boolean as "is this a BLOCK?" -> every other dangerous command fell through to PASS. An earlier edit (to fix a substring-anchoring bug) had switched the verdict parse from `ismatch` to `hasmatch`, unknowingly introducing this.
+
+This invalidates the stale-keep-alive hypothesis in the Architecture / "Why no JAR" / Task 2 sections above: there was no connection problem to retry around.
+
+**Task 5 -- the real fix (commit `87f1b95`, `.cna` only, NO JAR/daemon change):**
+- Replaced EVERY `hasmatch` *operator* use in `redrobin.cna` with stateless `ismatch '.*PATTERN.*'` (full-anchored, no iterator state): the verdict parse (BLOCK/WARN/ESCALATE + reason capture), the handshake `adapter_session_id` parse, and the `redrobin_http_post` error classification.
+- Reverted the Task 2 retry: `redrobin_http_post` is back to no `$retry` param; `redrobin_query_quick` calls it with 2 args.
+- KEPT from Tasks 2-3: the `UNAVAILABLE` status, the `$dangerous` fail-closed gate, and the `popup_beacon.sleep` fail-closed branches -- those are correct and independent of the parse bug.
+
+**Re-smoke (acceptance -- PASSED):**
+- `mimikatz logonpasswords` x18 consecutive -> 18/18 BLOCKED, zero toggle (was ~50%).
+- Daemon stopped -> `mimikatz` fail-CLOSED (`gate UNAVAILABLE -- BLOCKING`); `shell whoami` warn-proceed.
+- #141: engagement `episodic.db` shows zero new `command='?'` rows after the fix.
+
+**Lessons (recorded in project memory):**
+1. **Sleep `hasmatch` is a stateful-iterator footgun -- never use it as a one-shot boolean.** Use `ismatch '.*X.*'` (full-anchored, stateless) or `indexOf`.
+2. **Operator-smoke on a live beacon is the only real acceptance for `.cna` changes** -- the wrong-hypothesis fix passed BOTH code reviews and still shipped a fail-open. Code review cannot catch a wrong root-cause hypothesis; the live smoke can.
+3. **Instrument, don't guess** -- two hypotheses (bg-task latency, then stale keep-alive) were both wrong; blogging the raw response found the truth in one shot.
