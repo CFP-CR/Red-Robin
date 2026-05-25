@@ -8,19 +8,18 @@ Live tracker of **open work**. Resolved history + deep per-issue detail live in 
 ---
 
 ## Now / Next
-**Plan I (P1)** — TUI live state (#146 / #139 / #140 / #143). *(Not started — branch off `dev-juan`; needs a live beacon for the smoke.)*
+**TUI hardening + UX (P1)** — next branch off `dev-juan`. Plan I shipped the live-state *plumbing* (daemon-side verified); this branch makes the TUI genuinely usable: (1) **#155** client-render repaint, (2) a **TUI UX best-practices pass** *(scoping in progress)*, (3) **#156** WM-seed from `engagement.yaml`. *"If it doesn't look good there's no point having a TUI."*
 
 ---
 
-## Open — Plans I–K
+## Open — Plans (TUI next, then J–K)
 
-### Plan I · P1 · core operator UX — TUI live state
-> Today 2/3 TUI panels are dead. Detail: [backlog.md](./backlog.md) (#139/#140/#143/#146).
-- [ ] **#146** — working memory never updates after connect (snapshot sent once). Likely unified fix also closes #139.
-- [ ] **#139** — snapshot frame emits 5/14 fields → Memory Inspector shows defaults.
-- [ ] **#140** — Inspector has no findings/credentials section.
-- [ ] **#143** — `.cna` never emits `beacon.initial` → Sessions panel always empty.
-- **Accept:** WM panel + Inspector update live; Sessions populates; findings/creds visible. *(Live-beacon smoke.)*
+### TUI hardening + UX · P1 · core operator UX  *(next branch off `dev-juan`)*
+> Plan I shipped the live-state plumbing (#139/#140/#143/#146 ✅, daemon-side verified via live smoke + WS probe). This branch makes it actually *usable*. Detail: [backlog.md](./backlog.md) (#155/#156).
+- [ ] **#155** — TUI client doesn't always repaint delivered frames. Daemon pushes live `opsec.verdict` + `working_memory_snapshot` (probe-verified, wm.json 148→149→150); the prompt_toolkit client doesn't reflect them (intermittent — first frame repainted, later didn't, ~after inspector opened). NOT in Plan I's changed files → likely pre-existing client-render/`invalidate` bug. Root-cause then fix.
+- [ ] **TUI UX best-practices pass** — research + apply: layout/density, color & contrast, overflow/wrap (cf. #148), keybinding discoverability, status/help affordances, responsiveness, empty-states. *Scoping in progress.*
+- [ ] **#156** — WorkingMemory not seeded from `engagement.yaml`: Inspector shows `Client: X` / `in_scope []` / ROE & objectives empty though the engagement config has them (ScopeEnforcer reads the yaml directly; WM is a separate store never seeded). Seed `WM.client/scope_in_scope/scope_out_of_scope/rules_of_engagement/objectives` at engagement load.
+- **Accept:** live updates visible WITHOUT reconnect; engagement scope/client/ROE shown in Inspector; TUI reads clean + usable. *(Live-beacon + visual smoke.)*
 
 ### Plan J · P2 · robustness
 - [ ] **#145** — kerberos finding false-positive (fires on `Cached Tickets: (0)`).
@@ -45,6 +44,7 @@ Live tracker of **open work**. Resolved history + deep per-issue detail live in 
 ---
 
 ## Recently shipped
+- **Plan I** (#139 + #140 + #143 + #146) ✅ 2026-05-25 — TUI live-state plumbing: complete `working_memory_snapshot` serializer (#139), Inspector CREDENTIALS/FINDINGS sections (#140), `.cna beacon.initial` + backfill + Sessions panel field-fix (#143), reducer re-emits snapshot on each mutation (#146). Merged to `dev-juan` via **PR #2** (`0ce6361`). Live smoke + direct `/v1/tui` WS probe verified the daemon side end-to-end (wm.json 148→149→150; live `opsec.verdict` + `working_memory_snapshot` delivered). Visible-refresh in the prompt_toolkit client → follow-on **#155**. [detail](./backlog.md)
 - **Plan H** (#135 + #142) ✅ 2026-05-25 — `engagement new` writes loader-consumable YAML (unified the two `Engagement` schemas) + `--in-scope/--out-of-scope/--summary/--name` flags + empty-scope now loud (daemon WARN + banner + CLI notice), fail-closed. Merged to `dev-juan` via PR #1. [detail](./backlog.md)
 - **Plan G** (#141 + #144) ✅ 2026-05-25 — gate fail-open fixed (root cause: Sleep `hasmatch` stateful iterator → stateless `ismatch`); Layer B retro carries the real command. [detail](./backlog.md)
 - **Plans A–F** ✅ 2026-05-24 — defensive hardening, docs polish, Layer B trigger audit + prompt tuning, obsolete cleanup (#125/#127/#137/#131/#116/#120/#111/#130/#129/#110/#112).
