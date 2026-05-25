@@ -20,6 +20,17 @@ from fastapi.testclient import TestClient
 from redrobin.api.app import create_app
 
 
+def _recv_verdict(ws):
+    """Receive WS frames, skipping the working_memory_snapshot frames the
+    reducer re-emits after every event (#146), and return the first
+    opsec.verdict frame. The real TUI routes frames by type; this test
+    asserts on the verdict frames specifically."""
+    while True:
+        frame = ws.receive_json()
+        if frame.get("type") == "opsec.verdict":
+            return frame
+
+
 @pytest.fixture()
 def daemon(tmp_path, monkeypatch):
     root = tmp_path / ".redrobin"
@@ -69,7 +80,7 @@ def test_retroactive_verdict_emits_second_event(daemon):
                 },
             },
         )
-        e1 = ws.receive_json()
+        e1 = _recv_verdict(ws)
         assert e1["type"] == "opsec.verdict"
         assert e1["payload"]["correlation_id"] == "c-retro"
         assert e1["payload"]["verdict"] == "PASS"
@@ -86,7 +97,7 @@ def test_retroactive_verdict_emits_second_event(daemon):
                 reason="post-hoc EDR risk",
             )
         )
-        e2 = ws.receive_json()
+        e2 = _recv_verdict(ws)
         assert e2["type"] == "opsec.verdict"
         assert e2["payload"]["correlation_id"] == "c-retro"
         assert e2["payload"]["verdict"] == "BLOCK"
