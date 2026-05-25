@@ -30,7 +30,7 @@ def test_validate_slug_rejects_path_traversal():
 def test_new_creates_engagement_dir_and_yaml(tmp_path):
     svc = EngagementService(root=tmp_path)
     eng = svc.new("acme-q2", client="Acme Corp")
-    assert eng.id == "acme-q2"
+    assert eng.slug == "acme-q2"
     assert (tmp_path / "engagements" / "acme-q2" / "engagement.yaml").exists()
     assert (tmp_path / "engagements" / "acme-q2" / "working_memory.json").exists()
 

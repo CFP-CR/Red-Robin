@@ -19,7 +19,7 @@ usable :class:`Engagement` (the lifespan logs the slug + path on load).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml  # type: ignore[import-untyped]
@@ -29,9 +29,10 @@ import yaml  # type: ignore[import-untyped]
 class Engagement:
     slug: str
     name: str
-    in_scope: list[str]
-    out_of_scope: list[str]
-    summary: str
+    in_scope: list[str] = field(default_factory=list)
+    out_of_scope: list[str] = field(default_factory=list)
+    summary: str = ""
+    client: str = ""
 
 
 class EngagementLoader:
@@ -49,4 +50,5 @@ class EngagementLoader:
             in_scope=list(data.get("in_scope") or []),
             out_of_scope=list(data.get("out_of_scope") or []),
             summary=str(data.get("summary") or "").strip(),
+            client=str(data.get("client") or ""),
         )

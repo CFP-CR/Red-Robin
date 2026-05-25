@@ -25,8 +25,8 @@ def run_new(*, svc: EngagementService, slug: str, client: str | None) -> int:
     except EngagementError as e:
         print(f"[!] {e}", file=sys.stderr)
         return 1
-    print(f"[+] Created engagement {eng.id}")
-    print(f"[+] Edit {redrobin_root()}/engagements/{eng.id}/engagement.yaml")
+    print(f"[+] Created engagement {eng.slug}")
+    print(f"[+] Edit {redrobin_root()}/engagements/{eng.slug}/engagement.yaml")
     return 0
 
 
