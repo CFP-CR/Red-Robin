@@ -304,6 +304,49 @@ sub redrobin_emit_command_output {
     }
 }
 
+# beacon.initial — emitted on each new beacon (on beacon_initial) + backfilled
+# for pre-existing beacons on load. Schema (protocol/schemas/v0.1/events/
+# beacon_initial.schema.json) REQUIRES all 8 fields incl. arch enum
+# (x86|x64|arm64) + integer pid/ppid, additionalProperties:false — a wrong
+# shape gets a 400 (swallowed) and no session appears. binfo keys + the
+# integrity " *" strip are validated by the live operator-smoke (Task 6).
+sub redrobin_emit_beacon_initial {
+    local('$bid $host $user $arch $pid $ppid $il $event_json $body');
+    $bid = $1;
+    $host = binfo($bid, "computer");
+    $user = binfo($bid, "user");
+    # binfo("user") carries a trailing " *" in high-integrity context (see
+    # redrobin_integrity_level). Strip it so the wire user is clean.
+    if ($user !is $null && right($user, 2) eq " *") {
+        $user = substr($user, 0, strlen($user) - 2);
+    }
+    $arch = binfo($bid, "arch");   # CS reports "x86" / "x64"
+    $pid  = binfo($bid, "pid");
+    $ppid = binfo($bid, "ppid");
+    $il = redrobin_integrity_level($bid);
+    # Schema requires non-empty strings + integer pid/ppid; default safely.
+    if ($host is $null) { $host = "unknown"; }
+    if ($user is $null) { $user = "unknown"; }
+    if ($arch is $null) { $arch = "x64"; }
+    if ($il is $null) { $il = "Medium"; }
+    if ($pid is $null) { $pid = 0; }
+    if ($ppid is $null) { $ppid = 0; }
+    $event_json = '{"type":"beacon.initial",' .
+                  '"bid":"' . redrobin_escape_json($bid) . '",' .
+                  '"host":"' . redrobin_escape_json($host) . '",' .
+                  '"user":"' . redrobin_escape_json($user) . '",' .
+                  '"integrity_level":"' . redrobin_escape_json($il) . '",' .
+                  '"arch":"' . redrobin_escape_json($arch) . '",' .
+                  '"pid":' . $pid . ',' .
+                  '"ppid":' . $ppid . '}';
+    $body = redrobin_envelope($event_json);
+    try {
+        redrobin_http_post("/v1/events", $body);
+    } catch $e {
+        # Swallow silently — see #134 commit b7c7c69 rationale.
+    }
+}
+
 
 # ===== Adapter handshake (3-attempt retry with backoff) =====
 # Daemon may be still booting when operator loads the .cna. Single-shot
@@ -317,7 +360,7 @@ sub redrobin_handshake_with_retry {
                      '"preflight_block_tui":false,"tui_dispatch":true,"output_observe":true,' .
                      '"console_annotation":true,"emergency_kill_switch":true,"gate_scope":"per_operator",' .
                      '"command_modification":false},"events_emitted":["beacon.command_input","beacon.command_output",' .
-                     '"host.observation","credential.observed"],"events_consumed":["opsec.verdict"],' .
+                     '"host.observation","credential.observed","beacon.initial"],"events_consumed":["opsec.verdict"],' .
                      '"requirements":{"cobalt_strike":">=4.12"}}}';
 
     $attempt = 1;
@@ -387,6 +430,14 @@ redrobin_init_http();
 redrobin_init_event_stream();
 redrobin_handshake_with_retry();
 
+# Backfill beacon.initial for beacons that checked in BEFORE this .cna loaded
+# (on beacon_initial only fires for NEW check-ins). beacons() returns a list
+# of maps with an "id" key per active beacon. Runs after the handshake set
+# $REDROBIN_SESSION_ID, so the events carry the adapter session id.
+foreach $_rr_b (beacons()) {
+    redrobin_emit_beacon_initial($_rr_b['id']);
+}
+
 
 # ===== Load alias templates =====
 include(script_resource("aliases/tier1a_gate.sleep"));
@@ -422,6 +473,11 @@ on beacon_input {
     @parts = split(' ', $3);
     $command = iff(size(@parts) > 0, @parts[0], "");
     redrobin_emit_command_input($1, $2, $command, $3);
+}
+
+# New-beacon observation event (Aggressor `on beacon_initial`): $1 = bid.
+on beacon_initial {
+    redrobin_emit_beacon_initial($1);
 }
 
 
