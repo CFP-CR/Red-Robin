@@ -178,7 +178,7 @@ The keystone test. Operator launches CS Client via the official launcher with **
 - [ ] `&binit(rand(100000))` in Script Console → registers dummy bid.
 - [ ] Type alias `mimikatz` in beacon console.
 - [ ] In daemon log expect: `POST /v1/verdict/quick HTTP/1.1 200 OK`
-- [ ] In beacon console expect: `[!] [Red Robin] DANGER: <reason from rule>` (BLOCK or WARN — the rule fires and `hasmatch` actually extracts the action). NOT a silent dispatch.
+- [ ] In beacon console expect: `[!] [Red Robin] DANGER: <reason from rule>` (BLOCK or WARN -- the rule fires and the stateless `ismatch` verdict parse extracts the action). NOT a silent dispatch. Do NOT revert this parse to `hasmatch`: `hasmatch` is a stateful iterator that toggles true/false on repeated identical responses, which silently fails the gate open (see "Plan G -- gate reliability smoke" below, #144).
 
 ### 5. Actionable error logging
 
@@ -403,3 +403,70 @@ After all 5 cases run:
 - **T3-S1 / S2 / S3 still WARN** → Plan E's prompt tuning was insufficient; iterate on Task 1's AFTER block (add more explicit anti-patterns or escalate to few-shot examples) and re-run the smoke.
 - **T3-S4 returns PASS** → tuning is over-permissive; re-emphasize the UNAMBIGUOUSLY_DANGEROUS category, especially LSASS / credential dumping, and re-run.
 - **Daemon errors / no Layer B response** → check daemon log for Anthropic API errors, KB load failures, or working-memory drift. NOT a prompt issue; file a separate bug.
+
+---
+
+## Plan G -- gate reliability smoke (2026-05-25, #144 + #141)
+
+This is the live-beacon acceptance for #144 (the gate must NEVER silently fail open on a dangerous command) and #141 (the Layer B retroactive verdict must carry the real command verb, not `?`). Run on a live Cobalt Strike beacon, daemon on `localhost:7777`, `redrobin.cna` freshly unloaded then reloaded in Script Manager, and an engagement whose scope is non-empty.
+
+**Root cause this smoke guards against:** Sleep `hasmatch` is a stateful iterator -- used as a boolean on repeated identical verdict responses it toggled true/false, so every other `mimikatz` fell through to PASS. The fix is stateless `ismatch`; this smoke guards the regression.
+
+Per project rule, this operator-smoke procedure IS the acceptance artifact for `.cna` changes (there is no offline Sleep linter). The results below were recorded on the 2026-05-25 acceptance run (commits `e68c01e`, `7acd5a3`, `87f1b95`).
+
+### 1. Setup
+
+- [ ] Daemon running: `redrobin daemon start --host 127.0.0.1 --port 7777`.
+- [ ] In CS Client Script Manager: unload `redrobin.cna`, then reload it.
+- [ ] Confirm Script Console shows `[Red Robin] handshake OK; session=ses_<uuid>` then `[Red Robin] .cna loaded; gate active.`
+- [ ] One active beacon callbacked.
+- [ ] Active engagement scope is non-empty (verify the engagement has at least one in-scope target).
+
+### 2. Toggle regression (THE #144 guard)
+
+- [ ] In the beacon console, type `mimikatz logonpasswords` repeatedly -- at least 10 times in a row (the recorded run did 18).
+- [ ] Expected: EVERY invocation shows `[-] [Red Robin] DANGER: ...`.
+- [ ] Expected: NONE show `Tasked beacon to run mimikatz` and NONE produce credential output.
+- [ ] A single execution = FAIL (that is the old `hasmatch` toggle re-appearing).
+- [ ] **RECORDED RESULT:** 18/18 BLOCKED, zero toggle. (Pre-fix behaviour was ~50% -- a perfect BLOCK/EXEC alternation driven by the stateful `hasmatch` iterator.)
+
+### 3. Benign pass-through
+
+- [ ] In the beacon console, type `shell whoami`.
+- [ ] Expected: `[Red Robin] novel pattern -- Layer B reviewing async` preamble, THEN the command executes and returns `domain\user`.
+- [ ] **RECORDED RESULT:** PASS.
+
+### 4. Daemon-down fail-CLOSED for dangerous
+
+- [ ] Stop the daemon (Ctrl+C in the daemon terminal).
+- [ ] In the beacon console, type `mimikatz logonpasswords`.
+- [ ] Expected: `[-] [Red Robin] gate UNAVAILABLE (daemon unreachable) -- BLOCKING mimikatz ...`.
+- [ ] Expected: NO execution.
+- [ ] **RECORDED RESULT:** PASS (fail-closed).
+
+### 5. Daemon-down warn-proceed for benign
+
+- [ ] With the daemon still down, type `shell whoami`.
+- [ ] Expected: `[Red Robin] gate UNAVAILABLE (daemon unreachable) -- shell NOT vetted, proceeding ...`, THEN the command executes.
+- [ ] **RECORDED RESULT:** PASS (warn-proceed).
+
+### 6. GUI popup fail-closed
+
+- [ ] With the daemon still down, right-click the beacon -> Access -> "Run Mimikatz" (then repeat for "Make Token (gated)").
+- [ ] Expected: each shows `[-] [Red Robin] gate UNAVAILABLE ... BLOCKING ...`; no execution. (Covers `popup_beacon.sleep`.)
+- [ ] **RECORDED RESULT:** covered by the fail-closed branches added in `7acd5a3`.
+
+### 7. #141 end-to-end (Layer B retro verdict carries the real command)
+
+- [ ] Restart the daemon (`redrobin daemon start --host 127.0.0.1 --port 7777`).
+- [ ] Run a HARMLESS command that ESCALATEs to a Layer B WARN, e.g. `shell findstr /si password *.txt`. Do NOT use a real LSASS dump: on ESCALATE the gate proceeds before Layer B returns.
+- [ ] After ~10s, inspect the engagement `episodic.db`:
+  ```bash
+  uv run python tools/inspect_episodic.py ~/.redrobin/engagements/<active-slug>/episodic.db 2>&1 | tail -20
+  ```
+- [ ] Expected: the Layer B retroactive row's `command` is the real verb (e.g. `shell`), NOT `?`.
+- [ ] **RECORDED RESULT:** PASS -- zero new `command='?'` rows after the fix (commit `e68c01e`).
+
+### Acceptance
+
+ALL steps must pass on a live beacon. This section re-runs to green after any future gate or `.cna` change.
