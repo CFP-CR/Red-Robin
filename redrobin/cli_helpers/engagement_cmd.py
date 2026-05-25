@@ -13,15 +13,45 @@ from redrobin.application.engagement_service import EngagementError, EngagementS
 from redrobin.infrastructure.filesystem import ensure_layout, redrobin_root
 
 
+def _csv_list(values: list[str] | None) -> list[str]:
+    """Flatten repeatable + comma-separated flag values into a clean list.
+
+    ``--in-scope a,b --in-scope c`` -> ``["a", "b", "c"]``. Trims whitespace
+    and drops empties so a stray comma never injects a blank scope entry.
+    """
+    out: list[str] = []
+    for v in values or []:
+        out.extend(part.strip() for part in v.split(",") if part.strip())
+    return out
+
+
 def make_service() -> EngagementService:
     """Construct an :class:`EngagementService` against the on-disk root layout."""
     ensure_layout()
     return EngagementService()
 
 
-def run_new(*, svc: EngagementService, slug: str, client: str | None) -> int:
+def run_new(
+    *,
+    svc: EngagementService,
+    slug: str,
+    client: str | None,
+    name: str | None = None,
+    in_scope: list[str] | None = None,
+    out_of_scope: list[str] | None = None,
+    summary: str | None = None,
+) -> int:
+    parsed_in = _csv_list(in_scope)
+    parsed_out = _csv_list(out_of_scope)
     try:
-        eng = svc.new(slug, client=client or "")
+        eng = svc.new(
+            slug,
+            name=name or "",
+            client=client or "",
+            in_scope=parsed_in,
+            out_of_scope=parsed_out,
+            summary=summary or "",
+        )
     except EngagementError as e:
         print(f"[!] {e}", file=sys.stderr)
         return 1
