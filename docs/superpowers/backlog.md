@@ -1,4 +1,6 @@
-# Red Robin — Backlog (v0.1.x → v0.2)
+# Red Robin — Backlog (ARCHIVE + issue detail)
+
+> **Live open work → [TODO.md](./TODO.md)** (lean roadmap, Plans H–K). This file is the **reference archive**: resolved-issue history (root causes + commit SHAs + lessons) and the deep detail behind each open issue. Long by design — scan TODO.md for *what's next*, read here for *why / how*. (Restructured 2026-05-25 per Claude Code best practices: lean live file + linked detail.)
 
 Generated 2026-05-24 from in-session task tracker during the adapter event-stream + engagement-isolation work (commits `ec5dbe5` → `d949404`). Updated 2026-05-24 with current-sprint scope after critical-for-demo bugs cleared.
 
@@ -74,6 +76,8 @@ Confirmed twice (test-real-001, e2e-verify): `engagement new` writes a YAML the 
 
 ## Production-grade roadmap — Plans G–K (2026-05-24)
 
+> **Authoritative live roadmap now lives in [TODO.md](./TODO.md).** The table below is a historical snapshot (kept for the Plan G close-out record + acceptance criteria). When they diverge, TODO.md wins.
+
 **Goal reset:** target is a **production-grade product, usable from day one**, not a demo. Every open issue is addressed to production quality (real-infra verified), prioritized by product correctness/usability — no conference-date gate.
 
 **Workflow per plan (mandatory order):** `/writing-plans` → `/auditing-plans` → `/subagent-driven-development` (Opus 4.7). Atomic commits, no Claude co-author.
@@ -111,7 +115,7 @@ Decided 2026-05-24 to clear the v0.1.x hardening + docs + Layer B + obsolete-cle
 
 ---
 
-## Critical for demo — fix before 2026-05-31
+## Resolved — formerly "critical for demo" (framing superseded 2026-05-24; all items below shipped)
 
 These materially affect the live demo experience or shipping correctness.
 
