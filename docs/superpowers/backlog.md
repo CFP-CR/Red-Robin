@@ -2,7 +2,95 @@
 
 Generated 2026-05-24 from in-session task tracker during the adapter event-stream + engagement-isolation work (commits `ec5dbe5` → `d949404`). Updated 2026-05-24 with current-sprint scope after critical-for-demo bugs cleared.
 
-Each entry below includes the bug source (commit / smoke session), reproduction notes, and recommended fix scope. None of these block the DEF CON RTV CFP demo (2026-05-31) unless explicitly marked **Critical for demo**.
+Each entry below includes the bug source (commit / smoke session), reproduction notes, and recommended fix scope.
+
+**Goal reset (2026-05-24): production-grade, usable from day one — NOT demo-driven.** Open issues are prioritized **P0–P3 by product correctness/usability** (see "Production-grade roadmap" below), not by any conference date. The earlier "Critical for demo / fix before 2026-05-31" framing is superseded.
+
+---
+
+## Manual E2E verification — 2026-05-24 (live beacon, engagement `e2e-verify`)
+
+Empirical verification of every component path against a live Cobalt Strike beacon on a standalone Windows lab host (`EC2AMAZ-IJVFMFN`, 10.100.0.240 / 10.100.0.0/24, **Defender OFF, no third-party EDR**). Engagement `e2e-verify` configured with correct loader schema + real scope + real defense-posture summary. Daemon HEAD `362ca35`. Goal: confirm what works, what's pending, file new issues. **Updated live as the session proceeds.**
+
+### Component status
+
+| Componente | Test | Estado | Evidencia |
+|---|---|---|---|
+| **#135** writer (`engagement new`) | YAML the CLI emits | 🔴 CONFIRMED BROKEN | `engagement new e2e-verify` → `id`/`client`/nested `scope:`; no `slug`/top-level `in_scope`/`summary`. Loader → empty scope. |
+| **#135** workaround (hand-edit YAML) | loader schema + restart | ✅ WORKS | banner `Engagement: E2E Verification Lab 2026-05-24`; scope loads (probes below) |
+| ScopeEnforcer — in-scope CIDR | `jump psexec 10.100.0.240` | ✅ | not `roe` (scope passed) |
+| ScopeEnforcer — out-of-scope CIDR | `jump psexec 10.99.0.5` | ✅ | `BLOCK` rule_id `roe` |
+| ScopeEnforcer — strict-ROE (neither list) | `jump psexec 192.168.50.50` | ✅ | `BLOCK` rule_id `roe` |
+| Layer A — exact command match | `command=jump`, `raw=jump psexec 10.100.0.240` | ✅ | `BLOCK psexec_lateral` (T1021.002) |
+| Layer A — full-string vs bare-verb "anomaly" | curl shape | ✅ NOT A BUG | `rules.py:208` exact-matches `ctx.command`; earlier ESCALATE was a malformed curl (`command`=full string). `.cna` sends bare verb correctly (smoke #133/#129). |
+| Layer B (real summary, async retro) | in-scope `jump psexec` escalated → Layer B WARN (id=4) | ✅ | ran async post-response; retro WARN; grounded reason |
+| **B5** hallucination w/ real summary | same Layer B WARN reason | ✅ RESOLVED w/ real summary | reason cites *"even with Defender real-time protection off"* + *"Sysmon (status unknown)"* — NO invented EDRs (contrast tc4-smoke empty-summary → "CrowdStrike/Defender/SentinelOne confirmed"). Proves summary is load-bearing; B5 is downstream of #135. |
+| **B4** Layer B retro loses command | episodic id=4 (Layer B WARN) vs id=1 (Layer A, same corr) | 🐛 CONFIRMED LIVE | id=4 `command='?'`; id=1 has real command. `verdict_pipeline.py:_on_retroactive` omits command from payload. |
+| Console gate — PASS path | `shell whoami` via beacon | ✅ | executed → `ec2amaz-ijvfmfn\administrator`; silent pass-through; Layer A ESCALATE → Layer B PASS (no `[Red Robin]` line) |
+| Console gate — BLOCK path | `mimikatz logonpasswords` (clean `.cna` load) | ✅ | `[Red Robin] DANGER` berror + command NOT executed (no dispatch). Layer A `mimikatz_logonpasswords` BLOCK. **Core value prop verified.** |
+| Console gate — ESCALATE blog | `shell whoami` | ✅ | `[Red Robin] novel pattern — Layer B reviewing async` blog, then executes |
+| Console gate — fail-OPEN on timeout (**#144**) | `mimikatz` ×3 (18:14 / 18:19 / 18:43) | 🔴 CRITICAL — INTERMITTENT | blocks ~50%: 18:19 BLOCKED ✓, **18:14 + 18:43 EXECUTED** (episodic ids 7,14 = daemon computed BLOCK, `.cna` failed open). systeminfo 18:40 also silent-fell-open (id=12 ESCALATE, no blog). **Measured: daemon <77ms / 0% over 200ms → NOT daemon latency; client-side stale keep-alive + silent-fail-open-on-any-error.** **Core protection UNRELIABLE.** |
+| Console gate — bare-args guard (#133) | bare `mimikatz` via beacon | ✅ | `[Red Robin] mimikatz requires arguments` + no execution + NO verdict POST (episodic count unchanged). |
+| Reducer Path-2 — all 3 extraction paths | systeminfo (host) / klist (kerberos) / synthetic NTLM (cred) | ✅ | host=`EC2AMAZ-IJVFMFN` (name-only — OS/domain/IPs ignored); kerberos finding created (but #145 FP — fires on `Cached Tickets: (0)`); credential `CORP\alice`+hash extracted. Extraction machinery solid. |
+| TUI Events panel | real beacon traffic | ✅ | command_input/output + Layer A verdicts stream live |
+| TUI Memory Inspector (**B2**) | inspector overlay | 🐛 CONFIRMED LIVE | `Client: -`, `in_scope/out_of_scope: []` despite daemon holding real scope (curls prove it). `_build_initial_snapshot` omits the fields. |
+| TUI Inspector findings/creds (**B3**) | inspector overlay | 🐛 CONFIRMED LIVE | no FINDINGS/CREDENTIALS section; 3 `opsec_block` findings in wm.json invisible. |
+| TUI Sessions panel (**#143**) | active beacon | 🐛 NEW | "(no active sessions)" despite live beacon + traffic. `.cna` never emits `beacon.initial`. |
+| TUI Working Memory live updates (**#146**) | findings 3→7 during session | 🐛 NEW CRITICAL | daemon sends `working_memory_snapshot` ONCE at connect (`tui_ws.py:34`), never re-pushed. Reducer mutations persist to wm.json but never reach TUI → WM panel + Inspector frozen. Compounds #139 + #140. |
+| TUI Inspector "LESSONS" (**#147**) | clears each command | 🐛 NEW | `app.py:128-139` renders only `latest_verdict()` as a 1-item list — replaced each command, not accumulated; mislabeled (it's the last verdict, not episodic lessons). |
+| Promoter (≥3 → promoted_lesson) | 3× mimikatz BLOCK in e2e-verify | ✅ | promoted (longterm `mimikatz/BLOCK count=3`); min=3 works. Keyed by `(command,verdict)` GLOBALLY (cross-eng aggregation, no per-eng attribution). **B4 blast radius**: garbage `?/BLOCK count=13` + `?/WARN count=15` lessons in longterm from command='?'. |
+| Summarizer (≥25 → context_summary) | deferred — proven historically | ⏳ (skip) | tc4-smoke has 44 context_summaries it generated; e2e-verify at ~14 episodes, would need ~11 more commands to trigger. Low value to re-verify. |
+
+### #135 — empirical verdict: reclassify Round 6/v0.2 → **Critical for demo**
+
+Confirmed twice (test-real-001, e2e-verify): `engagement new` writes a YAML the loader can't consume → daemon loads empty `in_scope` → post-Phase-2 strict ROE **BLOCKs every targeted command** with a generic `roe` reason, no warning anywhere. Any DEF CON attendee running `engagement new` + a `jump`/`psexec` hits this. Workaround (hand-edit YAML to loader schema) verified end-to-end. Fix scope = the #135 entry in the Deferred section **plus**: CLI flags (`--in-scope/--out-of-scope/--summary/--name`), a boot warning on empty `in_scope` (→ new **#142**), and one-shot migration of the 3 broken on-disk YAMLs (`tc4-smoke`, `spiedra-test`, `acme-q2-2026`).
+
+### New issues to file (already confirmed today + DB inspection; live beacon will re-confirm + may add more)
+
+- **#139** — TUI snapshot frame emits 5/14 fields (`tui_ws.py:_build_initial_snapshot`) → Memory Inspector shows scope/client/objectives/etc. as defaults regardless of daemon state. Independent of #135 (fixing #135 alone does NOT fix this — verified).
+- **#140** — `tui/inspector.py` render has no findings/credentials section → reducer-derived data (e.g. 7 `opsec_block` findings in test-real-001 wm.json) never visible in TUI.
+- **#141** — Layer B retroactive verdict omits `command` from the `opsec.verdict` payload (`verdict_pipeline.py:_on_retroactive`) → reducer defaults to `"?"` (`working_memory_reducer.py:166`) → episodes + findings + (via summarizer) L5 summaries record `command='?'`. ~1-line fix. Already flagged as a "pre-existing inconsistency" in test docstrings.
+- **#142** — no warning (banner/log/response) when an engagement loads with empty `in_scope`; operator only discovers it on the first generic `roe` BLOCK.
+- **#143** — `.cna` never emits `beacon.initial` (verified: no `beacon_initial` handler / `beacons()` enumeration in `redrobin.cna`) → reducer `_on_beacon_initial` never fires → **TUI Sessions panel always empty** for real beacons + host/integrity never learned from beacon metadata (only fragile command-output regex). Worse for beacons established before `.cna` load. Confirmed live 2026-05-24: beacon `2047462324` active w/ command traffic, zero sessions. Fix: `on beacon_initial` handler + enumerate `beacons()` on `script_load` to backfill pre-existing beacons.
+- **#144** — **gate fails OPEN silently on verdict timeout** (CRITICAL). When the `/v1/verdict/quick` round-trip exceeds the `.cna`'s 200ms client cap (cold call / slow daemon / stale connection), `redrobin_query_quick` gets an empty response and falls through to PASS → `tier1a` dispatches, with NO operator-visible signal. Confirmed live 2026-05-24 as **INTERMITTENT**: identical `mimikatz logonpasswords` BLOCKED at 18:19 (✓) but EXECUTED at 18:14 AND 18:43 (DLL uploaded + ran) — daemon computed+persisted BLOCK each time (episodic ids 7, 14) while the `.cna` failed open; `systeminfo` 18:40 also fell open silently (id=12 ESCALATE, no blog). **Gate protection is ~50% reliable on the canonical dangerous command** — a demo-killer (typing `mimikatz` to show the block has a coin-flip chance of executing instead). **Measured 2026-05-24 (80 probes / 120s): daemon `/v1/verdict/quick` runs 22–77ms (p95=70), 0% over 200ms even under summarizer+promoter load — daemon latency is NOT the cause (original "bg tasks race the cap" hypothesis DISPROVEN).** Actual root cause is CLIENT-SIDE: `redrobin_query_quick` treats ANY POST failure (timeout / connect-error / non-2xx) as a silent PASS, and `RedRobinHttp` reuses a keep-alive `HttpClient` with a 200ms TOTAL request timeout. Strong hypothesis (fits the timing + operator "not connected" notes): a stale / idle-closed keep-alive connection (uvicorn drops idle conns ~5s; operators type sporadically) fails the first POST after a gap → silent fail-open — 18:19 mimikatz (1s after prior cmd, warm) BLOCKED ✓ vs 18:43 (24s gap, idle) executed ✗. Either way it's a PROTECTION failure, not a UX nicety. Fix: `redrobin_query_quick` must distinguish timeout/unreachable from PASS and fail-closed (or emit a loud per-command `berror`) for dangerous verbs. Relates to #130/#142.
+- **#145** — reducer emitted a `kerberos_ticket_observed` finding on beacon `2047462324` with no obvious Kerberos output in the issued commands — possible `_KERBEROS_TICKET` regex false-positive. Needs the triggering command/output identified before confirming.
+- **#146** — **TUI working memory never updates after connect** (CRITICAL for TUI demo). `tui_ws.py:32-41` sends `working_memory_snapshot` exactly once at connect, then only forwards raw bus events; nothing re-emits the snapshot (verified: only producer in redrobin/ is `tui_ws.py:34`). Reducer mutations (findings/creds/hosts/sessions) persist to wm.json but never reach the TUI → Working Memory panel + Memory Inspector frozen at connect-time state. Compounds #139 (incomplete) + #140 (no findings/creds section). Likely unified fix: reducer publishes a COMPLETE `working_memory_snapshot` to the bus after each `repo.save()`; `tui_ws` forwards it (closes #139 + #146 together). Operator-observed live 2026-05-24.
+- **#147** — TUI Memory Inspector "LESSONS" is actually just the single latest verdict (`app.py:124-139` renders `latest_verdict()` as a one-item list), replaced on every command, not accumulated. Mislabeled (not episodic lessons) + loses history. Operator-observed: "se limpia cada vez que envío un comando."
+- **#148** (cosmetic) — Events panel renders raw JSON envelopes and overflows horizontally into the Working Memory column (long `beacon.command_output` lines bleed across the panel boundary). Needs per-event formatting + width clip/wrap. Low functional impact, prominent in a demo. Operator-flagged.
+- **#149** — reducer extracts hostname ONLY from rich output; `systeminfo` carries OS / domain / NIC IPs / build but only `Host Name` lands in the Host record (os/integrity/etc. stay None). Enhancement: parse OS + domain + NICs into Host attrs. P2.
+- **#150** — `promoted_lessons` is keyed `(command, verdict)` GLOBALLY (no `engagement_id` column) → cross-engagement aggregation loses per-engagement attribution (a lesson from engagement A merges its count with B). Design characteristic; revisit if per-engagement long-term memory is wanted. P3.
+- **#151** (P3) — `.cna` sends `source.engagement_id: "unknown"` on path-2 events. Harmless today (daemon routes by active engagement) but should carry the real engagement id for correct attribution / multi-engagement future.
+- **#152** (P2) — beacon-originated `/v1/verdict/quick` has empty `source_event_id` → episode `correlation_id=''`. A Layer B retro WARN/BLOCK on a beacon command can't correlate back to its Layer A row (TUI `update_verdict`-by-correlation won't match; episode untieable to its verdict). curl probes set IDs so we missed it; real beacon escalations hit it. Fix: `.cna` generates a ULID `source_event_id` per gated command and threads it through.
+- **#153** (P3, housekeeping) — stray untracked files in the working tree (`:TEMPinspect_*.txt`, `.commitmsg.tmp`, `redrobin_postcommit.tmp.cna`). Review + clean; confirm `TESTING.md` (31 KB untracked) is intentional before committing/removing.
+- **#154** (P3) — daemon-synced danger classification at handshake: the daemon sends its DANGER-severity verb set to the `.cna`, which caches it for offline fail-closed decisions (#144). Eliminates drift between the `.cna`'s offline danger list (Plan G v1 = tier1a-derived) and the daemon's Layer A DANGER rules — single source of truth. Future hardening of the Plan G fix.
+
+### Codebase-reality notes (verified this session — corrects stale assumptions, not bugs)
+
+- Repos are **sync-sqlite3 only** (async SQLAlchemy path removed Slice 9), not dual-mode.
+- `Lesson` + `Fact` dataclasses removed Slice 12; the `lessons` (episodic) + `facts` (longterm) tables are **dead schema** — all promotion flows through structured `PromotedLesson`.
+- `longterm.db promoted_lessons` is **write-only in v0.1** — nothing in the verdict path or Layer B reads it back (Layer B only reads per-engagement `context_summaries` via `list_recent(eng_id, limit=1)`). The tc4-smoke "CrowdStrike/Defender/SentinelOne" hallucination is therefore contained per-engagement, NOT active cross-engagement poisoning.
+
+---
+
+## Production-grade roadmap — Plans G–K (2026-05-24)
+
+**Goal reset:** target is a **production-grade product, usable from day one**, not a demo. Every open issue is addressed to production quality (real-infra verified), prioritized by product correctness/usability — no conference-date gate.
+
+**Workflow per plan (mandatory order):** `/writing-plans` → `/auditing-plans` → `/subagent-driven-development` (Opus 4.7). Atomic commits, no Claude co-author.
+
+**Verification gate (non-negotiable):** operator-smoke against the LIVE beacon for any gate/`.cna`/TUI change. Unit tests + curls provably miss these — this session had 393 tests green while the gate failed open (#144) and the TUI was frozen (#146). The "Manual E2E verification" component table above IS the regression spec; each fix re-runs its row to green on a live beacon.
+
+| Plan | Priority | Issues | Theme / acceptance |
+|---|---|---|---|
+| **G** | **P0 — verdict-path correctness & safety** | #144, #141 | gate must reliably BLOCK (silent fail-open = safety bug); retro verdict must stop corrupting memory with `?`. Accept: `mimikatz` ×10 → 100% block; episodes/findings carry the real command. #144 = investigate (measure verdict latency) → fix. |
+| **H** | **P0 — usability blocker** | #135, #142, +CLI flags, +YAML migration | `engagement new` must yield a usable engagement (today empty scope blocks everything). Accept: `engagement new` + a `jump` works with no hand-editing; loud warn if scope empty. |
+| **I** | **P1 — core operator UX** | #146, #139, #140, #143 | the TUI must show live, complete engagement state (today 2/3 panels dead). Accept: WM panel + Inspector update live; Sessions populates; findings/creds visible. |
+| **J** | **P2 — robustness** | #145, #147, #91, #109, #149, #152 | kerberos FP, lessons relabel, BOM-tolerant rules, handshake retry classification, host-rich extraction, beacon `source_event_id` correlation. |
+| **K** | **P3 — polish + tech-debt** | #148, #126, #113, #114, #100, #150, #151, #153, #154 | events formatting, `bid`/`beacon_id` naming, fork→sendAsync, CS REST systemd, promoter per-engagement attribution, engagement_id on path-2 events, working-tree cleanup, daemon-synced danger list. |
+
+**Sequence:** P0 (G + H — disjoint files, parallelizable) → P1 (I) → P2 (J) → P3 (K). "Done" = production-grade + live-beacon smoke green, not a date.
+
+**Re-evaluated from old "Deferred" framing:** #91 (silent rule-load failure on BOM) + #109 (fragile reconnect) graduate to P2 — a day-one operator hits them. #126/#113/#114/#100 remain lowest (internal/infra debt). **#135 is NOT a v0.2 deferral — it's a P0 day-one usability blocker.**
 
 ---
 
