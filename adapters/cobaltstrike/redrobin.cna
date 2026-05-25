@@ -76,13 +76,25 @@ sub redrobin_load_token {
 # semantics preserved per caller contract).
 sub redrobin_http_post {
     global('$REDROBIN_HTTP $REDROBIN_URL $REDROBIN_TOKEN');
-    local('$path $body $err');
-    ($path, $body) = @_;
+    local('$path $body $retry $err');
+    ($path, $body, $retry) = @_;
 
     try {
         return [$REDROBIN_HTTP post: $path, $body];
     } catch $e {
         $err = redrobin_sanitize_error($e);
+        # Stale / idle-closed keep-alive (#144): the first POST after an idle gap
+        # hits a dead pooled connection. Retry ONCE so attempt 2 gets a fresh one.
+        # GATED on $retry: this helper is SHARED with the NON-idempotent /v1/events
+        # posts and the handshake (own retry) — only the read-only verdict query
+        # opts in. Blindly retrying events would duplicate episodes/findings.
+        if ($retry && ($err hasmatch 'ConnectException' || $err hasmatch 'reset' || $err hasmatch 'closed' || $err hasmatch 'GOAWAY' || $err hasmatch 'EOF')) {
+            try {
+                return [$REDROBIN_HTTP post: $path, $body];
+            } catch $e2 {
+                $err = redrobin_sanitize_error($e2);
+            }
+        }
         if ($err hasmatch 'ConnectException' || $err hasmatch 'refused') {
             warn("[Red Robin] daemon connection refused at " . $REDROBIN_URL . " — is the daemon running?");
         } else if ($err hasmatch 'HttpTimeout' || $err hasmatch 'timed out') {
@@ -189,7 +201,10 @@ sub redrobin_query_quick {
         $body .= ',"integrity_level":"' . $il . '"';
     }
     $body .= '}';
-    $response = redrobin_http_post("/v1/verdict/quick", $body);
+    $response = redrobin_http_post("/v1/verdict/quick", $body, true);
+    if ($response eq "") {
+        return %(action => "UNAVAILABLE", reason => "daemon unreachable -- command NOT vetted");
+    }
 
     # Crude JSON parse — extract action field via Sleep hasmatch (substring).
     # ismatch (used previously) is full-string anchored and never matched
