@@ -94,5 +94,8 @@ async def test_events_log_long_reason_does_not_overflow_horizontally():
             )
         )
         await pilot.pause()
-        # virtual width must not exceed the visible pane width → no horizontal scroll.
+        # No horizontal scroll: wrap to the pane width, never a horizontal scrollbar.
         assert log.virtual_size.width <= log.size.width
+        assert log.show_horizontal_scrollbar is False
+        # A handful of verdicts must not show an always-on vertical scrollbar gutter.
+        assert log.show_vertical_scrollbar is False

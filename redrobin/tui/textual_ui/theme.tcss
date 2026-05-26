@@ -37,6 +37,14 @@ Screen {
 #events { width: 3fr; }
 #memory { width: 2fr; }
 
+/* Verdict log: scroll vertically only when it overflows (no always-on scrollbar
+   gutter when there are few verdicts — RichLog defaults to overflow-y: scroll).
+   Never scroll horizontally — long reasons wrap to the pane (wrap=True + min_width=0). */
+#events-log {
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
 /* Reserved seam for the future AI Advisor (Phase S6). Present but hidden. */
 #advisor-dock {
     display: none;
