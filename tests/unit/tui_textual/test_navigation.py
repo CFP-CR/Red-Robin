@@ -25,3 +25,30 @@ async def test_shift_tab_reverses():
         await pilot.press("shift+tab")
         await pilot.pause()
         assert app.focused.id == "memory-panel"
+
+
+@pytest.mark.asyncio
+async def test_question_mark_opens_help():
+    app = RedRobinApp(start_worker=False)
+    async with app.run_test() as pilot:
+        await pilot.press("?")
+        await pilot.pause()
+        assert app.screen.__class__.__name__ == "HelpScreen"
+        from textual.widgets import Static
+
+        body = app.screen.query_one("#help-body", Static)
+        text = str(body.content)
+        assert "Inspector" in text
+        assert "Command palette" in text
+
+
+@pytest.mark.asyncio
+async def test_help_escape_closes():
+    app = RedRobinApp(start_worker=False)
+    async with app.run_test() as pilot:
+        await pilot.press("?")
+        await pilot.pause()
+        assert app.screen.__class__.__name__ == "HelpScreen"
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.screen.__class__.__name__ != "HelpScreen"
