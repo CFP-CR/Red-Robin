@@ -67,3 +67,14 @@ async def test_resize_hint_hidden_when_big_enough():
     async with app.run_test(size=(100, 30)):
         assert app.query_one("#resize-hint").display is False
         assert app.query_one("#main").display is True
+
+
+@pytest.mark.asyncio
+async def test_events_log_wraps_long_lines():
+    # A long verdict reason must wrap inside the panel, not overflow horizontally
+    # (no horizontal scrollbar). RichLog defaults to wrap=False — we enable it.
+    app = RedRobinApp(start_worker=False)
+    async with app.run_test():
+        from redrobin.tui.textual_ui.panels import EventsLog
+
+        assert app.query_one("#events-log", EventsLog).wrap is True

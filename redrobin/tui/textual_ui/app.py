@@ -67,7 +67,7 @@ class RedRobinApp(App):
                 yield SessionsTable(id="sessions-table")
             with Container(id="events") as events_box:
                 events_box.border_title = "Verdicts / Events"
-                yield EventsLog(id="events-log", highlight=False, markup=False)
+                yield EventsLog(id="events-log", highlight=False, markup=False, wrap=True)
             with Container(id="memory") as memory_box:
                 memory_box.border_title = "Working Memory"
                 yield MemoryPanel(id="memory-panel")
