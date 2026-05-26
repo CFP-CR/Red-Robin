@@ -14,6 +14,8 @@ will swap in an async write-behind layer here.
 from __future__ import annotations
 
 import json
+import os
+import time
 from dataclasses import asdict
 from pathlib import Path
 
@@ -46,7 +48,24 @@ class WorkingMemoryRepo:
 
     def save(self, wm: WorkingMemory) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(asdict(wm), indent=2, default=str))
+        # Atomic write: serialize to a sibling temp file, then os.replace() it
+        # onto the target. A reader (a cross-thread load() in the daemon, or a
+        # polling test) therefore sees either the old or the new complete file —
+        # never the empty window a plain truncate-then-write exposes, which
+        # caused a JSONDecodeError under concurrent reads. os.replace is atomic
+        # on POSIX; on Windows it raises PermissionError while a reader holds the
+        # target open, so retry briefly before giving up.
+        tmp = self.path.with_name(f"{self.path.name}.tmp")
+        tmp.write_text(json.dumps(asdict(wm), indent=2, default=str))
+        for attempt in range(10):
+            try:
+                os.replace(tmp, self.path)
+                return
+            except PermissionError:
+                if attempt == 9:
+                    tmp.unlink(missing_ok=True)
+                    raise
+                time.sleep(0.02)
 
     # --- Slice 4 reducer helpers ----------------------------------------- #
 
