@@ -8,7 +8,10 @@ the panes with DataTable/RichLog widgets.
 
 from __future__ import annotations
 
-from textual.app import App, ComposeResult
+import asyncio
+import os
+
+from textual.app import App, ComposeResult, ScreenStackError
 from textual.containers import Container, Horizontal
 from textual.css.query import NoMatches
 from textual.reactive import reactive
@@ -57,8 +60,33 @@ class RedRobinApp(App):
         engagement = snapshot.get("engagement_id") or "-"
         try:
             self.query_one("#topbar", Static).update(f"Red Robin · {engagement} · ●")
-        except NoMatches:
-            pass  # snapshot set before mount; compose() seeds the static text
+        except (NoMatches, ScreenStackError):
+            pass  # pre-mount (no screen yet) or topbar not mounted — compose() seeds it
+
+    def on_mount(self) -> None:
+        """Start the WS worker unless disabled (tests pass start_worker=False)."""
+        if not self._start_worker:
+            return
+        from redrobin.tui.textual_ui.ws_worker import ws_loop
+
+        self._stop_event = asyncio.Event()
+        url = self._ws_url or os.environ.get("REDROBIN_DAEMON_WS", "ws://127.0.0.1:8765/v1/tui")
+        self.run_worker(
+            ws_loop(
+                target=self,
+                url=url,
+                token=self._token,
+                registry=REGISTRY,
+                stop_event=self._stop_event,
+            ),
+            name="ws",
+            exclusive=True,
+        )
+
+    def on_unmount(self) -> None:
+        stop = getattr(self, "_stop_event", None)
+        if stop is not None:
+            stop.set()
 
 
 @REGISTRY.register("working_memory_snapshot")
@@ -70,3 +98,19 @@ def _on_snapshot(app: "RedRobinApp", payload: dict) -> None:
 def _on_verdict(app: "RedRobinApp", payload: dict) -> None:
     # Reassign (not append) so the reactive watcher sees the change.
     app.events = app.events + [payload]
+
+
+def main() -> None:
+    """Dev entry: ``python -m redrobin.tui.textual_ui.app``. The CLI entrypoint
+    (`redrobin tui`) is swapped to this in Phase 6."""
+    from redrobin.application.transport_auth import get_or_create_token
+
+    try:
+        token = get_or_create_token()
+    except Exception:
+        token = None
+    RedRobinApp(token=token).run()
+
+
+if __name__ == "__main__":
+    main()
