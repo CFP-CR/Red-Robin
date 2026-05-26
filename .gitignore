@@ -46,3 +46,6 @@ adapters/cobaltstrike/*.yaml
 
 # Stray commit message scratch file
 .commitmsg.tmp
+
+# Brainstorming visual-companion artifacts (mockups, session state)
+.superpowers/
