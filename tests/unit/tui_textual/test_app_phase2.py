@@ -59,5 +59,10 @@ async def test_verdict_frames_render_and_layer_b_corrects_in_place():
         # Corrected in place → still one event, now PASS.
         assert len(app.events) == 1
         assert app.events[0]["verdict"] == "PASS"
-        # And the log rendered one line.
-        assert len(app.query_one("#events-log", EventsLog).lines) == 1
+        # The log reflects the correction in place: PASS shown, the old ESCALATE
+        # replaced (not duplicated). Visual line count is width-dependent now that
+        # the log wraps to the pane, so assert on rendered text, not line count.
+        log = app.query_one("#events-log", EventsLog)
+        rendered = " ".join(strip.text for strip in log.lines)
+        assert "PASS" in rendered
+        assert "ESCALATE" not in rendered

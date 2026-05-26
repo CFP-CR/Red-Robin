@@ -14,15 +14,28 @@ import os
 from textual.app import App, ComposeResult, ScreenStackError
 from textual.containers import Container, Horizontal
 from textual.css.query import NoMatches
+from textual.events import Resize
 from textual.reactive import reactive
 from textual.widgets import Footer, Static
 
 from redrobin.tui.textual_ui.frames import Registry
-from redrobin.tui.textual_ui.panels import EventsLog, MemoryPanel, SessionsTable, apply_verdict
+from redrobin.tui.textual_ui.panels import (
+    EventsLog,
+    MemoryPanel,
+    SessionsTable,
+    TopBar,
+    apply_verdict,
+    verdict_counts,
+)
 
 # Module-level registry: handlers register at import time (Task 5). A future
 # feature adds its frame type with a new @REGISTRY.register — no edits here.
 REGISTRY = Registry()
+
+
+def is_too_small(width: int, height: int) -> bool:
+    """The dashboard needs at least 80x24 to lay out the three panes legibly."""
+    return width < 80 or height < 24
 
 
 class RedRobinApp(App):
@@ -32,6 +45,7 @@ class RedRobinApp(App):
 
     snapshot: reactive[dict] = reactive(dict)
     events: reactive[list] = reactive(list)
+    connection_state: reactive[str] = reactive("disconnected")
 
     def __init__(
         self,
@@ -46,37 +60,56 @@ class RedRobinApp(App):
         self._token = token
 
     def compose(self) -> ComposeResult:
-        yield Static("Red Robin", id="topbar")
+        yield TopBar("Red Robin", id="topbar")
         with Horizontal(id="main"):
             with Container(id="sessions") as sessions_box:
                 sessions_box.border_title = "Sessions"
                 yield SessionsTable(id="sessions-table")
             with Container(id="events") as events_box:
                 events_box.border_title = "Verdicts / Events"
-                yield EventsLog(id="events-log", highlight=False, markup=False)
+                yield EventsLog(
+                    id="events-log", highlight=False, markup=False, wrap=True, min_width=0
+                )
             with Container(id="memory") as memory_box:
                 memory_box.border_title = "Working Memory"
                 yield MemoryPanel(id="memory-panel")
         yield Container(id="advisor-dock")  # reserved seam (hidden via .tcss)
+        yield Static("Terminal too small — resize to at least 80x24.", id="resize-hint")
         yield Footer()
 
     def watch_snapshot(self, snapshot: dict) -> None:
         """Re-render topbar + Sessions + Working Memory on snapshot change. No
         manual repaint — reactive assignment drives Textual's compositor (#155)."""
-        engagement = snapshot.get("engagement_id") or "-"
+        self._refresh_topbar()
         try:
-            self.query_one("#topbar", Static).update(f"Red Robin · {engagement} · ●")
             self.query_one("#sessions-table", SessionsTable).update_from_snapshot(snapshot)
             self.query_one("#memory-panel", MemoryPanel).update_from_snapshot(snapshot)
         except (NoMatches, ScreenStackError):
             pass  # pre-mount (no screen yet) or widgets not mounted — compose seeds them
 
     def watch_events(self, events: list) -> None:
-        """Re-render the verdict/event log whenever the events list changes."""
+        """Re-render the verdict/event log + header counts whenever events change."""
+        self._refresh_topbar()
         try:
             self.query_one("#events-log", EventsLog).render_events(events)
         except (NoMatches, ScreenStackError):
             pass
+
+    def _refresh_topbar(self) -> None:
+        """Re-render the header from current snapshot + connection state + verdict counts."""
+        try:
+            bar = self.query_one("#topbar", TopBar)
+        except (NoMatches, ScreenStackError):
+            return
+        engagement = self.snapshot.get("engagement_id") or "-"
+        bar.update_status(engagement, self.connection_state, verdict_counts(self.events))
+
+    def watch_connection_state(self, state: str) -> None:
+        self._refresh_topbar()
+
+    def _set_connection_state(self, state: str) -> None:
+        """Callback handed to the WS worker; runs on the app loop → safe reactive set."""
+        self.connection_state = state
 
     def on_mount(self) -> None:
         """Start the WS worker unless disabled (tests pass start_worker=False)."""
@@ -93,6 +126,7 @@ class RedRobinApp(App):
                 token=self._token,
                 registry=REGISTRY,
                 stop_event=self._stop_event,
+                set_state=self._set_connection_state,
             ),
             name="ws",
             exclusive=True,
@@ -106,6 +140,18 @@ class RedRobinApp(App):
         stop = getattr(self, "_stop_event", None)
         if stop is not None:
             stop.set()
+
+    def on_resize(self, event: Resize) -> None:
+        self._apply_responsive(event.size.width, event.size.height)
+
+    def _apply_responsive(self, width: int, height: int) -> None:
+        """Below 80x24 the panes can't lay out — show a hint and hide the dashboard."""
+        too_small = is_too_small(width, height)
+        try:
+            self.query_one("#resize-hint").display = too_small
+            self.query_one("#main").display = not too_small
+        except (NoMatches, ScreenStackError):
+            pass
 
 
 @REGISTRY.register("working_memory_snapshot")

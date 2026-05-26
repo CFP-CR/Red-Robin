@@ -22,6 +22,13 @@ VERDICT_COLORS: dict[str, str] = {
 }
 _SEV_HIGH = "#f0883e"
 _MUTED = "#8b949e"
+# Daemon-connection status colors — mirror $status-ok/$status-warn/$status-err in theme.tcss.
+_STATUS_COLORS: dict[str, str] = {
+    "connected": "#3fb950",
+    "connecting": "#e3b341",
+    "disconnected": "#f85149",
+}
+_SCOPE_OUT = "#f85149"  # mirror $scope-out in theme.tcss
 _MAX_EVENTS = 500
 
 
@@ -42,6 +49,32 @@ def format_verdict(payload: dict[str, Any]) -> Text:
     return line
 
 
+def verdict_counts(events: list[dict[str, Any]]) -> dict[str, int]:
+    """Tally events by verdict action (only the four known actions are counted)."""
+    counts = {"BLOCK": 0, "WARN": 0, "PASS": 0, "ESCALATE": 0}
+    for event in events:
+        verdict = event.get("verdict")
+        if verdict in counts:
+            counts[verdict] += 1
+    return counts
+
+
+def format_topbar(engagement: str, connection_state: str, counts: dict[str, int]) -> Text:
+    """Header line: 'Red Robin · <engagement> · ●<connection> · <verdict counts>'.
+
+    16-color-safe: the connection state and each verdict carry a text label + weight,
+    so meaning survives non-truecolor terminals and color-blindness."""
+    line = Text()
+    line.append("Red Robin", style="bold")
+    line.append(f"  ·  {engagement or '-'}  ·  ", style=_MUTED)
+    line.append("●", style=_STATUS_COLORS.get(connection_state, _MUTED))
+    line.append(f" {connection_state}", style=_MUTED)
+    for verdict in ("BLOCK", "WARN", "PASS", "ESCALATE"):
+        line.append("   ")
+        line.append(f"{counts.get(verdict, 0)} {verdict}", style=f"bold {VERDICT_COLORS[verdict]}")
+    return line
+
+
 def apply_verdict(events: list[dict[str, Any]], payload: dict[str, Any]) -> list[dict[str, Any]]:
     """Return a NEW events list with the verdict applied. A Layer B correction
     (``source == "layer_b"`` with a matching ``correlation_id``) updates the most
@@ -58,6 +91,13 @@ def apply_verdict(events: list[dict[str, Any]], payload: dict[str, Any]) -> list
                 return new[-_MAX_EVENTS:]
     new.append(payload)
     return new[-_MAX_EVENTS:]
+
+
+class TopBar(Static):
+    """Docked header: engagement id + daemon-connection status + verdict counts."""
+
+    def update_status(self, engagement: str, connection_state: str, counts: dict[str, int]) -> None:
+        self.update(format_topbar(engagement, connection_state, counts))
 
 
 class SessionsTable(DataTable):
@@ -93,23 +133,28 @@ class EventsLog(RichLog):
             self.write(format_verdict(payload))
 
 
+def format_memory(snapshot: dict[str, Any]) -> Text:
+    """Working-memory summary as Rich Text: phase, scope (out-of-scope in red), counts.
+    Same text the plain renderer produced; out-of-scope now styled with $scope-out."""
+    in_scope = snapshot.get("scope_in_scope") or []
+    out_scope = snapshot.get("scope_out_of_scope") or []
+    phase = snapshot.get("current_phase") or "-"
+    hosts = len(snapshot.get("hosts") or [])
+    creds = len(snapshot.get("credentials") or [])
+    finds = len(snapshot.get("findings") or [])
+    text = Text()
+    text.append(f"phase   {phase}\n\n")
+    text.append("SCOPE\n", style=_MUTED)
+    text.append(f"  in   {', '.join(in_scope) if in_scope else '(none)'}\n")
+    text.append("  out  ")
+    text.append(f"{', '.join(out_scope) if out_scope else '(none)'}\n", style=_SCOPE_OUT)
+    text.append("\n")
+    text.append(f"hosts {hosts}   creds {creds}   findings {finds}")
+    return text
+
+
 class MemoryPanel(Static):
     """Working-memory summary: phase, scope (in/out), and counts."""
 
     def update_from_snapshot(self, snapshot: dict[str, Any]) -> None:
-        in_scope = snapshot.get("scope_in_scope") or []
-        out_scope = snapshot.get("scope_out_of_scope") or []
-        phase = snapshot.get("current_phase") or "-"
-        hosts = len(snapshot.get("hosts") or [])
-        creds = len(snapshot.get("credentials") or [])
-        finds = len(snapshot.get("findings") or [])
-        lines = [
-            f"phase   {phase}",
-            "",
-            "SCOPE",
-            f"  in   {', '.join(in_scope) if in_scope else '(none)'}",
-            f"  out  {', '.join(out_scope) if out_scope else '(none)'}",
-            "",
-            f"hosts {hosts}   creds {creds}   findings {finds}",
-        ]
-        self.update("\n".join(lines))
+        self.update(format_memory(snapshot))

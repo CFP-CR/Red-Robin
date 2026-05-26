@@ -166,3 +166,82 @@ async def test_memory_panel_empty_scope_is_graceful():
         mem.update_from_snapshot({})
         content = str(mem.content)
         assert "(none)" in content
+
+
+def test_verdict_counts_tallies_known_verdicts_only():
+    events = [
+        {"verdict": "BLOCK"},
+        {"verdict": "BLOCK"},
+        {"verdict": "PASS"},
+        {"verdict": "WARN"},
+        {"verdict": "ESCALATE"},
+        {"verdict": "WAT"},  # unknown → ignored
+        {},  # no verdict → ignored
+    ]
+    counts = panels.verdict_counts(events)
+    assert counts == {"BLOCK": 2, "WARN": 1, "PASS": 1, "ESCALATE": 1}
+
+
+def test_format_topbar_is_16color_safe_text():
+    out = panels.format_topbar(
+        "e2e-verify", "connected", {"BLOCK": 3, "WARN": 1, "PASS": 12, "ESCALATE": 0}
+    )
+    assert isinstance(out, Text)
+    plain = out.plain
+    # Every colored token also carries a text label (survives no-color terminals).
+    assert "e2e-verify" in plain
+    assert "connected" in plain
+    assert "3 BLOCK" in plain
+    assert "1 WARN" in plain
+    assert "12 PASS" in plain
+    assert "0 ESCALATE" in plain
+
+
+def test_format_topbar_blank_engagement_shows_dash():
+    out = panels.format_topbar(
+        "", "disconnected", {"BLOCK": 0, "WARN": 0, "PASS": 0, "ESCALATE": 0}
+    )
+    # Blank engagement falls back to "-" (rendered between the middle-dot separators).
+    assert " - " in out.plain
+
+
+@pytest.mark.asyncio
+async def test_topbar_widget_renders_status():
+    class _BarApp(App):
+        def compose(self) -> ComposeResult:
+            yield panels.TopBar("Red Robin", id="bar")
+
+    app = _BarApp()
+    async with app.run_test():
+        bar = app.query_one("#bar", panels.TopBar)
+        bar.update_status("acme", "connected", {"BLOCK": 1, "WARN": 0, "PASS": 0, "ESCALATE": 0})
+        content = str(bar.content)
+        assert "acme" in content
+        assert "1 BLOCK" in content
+
+
+def test_format_memory_marks_out_of_scope_red():
+    out = panels.format_memory(
+        {
+            "current_phase": "recon",
+            "scope_in_scope": ["EC2AMAZ", "10.100.0.0/24"],
+            "scope_out_of_scope": ["10.99.0.0/16"],
+            "hosts": [{}],
+            "credentials": [{}],
+            "findings": [{}, {}],
+        }
+    )
+    assert isinstance(out, Text)
+    plain = out.plain
+    # Text content is preserved (same fields the plain renderer showed).
+    assert "recon" in plain
+    assert "EC2AMAZ" in plain
+    assert "10.99.0.0/16" in plain
+    assert "findings 2" in plain
+    # The out-of-scope value carries the $scope-out red style.
+    assert any(panels._SCOPE_OUT in str(span.style) for span in out.spans)
+
+
+def test_format_memory_empty_scope_is_graceful():
+    out = panels.format_memory({})
+    assert "(none)" in out.plain

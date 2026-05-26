@@ -37,10 +37,33 @@ Screen {
 #events { width: 3fr; }
 #memory { width: 2fr; }
 
+/* Verdict log: scroll vertically only when it overflows (no always-on scrollbar
+   gutter when there are few verdicts — RichLog defaults to overflow-y: scroll).
+   Never scroll horizontally — long reasons wrap to the pane (wrap=True + min_width=0). */
+#events-log {
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
 /* Reserved seam for the future AI Advisor (Phase S6). Present but hidden. */
 #advisor-dock {
     display: none;
     dock: bottom;
     height: auto;
     border-top: heavy $accent;
+}
+
+/* Below the 80x24 minimum: a centered hint replaces the dashboard (toggled in code). */
+#resize-hint {
+    display: none;
+    width: 100%;
+    height: 100%;
+    content-align: center middle;
+    color: $status-warn;
+    text-style: bold;
+}
+
+/* Focus affordance: the focused pane gets the accent border (accent = interaction only). */
+#main > Container:focus-within {
+    border: round $accent;
 }
