@@ -3,6 +3,7 @@ from textual.app import App, ComposeResult
 from textual.widgets import Input, OptionList
 
 from redrobin.tui.textual_ui import inspector
+from redrobin.tui.textual_ui.app import REGISTRY, RedRobinApp
 
 SNAP = {
     "engagement_id": "e2e-verify",
@@ -200,3 +201,42 @@ async def test_inspector_group_toggle_groups_findings():
         content = screen.query_one("#inspector-content", OptionList)
         prompts = [str(content.get_option_at_index(i).prompt) for i in range(content.option_count)]
         assert any(p.startswith("── ") for p in prompts)  # a group sub-header appeared
+
+
+@pytest.mark.asyncio
+async def test_app_i_opens_inspector_with_snapshot():
+    app = RedRobinApp(start_worker=False)
+    async with app.run_test() as pilot:
+        REGISTRY.dispatch(
+            target=app,
+            frame={"type": "working_memory_snapshot", "payload": SNAP},
+        )
+        await pilot.press("i")
+        await pilot.pause()
+        assert app.screen.__class__.__name__ == "InspectorScreen"
+        content = app.screen.query_one("#inspector-content", OptionList)
+        assert any(
+            "e2e-verify" in str(content.get_option_at_index(i).prompt)
+            for i in range(content.option_count)
+        )
+
+
+@pytest.mark.asyncio
+async def test_inspector_copy_row_copies_highlighted(monkeypatch):
+    app = _Host(SNAP)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        copied: list[str] = []
+        monkeypatch.setattr(app, "copy_to_clipboard", lambda text: copied.append(text))
+        content = screen.query_one("#inspector-content", OptionList)
+        # Focus first: a focused OptionList resets ``highlighted`` to None on its
+        # focus tick (verified, Textual 8.2.7), so set the highlight AFTER focusing
+        # (as a real user does — focusing the list, then arrowing to a row).
+        content.focus()
+        await pilot.pause()
+        content.highlighted = 0
+        await pilot.pause()
+        await pilot.press("y")
+        await pilot.pause()
+        assert copied and copied[0] == str(content.get_option_at_index(0).prompt)

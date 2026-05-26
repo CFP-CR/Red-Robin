@@ -19,6 +19,7 @@ from textual.reactive import reactive
 from textual.widgets import Footer, Static
 
 from redrobin.tui.textual_ui.frames import Registry
+from redrobin.tui.textual_ui.inspector import InspectorScreen
 from redrobin.tui.textual_ui.panels import (
     EventsLog,
     MemoryPanel,
@@ -41,7 +42,7 @@ def is_too_small(width: int, height: int) -> bool:
 class RedRobinApp(App):
     CSS_PATH = "theme.tcss"
     TITLE = "Red Robin"
-    BINDINGS = [("q", "quit", "Quit")]
+    BINDINGS = [("q", "quit", "Quit"), ("i", "inspect", "Inspector")]
 
     snapshot: reactive[dict] = reactive(dict)
     events: reactive[list] = reactive(list)
@@ -110,6 +111,10 @@ class RedRobinApp(App):
     def _set_connection_state(self, state: str) -> None:
         """Callback handed to the WS worker; runs on the app loop → safe reactive set."""
         self.connection_state = state
+
+    def action_inspect(self) -> None:
+        """Open the Inspector modal over the current working-memory snapshot."""
+        self.push_screen(InspectorScreen(self.snapshot))
 
     def on_mount(self) -> None:
         """Start the WS worker unless disabled (tests pass start_worker=False)."""
