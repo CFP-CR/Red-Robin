@@ -67,3 +67,35 @@ Screen {
 #main > Container:focus-within {
     border: round $accent;
 }
+
+/* Inspector modal (Phase 4): a centered dialog over a dimmed screen. */
+InspectorScreen {
+    align: center middle;
+}
+#inspector {
+    width: 90%;
+    height: 90%;
+    background: $panel;
+    border: round $accent;
+}
+#inspector-title {
+    dock: top;
+    height: 1;
+    color: $text;
+    text-style: bold;
+}
+#inspector-hint {
+    dock: bottom;
+    height: 1;
+    color: $text-muted;
+}
+#inspector-nav {
+    width: 28;
+    border-right: solid $panel-lighten-2;
+}
+#inspector-body {
+    width: 1fr;
+}
+#inspector-filter {
+    height: 3;
+}
