@@ -79,3 +79,27 @@ def test_render_engagement_lines():
 def test_render_empty_section_is_graceful():
     lines = inspector.render_section({}, "findings")
     assert lines == ["(none)"]
+
+
+def test_filter_narrows_findings_case_insensitive():
+    lines = inspector.render_section(SNAP, "findings", filter_text="KERBEROS")
+    assert len(lines) == 1
+    assert "kerberos_ticket_observed" in lines[0]
+
+
+def test_filter_no_match_returns_none_placeholder():
+    lines = inspector.render_section(SNAP, "findings", filter_text="zzz-no-such")
+    assert lines == ["(none)"]
+
+
+def test_group_by_kind_adds_subheaders():
+    lines = inspector.render_section(SNAP, "findings", group_by="kind")
+    assert any(line.startswith("── kerberos_ticket_observed (1)") for line in lines)
+    assert any(line.startswith("── opsec_block (1)") for line in lines)
+    assert any(line.startswith("  [kerberos_ticket_observed]") for line in lines)
+
+
+def test_group_by_beacon_groups_by_source():
+    lines = inspector.render_section(SNAP, "findings", group_by="beacon")
+    assert any(line.startswith("── b1 (1)") for line in lines)
+    assert any(line.startswith("── b2 (1)") for line in lines)
