@@ -25,6 +25,8 @@ dependencies = [
     "numpy>=1.26",
     "pydantic-settings>=2.14.1",
     "python-dotenv>=1.2.2",
+    "textual>=8.2.7",
+    "websockets>=16.0",
 ]
 
 [project.optional-dependencies]
@@ -36,6 +38,7 @@ dev = [
     "mypy>=1.10",
     "import-linter>=2.11",
     "pre-commit>=3.7",
+    "pytest-textual-snapshot>=1.0.0",
 ]
 
 [project.scripts]
