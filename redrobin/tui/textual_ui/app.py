@@ -18,6 +18,7 @@ from textual.reactive import reactive
 from textual.widgets import Footer, Static
 
 from redrobin.tui.textual_ui.frames import Registry
+from redrobin.tui.textual_ui.panels import EventsLog, MemoryPanel, SessionsTable, apply_verdict
 
 # Module-level registry: handlers register at import time (Task 5). A future
 # feature adds its frame type with a new @REGISTRY.register — no edits here.
@@ -47,21 +48,35 @@ class RedRobinApp(App):
     def compose(self) -> ComposeResult:
         yield Static("Red Robin", id="topbar")
         with Horizontal(id="main"):
-            yield Container(Static("Sessions"), id="sessions")
-            yield Container(Static("Verdicts / Events"), id="events")
-            yield Container(Static("Working Memory"), id="memory")
+            with Container(id="sessions") as sessions_box:
+                sessions_box.border_title = "Sessions"
+                yield SessionsTable(id="sessions-table")
+            with Container(id="events") as events_box:
+                events_box.border_title = "Verdicts / Events"
+                yield EventsLog(id="events-log", highlight=False, markup=False)
+            with Container(id="memory") as memory_box:
+                memory_box.border_title = "Working Memory"
+                yield MemoryPanel(id="memory-panel")
         yield Container(id="advisor-dock")  # reserved seam (hidden via .tcss)
         yield Footer()
 
     def watch_snapshot(self, snapshot: dict) -> None:
-        """Re-render the topbar when the snapshot changes. No invalidate() —
-        Textual repaints bound widgets automatically (this is why #155 cannot
-        recur: there is no manual repaint path to miss)."""
+        """Re-render topbar + Sessions + Working Memory on snapshot change. No
+        manual repaint — reactive assignment drives Textual's compositor (#155)."""
         engagement = snapshot.get("engagement_id") or "-"
         try:
             self.query_one("#topbar", Static).update(f"Red Robin · {engagement} · ●")
+            self.query_one("#sessions-table", SessionsTable).update_from_snapshot(snapshot)
+            self.query_one("#memory-panel", MemoryPanel).update_from_snapshot(snapshot)
         except (NoMatches, ScreenStackError):
-            pass  # pre-mount (no screen yet) or topbar not mounted — compose() seeds it
+            pass  # pre-mount (no screen yet) or widgets not mounted — compose seeds them
+
+    def watch_events(self, events: list) -> None:
+        """Re-render the verdict/event log whenever the events list changes."""
+        try:
+            self.query_one("#events-log", EventsLog).render_events(events)
+        except (NoMatches, ScreenStackError):
+            pass
 
     def on_mount(self) -> None:
         """Start the WS worker unless disabled (tests pass start_worker=False)."""
@@ -100,8 +115,9 @@ def _on_snapshot(app: "RedRobinApp", payload: dict) -> None:
 
 @REGISTRY.register("opsec.verdict")
 def _on_verdict(app: "RedRobinApp", payload: dict) -> None:
-    # Reassign (not append) so the reactive watcher sees the change.
-    app.events = app.events + [payload]
+    # Reassign (not append) so watch_events fires; apply_verdict handles the
+    # Layer B in-place correction by correlation_id.
+    app.events = apply_verdict(app.events, payload)
 
 
 def main() -> None:
