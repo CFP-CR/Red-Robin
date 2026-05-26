@@ -13,6 +13,7 @@ References:
   - working_memory_reducer.py:75,178 — engagement_id frozen at __init__
   - app.py lifespan — start_working_memory runs BEFORE start_engagement
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -35,7 +36,9 @@ def isolated_root(tmp_path, monkeypatch):
     yield tmp_path
 
 
-def _publish_verdict(client, app, *, beacon_id: str, correlation_id: str, command: str, verdict: str):
+def _publish_verdict(
+    client, app, *, beacon_id: str, correlation_id: str, command: str, verdict: str
+):
     """Publish a Layer A opsec.verdict event onto the bus via the TestClient portal."""
     client.portal.call(
         app.state.event_bus.publish,
@@ -93,7 +96,8 @@ def test_episode_written_to_active_engagement_db(isolated_root):
         assert app.state.engagement_id == "eng-a"
 
         _publish_verdict(
-            client, app,
+            client,
+            app,
             beacon_id="bid_1",
             correlation_id="c_1",
             command="mimikatz",
@@ -101,6 +105,7 @@ def test_episode_written_to_active_engagement_db(isolated_root):
         )
         # Allow the reducer's async loop one tick to process the event
         import time
+
         time.sleep(0.5)
 
     # After lifespan close, the file must exist at the per-engagement path
@@ -128,16 +133,32 @@ def test_two_engagements_do_not_cross_contaminate(isolated_root):
     svc.use("eng-a")
     app = create_app()
     with TestClient(app) as client:
-        _publish_verdict(client, app, beacon_id="bid_a", correlation_id="c_a", command="mimikatz", verdict="BLOCK")
+        _publish_verdict(
+            client,
+            app,
+            beacon_id="bid_a",
+            correlation_id="c_a",
+            command="mimikatz",
+            verdict="BLOCK",
+        )
         import time
+
         time.sleep(0.5)
 
     # Then switch to eng-b and run again
     svc.use("eng-b")
     app = create_app()
     with TestClient(app) as client:
-        _publish_verdict(client, app, beacon_id="bid_b", correlation_id="c_b", command="hashdump", verdict="BLOCK")
+        _publish_verdict(
+            client,
+            app,
+            beacon_id="bid_b",
+            correlation_id="c_b",
+            command="hashdump",
+            verdict="BLOCK",
+        )
         import time
+
         time.sleep(0.5)
 
     db_a = isolated_root / "engagements" / "eng-a" / "episodic.db"
@@ -147,15 +168,11 @@ def test_two_engagements_do_not_cross_contaminate(isolated_root):
     assert _count_episodes(db_a, engagement_id="eng-a") == 1, (
         f"eng-a should have 1 row, found {_count_episodes(db_a, engagement_id='eng-a')}"
     )
-    assert _count_episodes(db_a, engagement_id="eng-b") == 0, (
-        "eng-a db must NOT contain eng-b rows"
-    )
+    assert _count_episodes(db_a, engagement_id="eng-b") == 0, "eng-a db must NOT contain eng-b rows"
     assert _count_episodes(db_b, engagement_id="eng-b") == 1, (
         f"eng-b should have 1 row, found {_count_episodes(db_b, engagement_id='eng-b')}"
     )
-    assert _count_episodes(db_b, engagement_id="eng-a") == 0, (
-        "eng-b db must NOT contain eng-a rows"
-    )
+    assert _count_episodes(db_b, engagement_id="eng-a") == 0, "eng-b db must NOT contain eng-a rows"
 
 
 def test_degraded_mode_no_engagement_falls_back_to_root(isolated_root):
@@ -168,8 +185,11 @@ def test_degraded_mode_no_engagement_falls_back_to_root(isolated_root):
     with TestClient(app) as client:
         assert app.state.engagement is None, "no engagement should be active"
 
-        _publish_verdict(client, app, beacon_id="bid_x", correlation_id="c_x", command="ls", verdict="PASS")
+        _publish_verdict(
+            client, app, beacon_id="bid_x", correlation_id="c_x", command="ls", verdict="PASS"
+        )
         import time
+
         time.sleep(0.5)
 
     root_db = isolated_root / "episodic.db"

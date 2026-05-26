@@ -5,6 +5,7 @@ construct an :class:`EngagementService`; the ``run_*`` helpers here apply the
 actual operations against that service so the bodies are testable without
 argparse plumbing.
 """
+
 from __future__ import annotations
 
 import sys

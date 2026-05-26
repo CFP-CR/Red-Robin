@@ -80,5 +80,3 @@ promoted_lessons = Table(
     Column("occurrence_count", Integer, nullable=False),
     Column("created_at", DateTime, nullable=False),
 )
-
-

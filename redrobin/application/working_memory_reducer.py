@@ -104,9 +104,7 @@ class WorkingMemoryReducer:
                 try:
                     mutated = self._dispatch(evt)
                 except Exception:
-                    logger.exception(
-                        "reducer failed to process event type=%s", evt.get("type")
-                    )
+                    logger.exception("reducer failed to process event type=%s", evt.get("type"))
                     mutated = False
                 if mutated:
                     await self._publish_snapshot()

@@ -16,6 +16,7 @@ schema for in-process replay.
 The Host serializer emits the ``name`` field (uppercased by the reducer's
 normalisation), and Credentials emit ``domain`` + ``username`` + ``ntlm_hash``.
 """
+
 from __future__ import annotations
 
 import time
@@ -87,8 +88,7 @@ def test_beacon_output_propagates_to_snapshot(daemon):
         time.sleep(0.05)
     else:
         pytest.fail(
-            "reducer did not record credential within 2s; creds=%r"
-            % repo.list_credentials()
+            "reducer did not record credential within 2s; creds=%r" % repo.list_credentials()
         )
 
     # Connect a fresh WS — the initial snapshot is built from the live repo.

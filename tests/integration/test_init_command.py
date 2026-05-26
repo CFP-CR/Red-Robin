@@ -1,4 +1,5 @@
 """Slice 5: redrobin init."""
+
 from __future__ import annotations
 
 import io
@@ -31,8 +32,20 @@ def test_init_creates_structure(tmp_path):
 def test_init_idempotent_does_not_overwrite_existing(tmp_path):
     """Re-running init must not clobber existing .env or engagement.yaml."""
     target = tmp_path / "rr"
-    run_init(root=target, anthropic_key="orig", voyage_key="orig", engagement_slug="op-a", interactive=False)
-    rc = run_init(root=target, anthropic_key="new", voyage_key="new", engagement_slug="op-b", interactive=False)
+    run_init(
+        root=target,
+        anthropic_key="orig",
+        voyage_key="orig",
+        engagement_slug="op-a",
+        interactive=False,
+    )
+    rc = run_init(
+        root=target,
+        anthropic_key="new",
+        voyage_key="new",
+        engagement_slug="op-b",
+        interactive=False,
+    )
     assert rc == 0
     env = (target / ".env").read_text()
     assert "ANTHROPIC_API_KEY=orig" in env, "init must not overwrite existing .env"
@@ -42,14 +55,18 @@ def test_init_sets_strict_perms_on_dotenv(tmp_path):
     if sys.platform == "win32":
         pytest.skip("POSIX perms")
     target = tmp_path / "rr"
-    run_init(root=target, anthropic_key="k", voyage_key="k", engagement_slug="op", interactive=False)
+    run_init(
+        root=target, anthropic_key="k", voyage_key="k", engagement_slug="op", interactive=False
+    )
     mode = (target / ".env").stat().st_mode & 0o777
     assert mode == 0o600
 
 
 def test_init_creates_sample_rule(tmp_path):
     target = tmp_path / "rr"
-    run_init(root=target, anthropic_key="k", voyage_key="k", engagement_slug="op", interactive=False)
+    run_init(
+        root=target, anthropic_key="k", voyage_key="k", engagement_slug="op", interactive=False
+    )
     rules = list((target / "rules" / "shared").rglob("*.yaml"))
     assert len(rules) >= 1
 

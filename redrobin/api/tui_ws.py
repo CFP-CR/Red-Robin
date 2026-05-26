@@ -5,6 +5,7 @@ On connect the client receives a single ``working_memory_snapshot`` event
 on ``app.state.event_bus`` is forwarded over the socket. The per-client
 queue is unsubscribed on disconnect (or sentinel ``{_type: _close}``).
 """
+
 from __future__ import annotations
 
 import logging
@@ -26,14 +27,12 @@ async def tui_ws(websocket: WebSocket, token: str = Query(...)) -> None:
     await websocket.accept()
     bus = websocket.app.state.event_bus
     queue = None  # Defensive: ensure `queue` is defined before the
-                  # try/finally even if bus.subscribe() raises (#127).
+    # try/finally even if bus.subscribe() raises (#127).
 
     try:
         queue = await bus.subscribe()
         snapshot_payload = await _build_initial_snapshot(websocket.app)
-        await websocket.send_json(
-            {"type": "working_memory_snapshot", "payload": snapshot_payload}
-        )
+        await websocket.send_json({"type": "working_memory_snapshot", "payload": snapshot_payload})
 
         while True:
             event = await queue.get()

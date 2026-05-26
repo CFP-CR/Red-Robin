@@ -8,6 +8,7 @@ contract.
 
 NEVER print secret values. Only print whether they are set/unset.
 """
+
 from __future__ import annotations
 
 from redrobin.infrastructure.config import Settings
@@ -58,22 +59,14 @@ def format_banner(
             )
     else:
         lines.append(
-            '  Engagement: (none) - WARNING: verdicts will NOT be persisted. '
+            "  Engagement: (none) - WARNING: verdicts will NOT be persisted. "
             'Run "redrobin engagement use <slug>" first.'
         )
     lines.append(f"  Rules:      {rules_count}")
-    lines.append(
-        f"  Adapters:   {', '.join(adapter_names) if adapter_names else '(none)'}"
-    )
-    lines.append(
-        f"  Anthropic:  {'set' if settings.anthropic_api_key else 'MISSING (degraded)'}"
-    )
-    lines.append(
-        f"  Voyage:     {'set' if settings.voyage_api_key else 'MISSING (degraded)'}"
-    )
-    lines.append(
-        f"  L5 window:  {settings.l5_window} (every {settings.l5_interval_sec}s)"
-    )
+    lines.append(f"  Adapters:   {', '.join(adapter_names) if adapter_names else '(none)'}")
+    lines.append(f"  Anthropic:  {'set' if settings.anthropic_api_key else 'MISSING (degraded)'}")
+    lines.append(f"  Voyage:     {'set' if settings.voyage_api_key else 'MISSING (degraded)'}")
+    lines.append(f"  L5 window:  {settings.l5_window} (every {settings.l5_interval_sec}s)")
     lines.append(
         f"  Promoter:   min={settings.promoter_min_occurrences} "
         f"(every {settings.promoter_interval_sec}s)"

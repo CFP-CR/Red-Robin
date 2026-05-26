@@ -1,4 +1,5 @@
 """Slice 14 integration: heartbeat, VectorStore JSON, doctor exit code."""
+
 from __future__ import annotations
 
 import json

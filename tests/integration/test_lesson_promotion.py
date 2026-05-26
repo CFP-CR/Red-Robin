@@ -11,6 +11,7 @@ Phase 1's async-SQL ``EpisodicRepo``/``LongtermRepo`` keep their original
 ``record()`` / ``upsert_lesson()`` API constructed from a ``Path`` so it
 matches the synchronous reducer dispatch path (no event loop hop per event).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -68,9 +69,7 @@ async def test_verdict_records_episode(tmp_path: Path) -> None:
             episodes = ep_repo.list_episodes_for_engagement("eng-test")
             if episodes:
                 break
-        assert any(
-            e.command == "mimikatz" and e.verdict == "BLOCK" for e in episodes
-        )
+        assert any(e.command == "mimikatz" and e.verdict == "BLOCK" for e in episodes)
     finally:
         await bus.close()
         await asyncio.wait_for(task, timeout=1.0)
@@ -123,9 +122,7 @@ async def test_promoter_creates_lesson_on_repeated_pattern(tmp_path: Path) -> No
     """Three or more BLOCK episodes for the same command produce one Lesson."""
     ep_repo = EpisodicRepo(tmp_path / "ep.db")
     lt_repo = LongtermRepo(tmp_path / "lt.db")
-    promoter = LessonPromoter(
-        episodic_repo=ep_repo, longterm_repo=lt_repo, min_occurrences=3
-    )
+    promoter = LessonPromoter(episodic_repo=ep_repo, longterm_repo=lt_repo, min_occurrences=3)
     for i in range(3):
         ep_repo.record(
             engagement_id="eng-test",
@@ -147,9 +144,7 @@ async def test_promoter_creates_lesson_on_repeated_pattern(tmp_path: Path) -> No
 async def test_promoter_skips_allow_and_below_threshold(tmp_path: Path) -> None:
     ep_repo = EpisodicRepo(tmp_path / "ep.db")
     lt_repo = LongtermRepo(tmp_path / "lt.db")
-    promoter = LessonPromoter(
-        episodic_repo=ep_repo, longterm_repo=lt_repo, min_occurrences=3
-    )
+    promoter = LessonPromoter(episodic_repo=ep_repo, longterm_repo=lt_repo, min_occurrences=3)
     # 5x ALLOW for "whoami" — should not promote (verdict gate).
     for i in range(5):
         ep_repo.record(
@@ -178,9 +173,7 @@ async def test_promoter_skips_allow_and_below_threshold(tmp_path: Path) -> None:
 async def test_promoter_is_idempotent(tmp_path: Path) -> None:
     ep_repo = EpisodicRepo(tmp_path / "ep.db")
     lt_repo = LongtermRepo(tmp_path / "lt.db")
-    promoter = LessonPromoter(
-        episodic_repo=ep_repo, longterm_repo=lt_repo, min_occurrences=3
-    )
+    promoter = LessonPromoter(episodic_repo=ep_repo, longterm_repo=lt_repo, min_occurrences=3)
     for i in range(3):
         ep_repo.record(
             engagement_id="eng-x",
@@ -204,9 +197,7 @@ async def test_promoter_updates_occurrence_count_when_pattern_grows(
 ) -> None:
     ep_repo = EpisodicRepo(tmp_path / "ep.db")
     lt_repo = LongtermRepo(tmp_path / "lt.db")
-    promoter = LessonPromoter(
-        episodic_repo=ep_repo, longterm_repo=lt_repo, min_occurrences=3
-    )
+    promoter = LessonPromoter(episodic_repo=ep_repo, longterm_repo=lt_repo, min_occurrences=3)
     for i in range(3):
         ep_repo.record(
             engagement_id="eng-g",

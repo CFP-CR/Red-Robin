@@ -5,6 +5,7 @@ beacon_id (verdict_pipeline.py:232), but _on_retroactive (Layer B path)
 does not. The CS Aggressor adapter needs beacon_id to route the verdict
 back to the right beacon console via blog($bid, ...).
 """
+
 from __future__ import annotations
 
 import asyncio

@@ -4,6 +4,7 @@ The Application itself can't be ``run`` without a real terminal, so we build it
 and walk the layout container tree to assert the named panels are reachable.
 Task 8.6 adds a true daemon-side roundtrip test below.
 """
+
 from __future__ import annotations
 
 import json
@@ -78,16 +79,12 @@ def dispatcher() -> OperatorDispatcher:
 
 
 def test_build_tui_app_returns_application_instance(state, dispatcher, pty_input, pty_output):
-    app = build_tui_app(
-        state=state, dispatcher=dispatcher, input=pty_input, output=pty_output
-    )
+    app = build_tui_app(state=state, dispatcher=dispatcher, input=pty_input, output=pty_output)
     assert isinstance(app, Application)
 
 
 def test_build_tui_app_exposes_three_named_panels(state, dispatcher, pty_input, pty_output):
-    app = build_tui_app(
-        state=state, dispatcher=dispatcher, input=pty_input, output=pty_output
-    )
+    app = build_tui_app(state=state, dispatcher=dispatcher, input=pty_input, output=pty_output)
     names = _collect_names(app.layout.container)
     assert "sessions_panel" in names
     assert "events_panel" in names
@@ -95,26 +92,20 @@ def test_build_tui_app_exposes_three_named_panels(state, dispatcher, pty_input, 
 
 
 def test_build_tui_app_exposes_input_buffer(state, dispatcher, pty_input, pty_output):
-    app = build_tui_app(
-        state=state, dispatcher=dispatcher, input=pty_input, output=pty_output
-    )
+    app = build_tui_app(state=state, dispatcher=dispatcher, input=pty_input, output=pty_output)
     names = _collect_names(app.layout.container)
     assert "input_buffer" in names
 
 
 def test_build_tui_app_exposes_inspector_float(state, dispatcher, pty_input, pty_output):
     """Inspector overlay must be reachable in the float container tree."""
-    app = build_tui_app(
-        state=state, dispatcher=dispatcher, input=pty_input, output=pty_output
-    )
+    app = build_tui_app(state=state, dispatcher=dispatcher, input=pty_input, output=pty_output)
     names = _collect_names(app.layout.container)
     assert "inspector_overlay" in names
 
 
 def test_build_tui_app_has_key_bindings(state, dispatcher, pty_input, pty_output):
-    app = build_tui_app(
-        state=state, dispatcher=dispatcher, input=pty_input, output=pty_output
-    )
+    app = build_tui_app(state=state, dispatcher=dispatcher, input=pty_input, output=pty_output)
     assert app.key_bindings is not None
     # KeyBindings or merged bindings — both expose .bindings.
     bindings = getattr(app.key_bindings, "bindings", None)
@@ -254,7 +245,15 @@ def test_roundtrip_initial_snapshot_replaces_state_snapshot(daemon):
     token = get_or_create_token()
     state = TUIState()
     # Tag snapshot before connect — the daemon's snapshot must overwrite it.
-    state.replace_snapshot({"engagement_id": "pre-existing", "hosts": [], "credentials": [], "findings": [], "sessions": []})
+    state.replace_snapshot(
+        {
+            "engagement_id": "pre-existing",
+            "hosts": [],
+            "credentials": [],
+            "findings": [],
+            "sessions": [],
+        }
+    )
 
     with client.websocket_connect(f"/v1/tui?token={token}") as ws:
         first = ws.receive_json()

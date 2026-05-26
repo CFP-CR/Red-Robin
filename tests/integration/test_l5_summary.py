@@ -24,6 +24,7 @@ This slice wires the full chain:
    + engagement_id provider so the cached block is always populated from
    the active engagement.
 """
+
 from __future__ import annotations
 
 import asyncio

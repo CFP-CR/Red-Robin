@@ -84,7 +84,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # ``finally`` block below for the current contract.
     _, close_bus = await start_event_bus(app, settings)
     _, stop_rules = await start_rules(app, settings)
-    await start_engagement(app, settings)  # no close hook — must run before working_memory so the reducer captures the resolved engagement_id
+    await start_engagement(
+        app, settings
+    )  # no close hook — must run before working_memory so the reducer captures the resolved engagement_id
     _, close_wm = await start_working_memory(app, settings)
     _, _close_pipeline = await start_pipeline(app, settings)  # no-op close
     _, close_adapters = await start_adapters(app, settings)
@@ -114,9 +116,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _banner = format_banner(
         settings=settings,
         rules_count=len(app.state.rules_loader.list_rules()),
-        engagement_name=(
-            app.state.engagement.name if app.state.engagement is not None else None
-        ),
+        engagement_name=(app.state.engagement.name if app.state.engagement is not None else None),
         version=_version,
         adapter_names=list(app.state.cs_adapters.keys()),
         scope_empty=getattr(app.state, "scope_empty", False),
@@ -147,15 +147,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             try:
                 pending_initial = [t for t in background_tasks if not t.done()]
                 if pending_initial:
-                    _, still_pending = await asyncio.wait(
-                        pending_initial, timeout=5.0
-                    )
+                    _, still_pending = await asyncio.wait(pending_initial, timeout=5.0)
                     for task in still_pending:
                         task.cancel()
                     if still_pending:
-                        await asyncio.gather(
-                            *still_pending, return_exceptions=True
-                        )
+                        await asyncio.gather(*still_pending, return_exceptions=True)
             except Exception:
                 logger.exception("error draining background_tasks")
         # 2. Close adapter REST clients now that no tracked task is still

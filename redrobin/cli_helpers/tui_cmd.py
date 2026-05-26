@@ -4,6 +4,7 @@ The CLI wrapper in :mod:`redrobin.cli` loads ``.env`` and resolves the bearer
 token from the local file when ``--token`` is omitted; :func:`run_tui` here
 just launches the textual app.
 """
+
 from __future__ import annotations
 
 from redrobin.application.transport_auth import get_or_create_token

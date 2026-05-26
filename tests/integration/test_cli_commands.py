@@ -1,4 +1,5 @@
 """Slice 11 integration: daemon stop, kb add, replay."""
+
 from __future__ import annotations
 
 import os
@@ -149,9 +150,7 @@ async def test_replay_posts_each_line(tmp_path):
     src.write_text(
         json.dumps({"type": "beacon.command_output", "payload": {"bid": "B-1", "output": "hi"}})
         + "\n"
-        + json.dumps(
-            {"type": "beacon.initial", "payload": {"bid": "B-2", "host": "WIN10"}}
-        )
+        + json.dumps({"type": "beacon.initial", "payload": {"bid": "B-2", "host": "WIN10"}})
         + "\n"
     )
 
@@ -163,9 +162,7 @@ async def test_replay_posts_each_line(tmp_path):
 
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(transport=transport) as client:
-        n = await replay_to_daemon(
-            file=src, client=client, base_url="http://daemon", token=None
-        )
+        n = await replay_to_daemon(file=src, client=client, base_url="http://daemon", token=None)
     assert n == 2
     assert posted[0]["type"] == "beacon.command_output"
     assert posted[1]["type"] == "beacon.initial"
@@ -197,9 +194,7 @@ async def test_replay_skips_blank_lines(tmp_path):
 
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(transport=transport) as client:
-        n = await replay_to_daemon(
-            file=src, client=client, base_url="http://daemon", token=None
-        )
+        n = await replay_to_daemon(file=src, client=client, base_url="http://daemon", token=None)
     assert n == 2
     assert len(posted) == 2
 

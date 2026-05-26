@@ -5,6 +5,7 @@ opsec.verdict payload omitted it and the reducer defaulted to '?'
 (working_memory_reducer.py:166), corrupting episodes/findings/promoted_lessons.
 Mirror of test_verdict_pipeline_layer_b_beacon_id.py.
 """
+
 from __future__ import annotations
 
 import asyncio

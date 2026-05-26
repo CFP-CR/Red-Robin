@@ -7,6 +7,7 @@ is testable without argparse plumbing.
 Reuses :func:`redrobin.cli_helpers.replay.replay_to_daemon` (the bulk-replay
 helper that does the actual JSONL streaming).
 """
+
 from __future__ import annotations
 
 import asyncio

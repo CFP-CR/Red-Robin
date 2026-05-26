@@ -3,6 +3,7 @@
 We intentionally avoid testing the asyncio reconnect loop in unit tests; that
 is covered in the integration test that boots a real TestClient WS.
 """
+
 from __future__ import annotations
 
 import json

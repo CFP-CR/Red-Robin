@@ -1,4 +1,5 @@
 """OperatorDispatcher unit tests using httpx.MockTransport."""
+
 from __future__ import annotations
 
 import json
@@ -67,9 +68,7 @@ async def test_submit_omits_authorization_when_token_is_none():
 
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(transport=transport) as client:
-        dispatcher = OperatorDispatcher(
-            client=client, base_url="http://127.0.0.1:8765", token=None
-        )
+        dispatcher = OperatorDispatcher(client=client, base_url="http://127.0.0.1:8765", token=None)
         await dispatcher.submit("whoami")
 
     assert "authorization" not in {k.lower() for k in captured["req"].headers}
@@ -85,9 +84,7 @@ async def test_submit_body_includes_correlation_command_raw_and_bid():
 
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(transport=transport) as client:
-        dispatcher = OperatorDispatcher(
-            client=client, base_url="http://127.0.0.1:8765", token="t"
-        )
+        dispatcher = OperatorDispatcher(client=client, base_url="http://127.0.0.1:8765", token="t")
         await dispatcher.submit("ls /etc", beacon_id="B-1")
 
     body = captured["body"]
@@ -110,9 +107,7 @@ async def test_submit_uses_empty_bid_when_beacon_missing():
 
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(transport=transport) as client:
-        dispatcher = OperatorDispatcher(
-            client=client, base_url="http://127.0.0.1:8765", token=None
-        )
+        dispatcher = OperatorDispatcher(client=client, base_url="http://127.0.0.1:8765", token=None)
         await dispatcher.submit("ls")
 
     # Daemon's request model expects bid: str (required), so we default to ""
@@ -127,9 +122,7 @@ async def test_submit_raises_on_http_error():
 
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(transport=transport) as client:
-        dispatcher = OperatorDispatcher(
-            client=client, base_url="http://127.0.0.1:8765", token=None
-        )
+        dispatcher = OperatorDispatcher(client=client, base_url="http://127.0.0.1:8765", token=None)
         with pytest.raises(httpx.HTTPStatusError):
             await dispatcher.submit("whoami")
 
@@ -164,9 +157,7 @@ async def test_submit_generates_unique_correlation_per_call():
 
     transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(transport=transport) as client:
-        dispatcher = OperatorDispatcher(
-            client=client, base_url="http://127.0.0.1:8765", token=None
-        )
+        dispatcher = OperatorDispatcher(client=client, base_url="http://127.0.0.1:8765", token=None)
         await dispatcher.submit("a")
         await dispatcher.submit("b")
         await dispatcher.submit("c")

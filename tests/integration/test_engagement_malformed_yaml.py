@@ -10,6 +10,7 @@ References:
   - lifespan_helpers.py:start_engagement (current FileNotFoundError-only catch)
   - backlog.md #137 (defensive hardening — broaden exception handler)
 """
+
 from __future__ import annotations
 
 import pytest
@@ -48,8 +49,7 @@ def test_malformed_yaml_falls_back_to_wildcard_scope(isolated_root):
         # .active_engagement); that's acceptable — the contract is "don't
         # crash", not "scrub state".
         assert app.state.engagement is None, (
-            "malformed YAML must yield engagement=None (wildcard scope), "
-            "not propagate a crash"
+            "malformed YAML must yield engagement=None (wildcard scope), not propagate a crash"
         )
         # Wildcard scope is in_scope=['*'], out_of_scope=[]
         assert app.state.scope.in_scope == ["*"]

@@ -153,9 +153,7 @@ def _eval_match_predicate(p: MatchPredicate, ctx: EventContext) -> bool:
         # strips the command prefix, ``args`` alone would never match such a
         # rule. Other fields (integrity_level, user, …) are scalar so the
         # synthesis only applies to the ``args`` case.
-        search_target = (
-            f"{ctx.command} {field_value}" if p.field == "args" else field_value
-        )
+        search_target = f"{ctx.command} {field_value}" if p.field == "args" else field_value
         for pattern in p.values:
             if re.search(pattern, search_target):
                 return True

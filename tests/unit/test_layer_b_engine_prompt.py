@@ -79,9 +79,7 @@ def test_prompt_names_specific_recon_commands():
         "klist",
     )
     for cmd in recon_commands:
-        assert cmd in SYSTEM_PROMPT, (
-            f"recon command {cmd!r} missing from STANDARD_RECON allow-list"
-        )
+        assert cmd in SYSTEM_PROMPT, f"recon command {cmd!r} missing from STANDARD_RECON allow-list"
 
 
 def test_prompt_blocks_edr_tamper():

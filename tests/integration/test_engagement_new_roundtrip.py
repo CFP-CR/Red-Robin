@@ -6,6 +6,7 @@ Root cause (verified live 2026-05-25): the writer emitted `id` + nested
 silently dropped -> empty -> ScopeEnforcer deny-all on every targeted command.
 This test pins the writer and loader to ONE schema.
 """
+
 from __future__ import annotations
 
 from redrobin.application.engagement_loader import EngagementLoader
@@ -36,14 +37,12 @@ def test_new_writes_top_level_keys_not_nested_scope(tmp_path):
 
     svc = EngagementService(root=tmp_path)
     svc.new("acme-q2", in_scope=["corp.acme.local"])
-    data = yaml.safe_load(
-        (tmp_path / "engagements" / "acme-q2" / "engagement.yaml").read_text()
-    )
+    data = yaml.safe_load((tmp_path / "engagements" / "acme-q2" / "engagement.yaml").read_text())
     # The loader reads these top-level keys; the old writer used `id` + `scope:`.
     assert data["slug"] == "acme-q2"
     assert data["in_scope"] == ["corp.acme.local"]
     assert "scope" not in data  # no nested scope block
-    assert "id" not in data     # loader never read `id`
+    assert "id" not in data  # loader never read `id`
 
 
 def test_init_template_stays_loader_consumable(tmp_path):
@@ -55,9 +54,7 @@ def test_init_template_stays_loader_consumable(tmp_path):
 
     eng_dir = tmp_path / "engagements" / "op-default"
     eng_dir.mkdir(parents=True)
-    (eng_dir / "engagement.yaml").write_text(
-        _ENGAGEMENT_TEMPLATE.format(slug="op-default")
-    )
+    (eng_dir / "engagement.yaml").write_text(_ENGAGEMENT_TEMPLATE.format(slug="op-default"))
     eng = EngagementLoader(engagements_root=tmp_path / "engagements").load("op-default")
     assert eng.slug == "op-default"
     assert eng.in_scope  # template ships a non-empty example scope

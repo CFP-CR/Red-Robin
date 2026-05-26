@@ -12,6 +12,7 @@ Both now route through a tracked task factory plumbed onto
 (timeout 5s) and cancels stragglers. These tests verify the tracker is wired
 into both paths.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -92,8 +93,7 @@ async def test_escalate_verdict_tracks_layer_b_task(tmp_path, monkeypatch):
         # Allow a single tick for the asyncio scheduling to settle.
         await asyncio.sleep(0)
         assert len(app.state.background_tasks) > before, (
-            f"layer B task not tracked. before={before} "
-            f"after={len(app.state.background_tasks)}"
+            f"layer B task not tracked. before={before} after={len(app.state.background_tasks)}"
         )
         # Drain so shutdown isn't slowed by the SlowLayerB sleep.
         for task in list(app.state.background_tasks):

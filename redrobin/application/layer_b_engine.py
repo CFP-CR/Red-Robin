@@ -238,28 +238,21 @@ class LayerBEngine:
         # the session — only invalidated on engagement switch — so the 5min
         # ephemeral cache pays for itself across a single operator workflow.
         engagement_block = (
-            f"# Engagement Context\n{self._engagement_summary}"
-            if self._engagement_summary
-            else ""
+            f"# Engagement Context\n{self._engagement_summary}" if self._engagement_summary else ""
         )
         # Slice 13 — pull the latest L5 sliding-window summary for the
         # active engagement. The repo lookup is one indexed sqlite query
         # (engagement_id + LIMIT 1) per evaluate() — well below the per-call
         # LLM latency floor, so this stays a fixed-cost addition.
         recent_summary_block = ""
-        if (
-            self._summary_repo is not None
-            and self._engagement_id_provider is not None
-        ):
+        if self._summary_repo is not None and self._engagement_id_provider is not None:
             try:
                 eng_id = self._engagement_id_provider()
                 summaries = self._summary_repo.list_recent(eng_id, limit=1)
                 if summaries:
                     recent_summary_block = summaries[0].text
             except Exception:
-                logger.exception(
-                    "Layer B: failed to load recent summary; continuing without it"
-                )
+                logger.exception("Layer B: failed to load recent summary; continuing without it")
         # Reserved for future per-turn working memory (e.g., hosts seen this
         # tick). Today the daemon does not feed working memory into Layer B,
         # so dynamic_state stays empty and Anthropic skips the block entirely.

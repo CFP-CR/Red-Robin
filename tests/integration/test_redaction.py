@@ -5,6 +5,7 @@ secrets (passwords, NTLM hashes, emails, JWTs, AWS keys) in clear text.
 The redactor sanitizes the operator command *before* it is embedded in
 the user prompt — Anthropic never sees raw secrets on the wire.
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock
@@ -19,7 +20,7 @@ from redrobin.domain.llm import LLMResponse
 
 def test_redactor_masks_password_kv():
     r = Redactor()
-    out = r.redact('logonpasswords /password:Hunter2 /domain:CORP')
+    out = r.redact("logonpasswords /password:Hunter2 /domain:CORP")
     assert "Hunter2" not in out
     assert "[REDACTED:PASSWORD]" in out
 
@@ -76,7 +77,7 @@ async def test_layer_b_redacts_user_prompt():
     kb = _mock_kb()
     engine = LayerBEngine(llm=llm, kb=kb)
 
-    secret_cmd = 'logonpasswords /password:Hunter2'
+    secret_cmd = "logonpasswords /password:Hunter2"
     await engine.evaluate(command=secret_cmd, raw=secret_cmd)
 
     user_msg = captured.get("user_message", "")

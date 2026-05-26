@@ -1,5 +1,6 @@
 """#142: a loaded engagement with empty in_scope must surface LOUDLY, not
 silently deny-all. The daemon sets app.state.scope_empty and logs a WARNING."""
+
 from __future__ import annotations
 
 import logging

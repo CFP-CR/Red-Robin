@@ -16,6 +16,7 @@ interactive flow therefore:
 * Warns (but does not fail) when ``MSYSTEM`` is set, recommending Windows
   Terminal or PowerShell for secret entry.
 """
+
 from __future__ import annotations
 
 import getpass

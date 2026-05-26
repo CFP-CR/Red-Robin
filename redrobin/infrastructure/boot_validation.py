@@ -13,6 +13,7 @@ Callsites:
     ``require_root_exists=False`` so TestClient can boot the app without
     a real ``~/.redrobin`` on disk.
 """
+
 from __future__ import annotations
 
 import sys
@@ -40,8 +41,7 @@ def validate_for_boot(settings: Settings, *, require_root_exists: bool = False) 
     if not settings.anthropic_api_key:
         if settings.allow_degraded_layer_b:
             warnings.append(
-                "ANTHROPIC_API_KEY missing — running with degraded Layer B "
-                "(no LLM judgment)"
+                "ANTHROPIC_API_KEY missing — running with degraded Layer B (no LLM judgment)"
             )
         else:
             errors.append(
@@ -53,14 +53,12 @@ def validate_for_boot(settings: Settings, *, require_root_exists: bool = False) 
             warnings.append("VOYAGE_API_KEY missing — KB retrieval disabled")
         else:
             errors.append(
-                "VOYAGE_API_KEY required for KB retrieval. "
-                "Set it, or pass --allow-degraded."
+                "VOYAGE_API_KEY required for KB retrieval. Set it, or pass --allow-degraded."
             )
 
     if require_root_exists and not settings.root.is_dir():
         errors.append(
-            f"REDROBIN_ROOT does not exist: {settings.root}. "
-            "Run `redrobin init` to set it up."
+            f"REDROBIN_ROOT does not exist: {settings.root}. Run `redrobin init` to set it up."
         )
 
     if settings.engagement_slug:

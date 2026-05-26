@@ -6,6 +6,7 @@ The daemon's ``QuickVerdictRequest`` model requires ``bid``, ``command``, and
 the bus, so this is the same identifier the TUI uses to correlate Layer A and
 Layer B verdicts.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -21,9 +22,7 @@ class OperatorDispatcher:
     a single keep-alive connection.
     """
 
-    def __init__(
-        self, *, client: httpx.AsyncClient, base_url: str, token: str | None
-    ) -> None:
+    def __init__(self, *, client: httpx.AsyncClient, base_url: str, token: str | None) -> None:
         self._client = client
         self._base_url = base_url.rstrip("/")
         self._token = token

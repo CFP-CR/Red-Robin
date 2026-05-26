@@ -1,4 +1,5 @@
 """Slice 2: dotenv loads at CLI entry, NOT at import."""
+
 from __future__ import annotations
 
 import os
@@ -13,12 +14,19 @@ def test_dotenv_not_loaded_at_import(monkeypatch, tmp_path):
     (tmp_path / ".env").write_text("REDROBIN_TEST_DOTENV=loaded\n")
     # subprocess so the import side-effects (if any) are isolated
     result = subprocess.run(
-        [sys.executable, "-c",
-         "import os; import redrobin.cli; print(os.environ.get('REDROBIN_TEST_DOTENV', 'NOT_LOADED'))"],
-        capture_output=True, text=True, cwd=tmp_path,
+        [
+            sys.executable,
+            "-c",
+            "import os; import redrobin.cli; print(os.environ.get('REDROBIN_TEST_DOTENV', 'NOT_LOADED'))",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
     )
     assert result.returncode == 0, result.stderr
-    assert "NOT_LOADED" in result.stdout, "dotenv was loaded at import time — this breaks test isolation"
+    assert "NOT_LOADED" in result.stdout, (
+        "dotenv was loaded at import time — this breaks test isolation"
+    )
 
 
 def test_dotenv_loaded_when_doctor_invoked(monkeypatch, tmp_path):
@@ -34,6 +42,7 @@ def test_dotenv_loaded_when_doctor_invoked(monkeypatch, tmp_path):
     monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
 
     from redrobin.cli import cmd_doctor
+
     # Call positionally — the intent here is verifying dotenv-loaded
     # secrets reach Settings, not real network connectivity. Use quick=True
     # so Slice 6's network probes don't try to dial Anthropic/Voyage with
@@ -49,6 +58,7 @@ def test_explicit_env_wins_over_dotenv(monkeypatch, tmp_path):
     monkeypatch.setenv("REDROBIN_PORT", "7777")
 
     from redrobin.cli import _load_env_for_cli
+
     _load_env_for_cli()
     assert os.environ["REDROBIN_PORT"] == "7777"
 
@@ -65,6 +75,8 @@ def test_dotenv_does_NOT_walk_parent_dirs(monkeypatch, tmp_path):
     monkeypatch.chdir(cwd)
 
     from redrobin.cli import _load_env_for_cli
+
     _load_env_for_cli()
-    assert "REDROBIN_LEAKED_SECRET" not in os.environ, \
+    assert "REDROBIN_LEAKED_SECRET" not in os.environ, (
         "parent-directory .env must NOT be loaded — dotenv path must be pinned to CWD only"
+    )

@@ -109,8 +109,7 @@ def _warn_loose_perms(path: Path) -> None:
     if mode & (stat.S_IRGRP | stat.S_IROTH | stat.S_IWGRP | stat.S_IWOTH):
         perms = oct(mode & 0o777)[2:]
         print(
-            f"WARN: {path} has loose permissions ({perms}); "
-            f"recommended 600 (chmod 600 {path})",
+            f"WARN: {path} has loose permissions ({perms}); recommended 600 (chmod 600 {path})",
             file=sys.stderr,
         )
 

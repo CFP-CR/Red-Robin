@@ -1,4 +1,5 @@
 """Slice 2 integration: in-process pub/sub bus with bounded queue fan-out."""
+
 from __future__ import annotations
 
 import asyncio
