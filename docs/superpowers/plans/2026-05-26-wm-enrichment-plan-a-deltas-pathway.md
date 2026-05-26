@@ -27,6 +27,8 @@
 
 **Out of scope for Plan A (Plan B):** `EnrichmentTrigger`, chunker, `DeltaParser` (JSON-string parsing), `WorkingMemoryEnricher`, the Haiku LLM client, lifespan wiring of the enricher, observability events, and **deleting** the regex + `upsert_host`/`upsert_credential`. Plan A only builds + wires the *receiver*.
 
+**Cross-plan contract (so Plan B's producer matches Task 5's consumer):** the Enricher must publish `{"type": "working_memory.deltas", "payload": {"source_beacon_id": <bid|null>, "hosts": [...], "credentials": [...], "findings": [...], "tools_used": [...], "defenses_observed": [...]}}` — `source_beacon_id` is a top-level key (system-supplied; the reducer reads it from there and ignores per-item values), and the five arrays are exactly `WorkingMemoryDeltas.to_payload()`.
+
 ---
 
 ### Task 1: Extend `Host` schema (domain + NIC IPs + OS version)
@@ -762,7 +764,7 @@ git commit -m "feat(reducer): handle working_memory.deltas events via apply_delt
 
 - [ ] **Step 1: Run the full test suite**
 
-Run: `uv run pytest -q`
+Run: `uv run pytest tests/` (CI runs `uv run pytest tests/ -v --tb=short`)
 Expected: PASS — the prior suite count + 12 new tests (2 Host + 2 Credential + 4 deltas + 3 apply_deltas + 1 reducer), 0 failures. The pre-existing `test_beacon_command_output_*` reducer tests still pass (regex path untouched).
 
 - [ ] **Step 2: Run the static gates**
@@ -771,10 +773,10 @@ Run:
 ```bash
 uv run ruff check .
 uv run ruff format --check .
-uv run mypy redrobin
-uv run lint-imports
+uv run mypy redrobin/domain redrobin/application
+uv run lint-imports --config importlinter.cfg
 ```
-Expected: all clean. (If `ruff format --check` flags the new code, run `uv run ruff format .` and re-commit. `mypy`: `WorkingMemoryDeltas.from_payload` takes `Any` and returns the typed object — no `# type: ignore` needed. `lint-imports`: `WorkingMemoryDeltas` is in `domain`, so the infra repo importing it satisfies the contracts.)
+Expected: all clean. **These are the exact CI gates (`.github/workflows/ci.yml`).** Notes: CI scopes mypy to `redrobin/domain redrobin/application` (NOT all of `redrobin`) — `WorkingMemoryDeltas.from_payload` (domain) takes `Any` and returns a typed object, and the reducer handler (application) is plain dict access, so neither needs `# type: ignore`. `lint-imports` **REQUIRES `--config importlinter.cfg`** (non-default config filename — bare `lint-imports` finds no contracts). `WorkingMemoryDeltas` is in `domain`, and `importlinter.cfg` forbids only domain→infra (`no-infra-from-domain`), NOT infra→domain, so the infra repo importing it passes every contract. If `ruff format --check` flags the new code, run `uv run ruff format .` and re-commit.
 
 - [ ] **Step 3: Commit any formatting fixups**
 
