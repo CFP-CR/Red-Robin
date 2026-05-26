@@ -44,9 +44,12 @@ Run:
 ```bash
 cd /c/Users/jcspi/Documents/dev-projects/Red-Robin
 uv add textual
+uv add websockets
 uv add --group dev pytest-textual-snapshot
 ```
-Expected: resolves and installs; `pyproject.toml` gains `textual` under `[project] dependencies` and `pytest-textual-snapshot` under the dev group; `uv.lock` updates.
+Expected: resolves and installs; `pyproject.toml` gains `textual` + `websockets` under `[project] dependencies` and `pytest-textual-snapshot` under the dev group; `uv.lock` updates.
+
+> **Audit notes:** `websockets` was previously only a *transitive* dep of `uvicorn` (16.0) — `ws_worker.py` imports it directly, so we declare it honestly. `pytest-asyncio>=0.23` is **already** a dev dep and the repo runs pytest in **strict** asyncio mode, so every async Pilot test below keeps its explicit `@pytest.mark.asyncio` marker — **no global pytest-config change.**
 
 - [ ] **Step 2: Verify the import works**
 
@@ -75,6 +78,11 @@ Create `redrobin/tui/textual_ui/__init__.py`:
 ```python
 """Textual TUI client (Phase 1 foundation). Built alongside the legacy
 prompt_toolkit client in ``redrobin/tui/``; the entrypoint swaps in Phase 6."""
+```
+
+Also create the **empty** test package marker (this repo packages its test dirs — every sibling under `tests/unit/` has an `__init__.py`, and there is no `conftest.py` to normalize import modes, so the marker is required for clean collection):
+```bash
+mkdir -p tests/unit/tui_textual && : > tests/unit/tui_textual/__init__.py
 ```
 
 - [ ] **Step 2: Write the failing test**
@@ -185,7 +193,7 @@ Expected: 4 passed.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add redrobin/tui/textual_ui/__init__.py redrobin/tui/textual_ui/frames.py tests/unit/tui_textual/test_frames.py
+git add redrobin/tui/textual_ui/__init__.py redrobin/tui/textual_ui/frames.py tests/unit/tui_textual/__init__.py tests/unit/tui_textual/test_frames.py
 git commit -m "feat(tui): generic frame-routing registry (extensibility seam)"
 ```
 
@@ -391,7 +399,7 @@ async def test_snapshot_frame_updates_state_and_topbar():
         assert app.snapshot.get("engagement_id") == "e2e-verify"
         from textual.widgets import Static
         topbar = app.query_one("#topbar", Static)
-        assert "e2e-verify" in topbar.renderable  # type: ignore[arg-type]
+        assert "e2e-verify" in str(topbar.content)  # Static exposes .content (NOT .renderable)
 
 
 @pytest.mark.asyncio
