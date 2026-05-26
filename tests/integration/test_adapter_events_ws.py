@@ -22,6 +22,9 @@ from redrobin.infrastructure.transport.bearer import get_or_create_token
 @pytest.fixture()
 def app_client(tmp_path, monkeypatch):
     monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
+    # Degraded boot: with no API keys (CI + local), validate_for_boot() would
+    # SystemExit(2). Opt into degraded mode like the e2e/contract daemon fixtures.
+    monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
     app = create_app()
     with TestClient(app) as client:
         yield app, client
