@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlencode
 
 from websockets.asyncio.client import connect
@@ -45,11 +45,18 @@ async def ws_loop(
     token: str | None,
     registry: Registry,
     stop_event: asyncio.Event,
+    set_state: Callable[[str], None] | None = None,
 ) -> None:
     """Auto-reconnecting consumer. ``target`` is the RedRobinApp; ``registry``
-    routes frames to handlers that set its reactive state."""
+    routes frames to handlers that set its reactive state. ``set_state`` (optional)
+    receives ``"connecting"``/``"connected"`` as the socket transitions so the UI
+    can show daemon-connection status."""
     full = build_ws_url(url, token)
+    if set_state:
+        set_state("connecting")
     async for ws in connect(full, ping_interval=20, ping_timeout=20):
+        if set_state:
+            set_state("connected")
         try:
             async for raw in ws:
                 if stop_event.is_set():
@@ -59,6 +66,8 @@ async def ws_loop(
                 handle_raw(target=target, raw=raw, registry=registry)
         except Exception as exc:
             logger.warning("ws_worker reconnecting after error: %s", exc)
+            if set_state:
+                set_state("connecting")
             if stop_event.is_set():
                 return
             continue
