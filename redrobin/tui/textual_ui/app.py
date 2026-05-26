@@ -14,8 +14,9 @@ import os
 from textual.app import App, ComposeResult, ScreenStackError
 from textual.containers import Container, Horizontal
 from textual.css.query import NoMatches
+from textual.events import Resize
 from textual.reactive import reactive
-from textual.widgets import Footer
+from textual.widgets import Footer, Static
 
 from redrobin.tui.textual_ui.frames import Registry
 from redrobin.tui.textual_ui.panels import (
@@ -30,6 +31,11 @@ from redrobin.tui.textual_ui.panels import (
 # Module-level registry: handlers register at import time (Task 5). A future
 # feature adds its frame type with a new @REGISTRY.register — no edits here.
 REGISTRY = Registry()
+
+
+def is_too_small(width: int, height: int) -> bool:
+    """The dashboard needs at least 80x24 to lay out the three panes legibly."""
+    return width < 80 or height < 24
 
 
 class RedRobinApp(App):
@@ -66,6 +72,7 @@ class RedRobinApp(App):
                 memory_box.border_title = "Working Memory"
                 yield MemoryPanel(id="memory-panel")
         yield Container(id="advisor-dock")  # reserved seam (hidden via .tcss)
+        yield Static("Terminal too small — resize to at least 80x24.", id="resize-hint")
         yield Footer()
 
     def watch_snapshot(self, snapshot: dict) -> None:
@@ -131,6 +138,18 @@ class RedRobinApp(App):
         stop = getattr(self, "_stop_event", None)
         if stop is not None:
             stop.set()
+
+    def on_resize(self, event: Resize) -> None:
+        self._apply_responsive(event.size.width, event.size.height)
+
+    def _apply_responsive(self, width: int, height: int) -> None:
+        """Below 80x24 the panes can't lay out — show a hint and hide the dashboard."""
+        too_small = is_too_small(width, height)
+        try:
+            self.query_one("#resize-hint").display = too_small
+            self.query_one("#main").display = not too_small
+        except (NoMatches, ScreenStackError):
+            pass
 
 
 @REGISTRY.register("working_memory_snapshot")

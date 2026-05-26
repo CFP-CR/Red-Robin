@@ -44,3 +44,18 @@ Screen {
     height: auto;
     border-top: heavy $accent;
 }
+
+/* Below the 80x24 minimum: a centered hint replaces the dashboard (toggled in code). */
+#resize-hint {
+    display: none;
+    width: 100%;
+    height: 100%;
+    content-align: center middle;
+    color: $status-warn;
+    text-style: bold;
+}
+
+/* Focus affordance: the focused pane gets the accent border (accent = interaction only). */
+#main > Container:focus-within {
+    border: round $accent;
+}
