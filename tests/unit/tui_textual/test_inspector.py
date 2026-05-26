@@ -1,6 +1,6 @@
 import pytest
 from textual.app import App, ComposeResult
-from textual.widgets import OptionList
+from textual.widgets import Input, OptionList
 
 from redrobin.tui.textual_ui import inspector
 
@@ -165,3 +165,38 @@ async def test_inspector_escape_dismisses():
         await pilot.press("escape")
         await pilot.pause()
         assert app.screen.__class__.__name__ != "InspectorScreen"
+
+
+@pytest.mark.asyncio
+async def test_inspector_filter_narrows_content():
+    app = _Host(SNAP)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        nav = screen.query_one("#inspector-nav", OptionList)
+        nav.highlighted = [k for k, _ in inspector.SECTIONS].index("findings")
+        await pilot.pause()
+        screen.query_one("#inspector-filter", Input).value = "kerberos"
+        await pilot.pause()
+        content = screen.query_one("#inspector-content", OptionList)
+        prompts = [str(content.get_option_at_index(i).prompt) for i in range(content.option_count)]
+        assert any("kerberos" in p.lower() for p in prompts)
+        assert not any("opsec_block" in p for p in prompts)
+
+
+@pytest.mark.asyncio
+async def test_inspector_group_toggle_groups_findings():
+    app = _Host(SNAP)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        screen = app.screen
+        nav = screen.query_one("#inspector-nav", OptionList)
+        nav.highlighted = [k for k, _ in inspector.SECTIONS].index("findings")
+        await pilot.pause()
+        # nav (an OptionList) doesn't consume 'g' → it bubbles to the screen binding
+        # (verified: a focused OptionList passes letter keys through to BINDINGS).
+        await pilot.press("g")  # None -> kind
+        await pilot.pause()
+        content = screen.query_one("#inspector-content", OptionList)
+        prompts = [str(content.get_option_at_index(i).prompt) for i in range(content.option_count)]
+        assert any(p.startswith("── ") for p in prompts)  # a group sub-header appeared
