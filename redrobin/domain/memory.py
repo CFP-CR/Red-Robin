@@ -179,8 +179,7 @@ class ContextSummary:
 
 def working_memory_to_snapshot(wm: WorkingMemory) -> dict[str, Any]:
     """Serialize a :class:`WorkingMemory` to the WS ``working_memory_snapshot``
-    payload dict — the inverse of
-    ``redrobin.tui.snapshot_adapter.working_memory_from_snapshot``.
+    payload dict (consumed directly by the Textual TUI client).
 
     Single source of truth for BOTH the connect-time snapshot
     (``tui_ws._build_initial_snapshot``) and the reducer's live re-emit

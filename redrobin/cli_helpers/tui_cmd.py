@@ -31,7 +31,10 @@ def run_tui(
     connect_http: str,
     token: str | None,
 ) -> int:
-    from redrobin.tui.app import run_tui as _run_tui
+    # The Textual client is a read-only WS observer — it consumes the daemon's
+    # /v1/tui stream and never POSTs commands, so connect_http is unused here
+    # (kept in the signature for CLI compatibility).
+    from redrobin.tui.textual_ui.app import RedRobinApp
 
-    _run_tui(connect_ws=connect_ws, connect_http=connect_http, token=token)
+    RedRobinApp(ws_url=connect_ws, token=token).run()
     return 0
