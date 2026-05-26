@@ -81,6 +81,10 @@ class RedRobinApp(App):
             ),
             name="ws",
             exclusive=True,
+            # A fatal connect error (e.g. the daemon closes /v1/tui with 1008 on a
+            # bad/missing token) must NOT tear down the app. Keep it alive; Phase 3
+            # surfaces connection state in the topbar status dot.
+            exit_on_error=False,
         )
 
     def on_unmount(self) -> None:
