@@ -218,3 +218,30 @@ async def test_topbar_widget_renders_status():
         content = str(bar.content)
         assert "acme" in content
         assert "1 BLOCK" in content
+
+
+def test_format_memory_marks_out_of_scope_red():
+    out = panels.format_memory(
+        {
+            "current_phase": "recon",
+            "scope_in_scope": ["EC2AMAZ", "10.100.0.0/24"],
+            "scope_out_of_scope": ["10.99.0.0/16"],
+            "hosts": [{}],
+            "credentials": [{}],
+            "findings": [{}, {}],
+        }
+    )
+    assert isinstance(out, Text)
+    plain = out.plain
+    # Text content is preserved (same fields the plain renderer showed).
+    assert "recon" in plain
+    assert "EC2AMAZ" in plain
+    assert "10.99.0.0/16" in plain
+    assert "findings 2" in plain
+    # The out-of-scope value carries the $scope-out red style.
+    assert any(panels._SCOPE_OUT in str(span.style) for span in out.spans)
+
+
+def test_format_memory_empty_scope_is_graceful():
+    out = panels.format_memory({})
+    assert "(none)" in out.plain

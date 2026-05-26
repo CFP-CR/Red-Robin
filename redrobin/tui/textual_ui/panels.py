@@ -28,6 +28,7 @@ _STATUS_COLORS: dict[str, str] = {
     "connecting": "#e3b341",
     "disconnected": "#f85149",
 }
+_SCOPE_OUT = "#f85149"  # mirror $scope-out in theme.tcss
 _MAX_EVENTS = 500
 
 
@@ -132,23 +133,28 @@ class EventsLog(RichLog):
             self.write(format_verdict(payload))
 
 
+def format_memory(snapshot: dict[str, Any]) -> Text:
+    """Working-memory summary as Rich Text: phase, scope (out-of-scope in red), counts.
+    Same text the plain renderer produced; out-of-scope now styled with $scope-out."""
+    in_scope = snapshot.get("scope_in_scope") or []
+    out_scope = snapshot.get("scope_out_of_scope") or []
+    phase = snapshot.get("current_phase") or "-"
+    hosts = len(snapshot.get("hosts") or [])
+    creds = len(snapshot.get("credentials") or [])
+    finds = len(snapshot.get("findings") or [])
+    text = Text()
+    text.append(f"phase   {phase}\n\n")
+    text.append("SCOPE\n", style=_MUTED)
+    text.append(f"  in   {', '.join(in_scope) if in_scope else '(none)'}\n")
+    text.append("  out  ")
+    text.append(f"{', '.join(out_scope) if out_scope else '(none)'}\n", style=_SCOPE_OUT)
+    text.append("\n")
+    text.append(f"hosts {hosts}   creds {creds}   findings {finds}")
+    return text
+
+
 class MemoryPanel(Static):
     """Working-memory summary: phase, scope (in/out), and counts."""
 
     def update_from_snapshot(self, snapshot: dict[str, Any]) -> None:
-        in_scope = snapshot.get("scope_in_scope") or []
-        out_scope = snapshot.get("scope_out_of_scope") or []
-        phase = snapshot.get("current_phase") or "-"
-        hosts = len(snapshot.get("hosts") or [])
-        creds = len(snapshot.get("credentials") or [])
-        finds = len(snapshot.get("findings") or [])
-        lines = [
-            f"phase   {phase}",
-            "",
-            "SCOPE",
-            f"  in   {', '.join(in_scope) if in_scope else '(none)'}",
-            f"  out  {', '.join(out_scope) if out_scope else '(none)'}",
-            "",
-            f"hosts {hosts}   creds {creds}   findings {finds}",
-        ]
-        self.update("\n".join(lines))
+        self.update(format_memory(snapshot))
