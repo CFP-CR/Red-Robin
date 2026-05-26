@@ -8,18 +8,22 @@ Live tracker of **open work**. Resolved history + deep per-issue detail live in 
 ---
 
 ## Now / Next
-**TUI hardening + UX (P1)** — next branch off `dev-juan`. Plan I shipped the live-state *plumbing* (daemon-side verified); this branch makes the TUI genuinely usable: (1) **#155** client-render repaint, (2) a **TUI UX best-practices pass** *(scoping in progress)*, (3) **#156** WM-seed from `engagement.yaml`. *"If it doesn't look good there's no point having a TUI."*
+**TUI → Textual redesign (P1)** — branch `tui/textual-redesign` (off `dev-juan`). Migrate `redrobin/tui/` prompt_toolkit → **Textual** (spec `specs/2026-05-25-tui-textual-redesign-design.md`; 6-phase breakdown). **#155 dissolves** via reactive render; **#156** (WM-seed) lands in Phase 6. **Phase 1 (foundation) ✅ shipped** — app shell + theme + WS worker + reactive store + frame registry + reserved advisor-dock seam (15 new tests; 492 suite green, 0 regressions). **Next: Phase 2 (panels).**
 
 ---
 
 ## Open — Plans (TUI next, then J–K)
 
-### TUI hardening + UX · P1 · core operator UX  *(next branch off `dev-juan`)*
-> Plan I shipped the live-state plumbing (#139/#140/#143/#146 ✅, daemon-side verified via live smoke + WS probe). This branch makes it actually *usable*. Detail: [backlog.md](./backlog.md) (#155/#156).
-- [ ] **#155** — TUI client doesn't always repaint delivered frames. Daemon pushes live `opsec.verdict` + `working_memory_snapshot` (probe-verified, wm.json 148→149→150); the prompt_toolkit client doesn't reflect them (intermittent — first frame repainted, later didn't, ~after inspector opened). NOT in Plan I's changed files → likely pre-existing client-render/`invalidate` bug. Root-cause then fix.
-- [ ] **TUI UX best-practices pass** — research + apply: layout/density, color & contrast, overflow/wrap (cf. #148), keybinding discoverability, status/help affordances, responsiveness, empty-states. *Scoping in progress.*
-- [ ] **#156** — WorkingMemory not seeded from `engagement.yaml`: Inspector shows `Client: X` / `in_scope []` / ROE & objectives empty though the engagement config has them (ScopeEnforcer reads the yaml directly; WM is a separate store never seeded). Seed `WM.client/scope_in_scope/scope_out_of_scope/rules_of_engagement/objectives` at engagement load.
-- **Accept:** live updates visible WITHOUT reconnect; engagement scope/client/ROE shown in Inspector; TUI reads clean + usable. *(Live-beacon + visual smoke.)*
+### TUI → Textual redesign · P1 · core operator UX  *(branch `tui/textual-redesign`)*
+> Migrating `redrobin/tui/` to **Textual** (the production-grade Python TUI framework; research + in-domain market validated). Spec: [specs/2026-05-25-tui-textual-redesign-design.md](./specs/2026-05-25-tui-textual-redesign-design.md). 6 phases, each its own writing→auditing→subagent-driven→smoke cycle. Built ALONGSIDE the legacy prompt_toolkit client; entrypoint swap is Phase 6.
+- [x] **Phase 1 — foundation** ✅ — `redrobin/tui/textual_ui/`: app shell + `theme.tcss` tokens + frame-routing registry (seam) + reactive store + WS worker + reserved `#advisor-dock`. **#155 dissolves** (reactive render; daemon↔registry contract test green). Plan: [plans/2026-05-25-tui-textual-foundation.md](./plans/2026-05-25-tui-textual-foundation.md). *(audit-clean; 15 tests; 492 suite green.)*
+- [ ] **Phase 2 — panels** — Sessions `DataTable`; Verdicts/Events `RichLog` (color-coded, Layer B in-place correction by correlation_id, no raw JSON → **fixes #148**); Working Memory pane — all bound to the reactive store.
+- [ ] **Phase 3 — color + chrome** — apply `$verdict-*` tokens; TopBar status (connection ● + verdict counts); Footer; 16-color fallback; responsive min-80×24.
+- [ ] **Phase 4 — Inspector `ModalScreen`** — section nav + counts, filter/search, group-by kind|beacon, scroll, copy-row (tames the 148-findings dump).
+- [ ] **Phase 5 — navigation** — Command Palette providers (seam) + `BINDINGS` + `?` help/keymap + focus model.
+- [ ] **Phase 6 — #156 + entrypoint swap** — seed `WorkingMemory` from `engagement.yaml` at load (daemon-side) + swap `redrobin tui` → the Textual app + retire the legacy prompt_toolkit client.
+- [ ] **(future, separate plan)** — AI Advisor *logic* (UI mapped in the spec §3.6; bus-subscriber LLM agent reacting to WM+lessons+notes → next-step recommendations; can't bypass the gate). Its seam (frame-routing registry + `#advisor-dock`) is reserved by Phase 1.
+- **Accept (per phase):** tests green + live operator smoke. Final: TUI visibly updates live (no reconnect), verdicts color-coded, Inspector scroll/filter, engagement scope/client/ROE shown.
 
 ### Plan J · P2 · robustness
 - [ ] **#145** — kerberos finding false-positive (fires on `Cached Tickets: (0)`).

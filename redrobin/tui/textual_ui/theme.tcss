@@ -1,0 +1,46 @@
+/* Centralized semantic tokens — referenced by function, not appearance.
+   16-color-safe: widgets pair color with text + weight, so meaning survives
+   non-truecolor terminals and color-blindness. Accent is reserved for focus. */
+$verdict-block: #f85149;
+$verdict-warn: #e3b341;
+$verdict-pass: #3fb950;
+$verdict-escalate: #58a6ff;
+$sev-high: #f0883e;
+$scope-out: #f85149;
+$status-ok: #3fb950;
+$status-warn: #e3b341;
+$status-err: #f85149;
+$accent: #58a6ff;
+$text-muted: #8b949e;
+
+Screen {
+    layout: vertical;
+}
+
+#topbar {
+    dock: top;
+    height: 1;
+    background: $panel;
+    color: $text;
+}
+
+#main {
+    height: 1fr;
+}
+
+#main > Container {
+    border: round $panel-lighten-2;
+    width: 1fr;
+}
+
+#sessions { width: 2fr; }
+#events { width: 3fr; }
+#memory { width: 2fr; }
+
+/* Reserved seam for the future AI Advisor (Phase S6). Present but hidden. */
+#advisor-dock {
+    display: none;
+    dock: bottom;
+    height: auto;
+    border-top: heavy $accent;
+}
