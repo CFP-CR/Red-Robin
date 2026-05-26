@@ -45,3 +45,20 @@ def test_save_creates_parent_dirs(tmp_path):
 def test_exists_returns_false_for_missing_file(tmp_path):
     repo = WorkingMemoryRepo(tmp_path / "nope.json")
     assert repo.exists() is False
+
+
+def test_save_leaves_no_temp_file(tmp_path):
+    """Atomic save() cleans up its temp via the replace — no leftover .tmp."""
+    repo = WorkingMemoryRepo(tmp_path / "wm.json")
+    repo.save(WorkingMemory(engagement_id="acme"))
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_save_overwrites_stale_temp_file(tmp_path):
+    """A leftover temp from a crashed prior save must not break the next save."""
+    target = tmp_path / "wm.json"
+    (tmp_path / "wm.json.tmp").write_text("garbage-half-write")
+    repo = WorkingMemoryRepo(target)
+    repo.save(WorkingMemory(engagement_id="acme"))
+    assert repo.load().engagement_id == "acme"
+    assert list(tmp_path.glob("*.tmp")) == []
