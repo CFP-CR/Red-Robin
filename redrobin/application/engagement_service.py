@@ -23,6 +23,7 @@ from pathlib import Path
 import yaml  # type: ignore[import-untyped]
 
 from redrobin.application.engagement_loader import Engagement
+from redrobin.application.working_memory_seed import apply_engagement_scope
 from redrobin.domain.engagement import validate_slug
 from redrobin.domain.memory import WorkingMemory
 from redrobin.infrastructure.filesystem import redrobin_root
@@ -89,7 +90,7 @@ class EngagementService:
         # Initialize empty working memory (objectives/phase/etc. live HERE, not
         # in engagement.yaml).
         WorkingMemoryRepo(path / "working_memory.json").save(
-            WorkingMemory(engagement_id=slug, client=client)
+            apply_engagement_scope(WorkingMemory(engagement_id=slug), eng)
         )
 
         return eng

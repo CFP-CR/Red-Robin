@@ -46,6 +46,7 @@ from redrobin.application.verdict_pipeline_factory import (
 )
 from redrobin.application.working_memory_lifecycle import WorkingMemory, WorkingMemoryRepo
 from redrobin.application.working_memory_reducer import WorkingMemoryReducer
+from redrobin.application.working_memory_seed import apply_engagement_scope
 
 logger = logging.getLogger(__name__)
 
@@ -153,10 +154,18 @@ async def start_working_memory(
     app.state.working_memory_repo = working_memory_repo
     app.state.engagement_id = engagement_id
 
-    # Seed an empty working memory file if none exists so the reducer's
-    # synchronous load → mutate → save cycle has something to read on the
-    # first event.
-    if not working_memory_repo.exists():
+    # Seed working memory. With an active engagement, project its client + scope
+    # onto the WM (#156) so the TUI shows real scope, not (none) — refreshed on
+    # every load since engagement.yaml is the source of truth. Degraded mode (no
+    # engagement) just seeds an empty WM if missing, preserving prior behavior.
+    if active_engagement is not None:
+        wm = (
+            working_memory_repo.load()
+            if working_memory_repo.exists()
+            else WorkingMemory(engagement_id=engagement_id)
+        )
+        working_memory_repo.save(apply_engagement_scope(wm, active_engagement))
+    elif not working_memory_repo.exists():
         working_memory_repo.save(WorkingMemory(engagement_id=engagement_id))
 
     # Longterm + summary repos stay at root paths by design — they're
