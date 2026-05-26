@@ -99,3 +99,23 @@ InspectorScreen {
 #inspector-filter {
     height: 3;
 }
+
+/* Help modal (Phase 5): a small centered keymap overlay. */
+HelpScreen {
+    align: center middle;
+}
+#help {
+    width: 60;
+    height: auto;
+    max-height: 90%;
+    background: $panel;
+    border: round $accent;
+    padding: 1 2;
+}
+#help-title {
+    text-style: bold;
+    color: $text;
+}
+#help-hint {
+    color: $text-muted;
+}

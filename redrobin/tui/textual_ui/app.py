@@ -18,7 +18,9 @@ from textual.events import Resize
 from textual.reactive import reactive
 from textual.widgets import Footer, Static
 
+from redrobin.tui.textual_ui.commands import RedRobinCommands
 from redrobin.tui.textual_ui.frames import Registry
+from redrobin.tui.textual_ui.help_screen import HelpScreen
 from redrobin.tui.textual_ui.inspector import InspectorScreen
 from redrobin.tui.textual_ui.panels import (
     EventsLog,
@@ -42,7 +44,12 @@ def is_too_small(width: int, height: int) -> bool:
 class RedRobinApp(App):
     CSS_PATH = "theme.tcss"
     TITLE = "Red Robin"
-    BINDINGS = [("q", "quit", "Quit"), ("i", "inspect", "Inspector")]
+    BINDINGS = [
+        ("q", "quit", "Quit"),
+        ("i", "inspect", "Inspector"),
+        ("question_mark", "help", "Help"),
+    ]
+    COMMANDS = App.COMMANDS | {RedRobinCommands}
 
     snapshot: reactive[dict] = reactive(dict)
     events: reactive[list] = reactive(list)
@@ -115,6 +122,10 @@ class RedRobinApp(App):
     def action_inspect(self) -> None:
         """Open the Inspector modal over the current working-memory snapshot."""
         self.push_screen(InspectorScreen(self.snapshot))
+
+    def action_help(self) -> None:
+        """Open the keymap help overlay."""
+        self.push_screen(HelpScreen())
 
     def on_mount(self) -> None:
         """Start the WS worker unless disabled (tests pass start_worker=False)."""

@@ -156,5 +156,7 @@ def format_memory(snapshot: dict[str, Any]) -> Text:
 class MemoryPanel(Static):
     """Working-memory summary: phase, scope (in/out), and counts."""
 
+    can_focus = True
+
     def update_from_snapshot(self, snapshot: dict[str, Any]) -> None:
         self.update(format_memory(snapshot))
