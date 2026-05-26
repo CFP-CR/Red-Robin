@@ -18,6 +18,7 @@ from textual.events import Resize
 from textual.reactive import reactive
 from textual.widgets import Footer, Static
 
+from redrobin.tui.textual_ui.commands import RedRobinCommands
 from redrobin.tui.textual_ui.frames import Registry
 from redrobin.tui.textual_ui.help_screen import HelpScreen
 from redrobin.tui.textual_ui.inspector import InspectorScreen
@@ -48,6 +49,7 @@ class RedRobinApp(App):
         ("i", "inspect", "Inspector"),
         ("question_mark", "help", "Help"),
     ]
+    COMMANDS = App.COMMANDS | {RedRobinCommands}
 
     snapshot: reactive[dict] = reactive(dict)
     events: reactive[list] = reactive(list)
