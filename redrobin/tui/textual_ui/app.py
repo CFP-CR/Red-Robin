@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal
+from textual.css.query import NoMatches
 from textual.reactive import reactive
 from textual.widgets import Footer, Static
 
@@ -48,3 +49,24 @@ class RedRobinApp(App):
             yield Container(Static("Working Memory"), id="memory")
         yield Container(id="advisor-dock")  # reserved seam (hidden via .tcss)
         yield Footer()
+
+    def watch_snapshot(self, snapshot: dict) -> None:
+        """Re-render the topbar when the snapshot changes. No invalidate() —
+        Textual repaints bound widgets automatically (this is why #155 cannot
+        recur: there is no manual repaint path to miss)."""
+        engagement = snapshot.get("engagement_id") or "-"
+        try:
+            self.query_one("#topbar", Static).update(f"Red Robin · {engagement} · ●")
+        except NoMatches:
+            pass  # snapshot set before mount; compose() seeds the static text
+
+
+@REGISTRY.register("working_memory_snapshot")
+def _on_snapshot(app: "RedRobinApp", payload: dict) -> None:
+    app.snapshot = payload  # reactive assignment → watch_snapshot fires
+
+
+@REGISTRY.register("opsec.verdict")
+def _on_verdict(app: "RedRobinApp", payload: dict) -> None:
+    # Reassign (not append) so the reactive watcher sees the change.
+    app.events = app.events + [payload]
