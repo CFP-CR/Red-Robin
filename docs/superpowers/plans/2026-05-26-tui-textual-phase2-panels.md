@@ -22,6 +22,7 @@
 | `redrobin/tui/textual_ui/app.py` | **MODIFY.** `compose` mounts the 3 widgets (in the existing `#sessions`/`#events`/`#memory` Containers, with border titles); `watch_snapshot` also refreshes Sessions + Memory; new `watch_events` refreshes EventsLog; `_on_verdict` uses `apply_verdict`. |
 | `tests/unit/tui_textual/test_panels.py` | **NEW.** Pure-helper unit tests (`format_verdict`, `apply_verdict`) + Pilot widget tests (populate from snapshot/events). |
 | `tests/unit/tui_textual/test_app_phase2.py` | **NEW.** Pilot integration: a snapshot frame populates Sessions+Memory; verdict frames populate Events incl. Layer-B in-place correction. |
+| `tests/unit/tui_textual/test_phase2_snapshot.py` | **NEW.** `pytest-textual-snapshot` SVG baseline of the populated dashboard (visual regression). |
 
 The legacy `redrobin/tui/*.py` is untouched.
 
@@ -568,15 +569,17 @@ git commit -m "test(tui): frames populate Sessions/Memory + Layer-B in-place ver
 
 Create `tests/unit/tui_textual/test_phase2_snapshot.py`:
 ```python
-import pytest
-
 from redrobin.tui.textual_ui.app import REGISTRY, RedRobinApp
 
 
-@pytest.mark.asyncio
-async def test_dashboard_snapshot(snap_compare):
-    """SVG snapshot of the dashboard with sample data. On first run this
-    creates the baseline; later runs diff against it (catches visual regressions)."""
+def test_dashboard_snapshot(snap_compare):
+    """SVG snapshot of the dashboard with sample data. On first run this creates
+    the baseline; later runs diff against it (catches visual regressions).
+
+    SYNC test ON PURPOSE: ``pytest-textual-snapshot``'s ``snap_compare`` drives
+    its OWN event loop (it runs the async ``run_before`` itself), so wrapping
+    this in ``@pytest.mark.asyncio`` / ``async def`` would nest event loops and
+    raise a RuntimeError. (Unlike the Pilot tests, which DO need the marker.)"""
     app = RedRobinApp(start_worker=False)
 
     async def _seed(pilot):
