@@ -13,6 +13,7 @@ The matching test sends ``integrity_level: "High"`` so both predicates fire;
 the negative test omits that field so the IntegrityLevel predicate evaluates
 to ``False`` (a missing context field never matches, per Sigma semantics).
 """
+
 from __future__ import annotations
 
 import pytest

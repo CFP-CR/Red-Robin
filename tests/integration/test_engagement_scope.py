@@ -1,4 +1,5 @@
 """Slice 6 integration: engagement.yaml → ScopeEnforcer."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -20,17 +21,17 @@ def _write_engagement(
     (eng_dir / "engagement.yaml").write_text(
         f"slug: {slug}\n"
         "name: Test Engagement\n"
-        "in_scope:\n" + "".join(f"  - {x}\n" for x in in_scope)
-        + "out_of_scope:\n" + "".join(f"  - {x}\n" for x in out_of_scope)
+        "in_scope:\n"
+        + "".join(f"  - {x}\n" for x in in_scope)
+        + "out_of_scope:\n"
+        + "".join(f"  - {x}\n" for x in out_of_scope)
         + f"summary: |\n  {summary}\n"
     )
     return eng_dir
 
 
 def test_loader_returns_scope(tmp_path):
-    _write_engagement(
-        tmp_path, "op-test", ["corp.local", "10.0.0.0/24"], ["dmz.corp.local"]
-    )
+    _write_engagement(tmp_path, "op-test", ["corp.local", "10.0.0.0/24"], ["dmz.corp.local"])
     loader = EngagementLoader(engagements_root=tmp_path / "engagements")
     eng = loader.load("op-test")
     assert eng.slug == "op-test"
@@ -58,12 +59,8 @@ def test_scope_enforcer_built_from_engagement(tmp_path):
 
 @pytest.mark.asyncio
 async def test_lifespan_loads_engagement_scope_into_pipeline(tmp_path, monkeypatch):
-    _write_engagement(
-        tmp_path / "rr", "op-lifespan", ["corp.local"], ["bigcorp.com"]
-    )
-    monkeypatch.setenv(
-        "REDROBIN_ENGAGEMENTS_DIR", str(tmp_path / "rr" / "engagements")
-    )
+    _write_engagement(tmp_path / "rr", "op-lifespan", ["corp.local"], ["bigcorp.com"])
+    monkeypatch.setenv("REDROBIN_ENGAGEMENTS_DIR", str(tmp_path / "rr" / "engagements"))
     monkeypatch.setenv("REDROBIN_ENGAGEMENT_SLUG", "op-lifespan")
     monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
 

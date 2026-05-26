@@ -169,9 +169,7 @@ def _parse_sigma_detection(
                 path,
                 field_name_raw,
             )
-            predicates.append(
-                _NeverMatchPredicate(reason=f"unsupported field {field_name_raw}")
-            )
+            predicates.append(_NeverMatchPredicate(reason=f"unsupported field {field_name_raw}"))
             continue
 
         # Sigma allows scalar or list values; list = OR across values.
@@ -251,9 +249,7 @@ class RulesLoader:
         snapshot, and return the new list sorted by path."""
         rules: list[Rule] = []
         for rule_path in sorted(
-            p
-            for ext in _RULE_EXTENSIONS
-            for p in self.rule_dir.rglob(f"*{ext}")
+            p for ext in _RULE_EXTENSIONS for p in self.rule_dir.rglob(f"*{ext}")
         ):
             if rule_path.name == "passthrough.yaml":
                 continue  # passthrough whitelist is handled separately

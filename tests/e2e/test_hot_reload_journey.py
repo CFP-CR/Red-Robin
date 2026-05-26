@@ -12,6 +12,7 @@ loader sets ``match.command`` to the file stem — a Sigma rule named
 ``exotic.yaml`` would only match command ``exotic``, never ``exotic_tool``.
 Full Sigma matching lands in a later Phase 2 slice.
 """
+
 from __future__ import annotations
 
 import time

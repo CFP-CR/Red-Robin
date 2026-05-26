@@ -56,9 +56,7 @@ def test_loader_ignores_non_yaml_and_other_kinds(tmp_path):
         operator_password="x",
     )
     # Wrong kind — should be skipped silently
-    (tmp_path / "sliver.yaml").write_text(
-        "name: sliver-1\nkind: sliver\nbase_url: https://s\n"
-    )
+    (tmp_path / "sliver.yaml").write_text("name: sliver-1\nkind: sliver\nbase_url: https://s\n")
     # Non-yaml — ignored
     (tmp_path / "notes.txt").write_text("not a config")
     configs = load_adapter_configs(tmp_path)
@@ -106,13 +104,12 @@ async def test_lifespan_loads_adapters(tmp_path, monkeypatch):
     )
     monkeypatch.setenv("REDROBIN_ADAPTERS_DIR", str(tmp_path / "adapters"))
     monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
-    monkeypatch.setenv(
-        "REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json")
-    )
+    monkeypatch.setenv("REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json"))
     # Slice 3: opt into degraded Layer B explicitly. No API keys here.
     monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
 
     from redrobin.api.app import create_app
+
     # Patch the infrastructure module (not the facade) — the facade re-exports
     # the function by reference at import time, but ``build_adapter`` resolves
     # ``_default_transport`` against its own module namespace.
@@ -125,9 +122,7 @@ async def test_lifespan_loads_adapters(tmp_path, monkeypatch):
             return httpx.Response(200, json={"task_id": "t-1"})
         return httpx.Response(404)
 
-    monkeypatch.setattr(
-        cal, "_default_transport", lambda: httpx.MockTransport(handler)
-    )
+    monkeypatch.setattr(cal, "_default_transport", lambda: httpx.MockTransport(handler))
     app = create_app()
     async with app.router.lifespan_context(app):
         assert "cs-main" in app.state.cs_adapters
@@ -142,9 +137,7 @@ async def test_lifespan_starts_clean_without_adapter_dir(tmp_path, monkeypatch):
     """No adapter YAML present → daemon boots with empty registry, no crash."""
     monkeypatch.setenv("REDROBIN_ADAPTERS_DIR", str(tmp_path / "nope"))
     monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
-    monkeypatch.setenv(
-        "REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json")
-    )
+    monkeypatch.setenv("REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json"))
     # Slice 3: opt into degraded Layer B explicitly. No API keys here.
     monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
 
@@ -172,9 +165,7 @@ async def test_allow_verdict_dispatches_through_adapter(tmp_path, monkeypatch):
     )
     monkeypatch.setenv("REDROBIN_ADAPTERS_DIR", str(tmp_path / "adapters"))
     monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
-    monkeypatch.setenv(
-        "REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json")
-    )
+    monkeypatch.setenv("REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json"))
     # Slice 3: opt into degraded Layer B explicitly. No API keys here.
     monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
 
@@ -201,9 +192,7 @@ async def test_allow_verdict_dispatches_through_adapter(tmp_path, monkeypatch):
             return httpx.Response(200, json={"task_id": "t-1"})
         return httpx.Response(404)
 
-    monkeypatch.setattr(
-        cal, "_default_transport", lambda: httpx.MockTransport(handler)
-    )
+    monkeypatch.setattr(cal, "_default_transport", lambda: httpx.MockTransport(handler))
 
     from redrobin.api.app import create_app
     from redrobin.infrastructure.transport.bearer import get_or_create_token
@@ -238,9 +227,7 @@ async def test_allow_verdict_dispatches_through_adapter(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_allow_verdict_without_adapter_field_does_not_dispatch(
-    tmp_path, monkeypatch
-):
+async def test_allow_verdict_without_adapter_field_does_not_dispatch(tmp_path, monkeypatch):
     """No 'adapter' in the request → verdict succeeds, nothing POSTed to CS."""
     from fastapi.testclient import TestClient
 
@@ -254,9 +241,7 @@ async def test_allow_verdict_without_adapter_field_does_not_dispatch(
     )
     monkeypatch.setenv("REDROBIN_ADAPTERS_DIR", str(tmp_path / "adapters"))
     monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
-    monkeypatch.setenv(
-        "REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json")
-    )
+    monkeypatch.setenv("REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json"))
     # Slice 3: opt into degraded Layer B explicitly. No API keys here.
     monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
 
@@ -276,9 +261,7 @@ async def test_allow_verdict_without_adapter_field_does_not_dispatch(
             return httpx.Response(200, json={"task_id": "t-1"})
         return httpx.Response(404)
 
-    monkeypatch.setattr(
-        cal, "_default_transport", lambda: httpx.MockTransport(handler)
-    )
+    monkeypatch.setattr(cal, "_default_transport", lambda: httpx.MockTransport(handler))
 
     from redrobin.api.app import create_app
     from redrobin.infrastructure.transport.bearer import get_or_create_token

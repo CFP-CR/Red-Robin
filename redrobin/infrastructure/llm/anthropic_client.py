@@ -98,9 +98,7 @@ class AnthropicClient(LLMProvider):
             system_blocks.append(
                 {
                     "type": "text",
-                    "text": (
-                        f"# Recent Activity Summary\n{cacheable_recent_summary}"
-                    ),
+                    "text": (f"# Recent Activity Summary\n{cacheable_recent_summary}"),
                     "cache_control": {"type": "ephemeral"},
                 }
             )

@@ -24,6 +24,7 @@ buffer.
 through an ``OperatorDispatcher``, and runs the prompt_toolkit Application
 alongside the auto-reconnecting WS consumer.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -187,9 +188,7 @@ def build_tui_app(
         labels = Labels(load_labels())
     input_buffer = Buffer(multiline=False)
 
-    sessions_pane = _panel(
-        lambda: _render_sessions(state), "Sessions", "sessions_panel", weight=2
-    )
+    sessions_pane = _panel(lambda: _render_sessions(state), "Sessions", "sessions_panel", weight=2)
     events_pane = _panel(lambda: _render_events(state), "Events", "events_panel", weight=4)
     memory_pane = _panel(
         lambda: _render_memory(state, labels), "Working Memory", "memory_panel", weight=2
@@ -229,9 +228,7 @@ def build_tui_app(
         ConditionalContainer(
             content=Frame(
                 Window(
-                    content=FormattedTextControl(
-                        text=lambda: _render_inspector(state, labels)
-                    ),
+                    content=FormattedTextControl(text=lambda: _render_inspector(state, labels)),
                     wrap_lines=True,
                     style="class:inspector-body",
                 ),
@@ -264,9 +261,7 @@ def build_tui_app(
         slash = parse_slash(text)
         if slash is not None:
             if slash.verb == "inspector":
-                state.focus_overlay = (
-                    "inspector" if state.focus_overlay != "inspector" else None
-                )
+                state.focus_overlay = "inspector" if state.focus_overlay != "inspector" else None
             state.append_event(
                 {
                     "type": "tui.slash_command",
@@ -347,9 +342,7 @@ async def _amain(
     ws_url = _build_ws_url(connect_ws, token)
 
     async with httpx.AsyncClient() as http_client:
-        dispatcher = OperatorDispatcher(
-            client=http_client, base_url=connect_http, token=token
-        )
+        dispatcher = OperatorDispatcher(client=http_client, base_url=connect_http, token=token)
         app = build_tui_app(state=state, dispatcher=dispatcher)
 
         def _invalidate() -> None:
@@ -385,9 +378,7 @@ def run_tui(
     token: str | None,
 ) -> None:
     """Blocking entry point — operator runs ``redrobin tui --connect-ws ...``."""
-    asyncio.run(
-        _amain(connect_ws=connect_ws, connect_http=connect_http, token=token)
-    )
+    asyncio.run(_amain(connect_ws=connect_ws, connect_http=connect_http, token=token))
 
 
 # ---------------------------------------------------------------------------

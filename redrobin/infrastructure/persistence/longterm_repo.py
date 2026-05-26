@@ -79,8 +79,7 @@ class LongtermRepo:
         """
         with self._connect() as conn:
             existing = conn.execute(
-                "SELECT id, created_at FROM promoted_lessons "
-                "WHERE command = ? AND verdict = ?",
+                "SELECT id, created_at FROM promoted_lessons WHERE command = ? AND verdict = ?",
                 (lesson.command, lesson.verdict),
             ).fetchone()
             if existing is None:
@@ -105,8 +104,7 @@ class LongtermRepo:
                     created_at=ts,
                 )
             conn.execute(
-                "UPDATE promoted_lessons SET summary = ?, occurrence_count = ? "
-                "WHERE id = ?",
+                "UPDATE promoted_lessons SET summary = ?, occurrence_count = ? WHERE id = ?",
                 (lesson.summary, lesson.occurrence_count, existing["id"]),
             )
             return PromotedLesson(
@@ -118,9 +116,7 @@ class LongtermRepo:
                 created_at=_parse_iso(existing["created_at"]),
             )
 
-    def find_by_command(
-        self, command: str, verdict: str
-    ) -> PromotedLesson | None:
+    def find_by_command(self, command: str, verdict: str) -> PromotedLesson | None:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT id, command, verdict, summary, occurrence_count, "

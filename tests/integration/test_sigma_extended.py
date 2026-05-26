@@ -1,4 +1,5 @@
 """Slice 11: extended Sigma matcher."""
+
 from __future__ import annotations
 
 import pytest
@@ -94,7 +95,11 @@ level: medium
     loader = RulesLoader(rule_dir=tmp_path)
     loader.load_all()
     rule = loader.list_rules()[0]
-    assert rule.matches(EventContext(command="7z", args="-p somepass archive.7z files/", description="7-Zip Console"))
+    assert rule.matches(
+        EventContext(
+            command="7z", args="-p somepass archive.7z files/", description="7-Zip Console"
+        )
+    )
 
 
 def test_unsupported_field_emits_warn_and_rule_is_unmatchable(tmp_path, caplog):
@@ -112,11 +117,14 @@ detection:
 level: high
 """)
     import logging
+
     with caplog.at_level(logging.WARNING):
         loader = RulesLoader(rule_dir=tmp_path)
         loader.load_all()
-    assert any("unsupported" in rec.getMessage().lower() and "ParentImage" in rec.getMessage()
-               for rec in caplog.records)
+    assert any(
+        "unsupported" in rec.getMessage().lower() and "ParentImage" in rec.getMessage()
+        for rec in caplog.records
+    )
     rules = loader.list_rules()
     assert len(rules) == 1
     # _NeverMatchPredicate makes the rule unmatchable for ANY context
@@ -132,6 +140,7 @@ def test_sigma_base64offset_three_or_predicates(tmp_path):
       padding byte = SPACE b" ", NOT NUL.
     """
     import base64
+
     (tmp_path / "shared" / "sigma").mkdir(parents=True)
     r = tmp_path / "shared" / "sigma" / "b64.yaml"
     r.write_text("""
@@ -154,7 +163,9 @@ level: high
         padded = (b" " * i) + plaintext_bytes
         full = base64.b64encode(padded).decode()
         static_middle = full[start_offsets[i] : end_offsets[(len(plaintext_bytes) + i) % 3]]
-        assert rule.matches(EventContext(
-            command="powershell",
-            args=f"-EncodedCommand prefix{static_middle}suffix",
-        )), f"shift={i} static_middle={static_middle!r} should match the rule"
+        assert rule.matches(
+            EventContext(
+                command="powershell",
+                args=f"-EncodedCommand prefix{static_middle}suffix",
+            )
+        ), f"shift={i} static_middle={static_middle!r} should match the rule"

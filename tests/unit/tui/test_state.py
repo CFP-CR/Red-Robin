@@ -1,4 +1,5 @@
 """TUIState — mutable container shared between WebSocket listener and panels."""
+
 from __future__ import annotations
 
 from redrobin.tui.state import TUIState

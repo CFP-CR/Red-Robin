@@ -140,8 +140,15 @@ def test_to_snapshot_round_trips_all_fields():
     working_memory_from_snapshot — every WorkingMemory field survives the
     round-trip (the connect-time snapshot used to drop 9 of 14)."""
     from redrobin.domain.memory import (
-        Account, Credential, Finding, Host, Objective, Session, ToolUsage,
-        WorkingMemory, working_memory_to_snapshot,
+        Account,
+        Credential,
+        Finding,
+        Host,
+        Objective,
+        Session,
+        ToolUsage,
+        WorkingMemory,
+        working_memory_to_snapshot,
     )
     from redrobin.tui.snapshot_adapter import working_memory_from_snapshot
 

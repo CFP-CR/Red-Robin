@@ -23,6 +23,7 @@ this to :class:`AnthropicSummarizerClient`, which issues a single uncached
 ``messages.create`` call against Anthropic's cheap summarizer model. Tests
 inject a plain async stub matching the same shape — no LLM SDK dependency.
 """
+
 from __future__ import annotations
 
 import logging
@@ -94,9 +95,7 @@ class L5Summarizer:
         if len(pending) < self._window:
             return False
         if self._llm is None:
-            logger.warning(
-                "L5Summarizer: window threshold met but no LLM configured — skipping"
-            )
+            logger.warning("L5Summarizer: window threshold met but no LLM configured — skipping")
             return False
 
         # Take the oldest ``window_size`` pending episodes. Anything after
@@ -131,9 +130,7 @@ class L5Summarizer:
     @staticmethod
     def _format(episodes: list[Episode]) -> str:
         lines = [
-            f"- {e.created_at.isoformat()} [{e.verdict}] {e.command} :: {e.reason}".rstrip(
-                " ::"
-            )
+            f"- {e.created_at.isoformat()} [{e.verdict}] {e.command} :: {e.reason}".rstrip(" ::")
             for e in episodes
         ]
         return _DEFAULT_PROMPT_HEADER + "\n".join(lines)

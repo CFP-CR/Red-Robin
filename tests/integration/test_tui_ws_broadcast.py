@@ -1,4 +1,5 @@
 """Slice 3 integration: TUI WebSocket receives bus events + initial snapshot."""
+
 from __future__ import annotations
 
 import pytest
@@ -42,8 +43,10 @@ def test_ws_forwards_published_event(app_client):
 def test_two_ws_clients_both_receive(app_client):
     app, client = app_client
     token = get_or_create_token()
-    with client.websocket_connect(f"/v1/tui?token={token}") as ws_a, \
-            client.websocket_connect(f"/v1/tui?token={token}") as ws_b:
+    with (
+        client.websocket_connect(f"/v1/tui?token={token}") as ws_a,
+        client.websocket_connect(f"/v1/tui?token={token}") as ws_b,
+    ):
         ws_a.receive_json()  # snapshot
         ws_b.receive_json()  # snapshot
         client.portal.call(
@@ -67,9 +70,19 @@ def test_ws_initial_snapshot_carries_all_fields(app_client):
         first = ws.receive_json()
         payload = first["payload"]
         for key in (
-            "client", "scope_in_scope", "scope_out_of_scope", "objectives",
-            "current_phase", "kill_chain_status", "rules_of_engagement",
-            "accounts", "defenses_observed", "tools_used",
-            "hosts", "credentials", "findings", "sessions",
+            "client",
+            "scope_in_scope",
+            "scope_out_of_scope",
+            "objectives",
+            "current_phase",
+            "kill_chain_status",
+            "rules_of_engagement",
+            "accounts",
+            "defenses_observed",
+            "tools_used",
+            "hosts",
+            "credentials",
+            "findings",
+            "sessions",
         ):
             assert key in payload, f"snapshot missing {key}"

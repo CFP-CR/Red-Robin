@@ -9,6 +9,7 @@ These tests pin two contracts:
    monolithic body was refactored into helpers. Pure-refactor regression
    net for Slice 8 — no behavioral change allowed.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

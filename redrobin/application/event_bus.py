@@ -1,4 +1,5 @@
 """In-process pub/sub bus. Single writer, many readers, bounded queues."""
+
 from __future__ import annotations
 
 import asyncio

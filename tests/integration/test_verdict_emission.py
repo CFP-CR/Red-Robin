@@ -6,6 +6,7 @@ both publish on the EventBus with a ``source`` discriminator so the TUI can
 distinguish the original verdict line (``source=layer_a``) from the retroactive
 correction (``source=layer_b``, carries ``previous_verdict``).
 """
+
 from __future__ import annotations
 
 import asyncio

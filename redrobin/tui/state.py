@@ -5,6 +5,7 @@ prompt_toolkit panels render directly from it on every paint. Layer A and
 Layer B verdicts share a correlation_id, so retroactive corrections update
 the original verdict line in place instead of appending duplicate events.
 """
+
 from __future__ import annotations
 
 from collections import deque

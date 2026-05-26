@@ -122,33 +122,22 @@ def working_memory_from_snapshot(snapshot: dict[str, Any]) -> WorkingMemory:
         scope_in_scope=_as_list(snapshot.get("scope_in_scope")),
         scope_out_of_scope=_as_list(snapshot.get("scope_out_of_scope")),
         objectives=[
-            _objective_from_dict(_as_dict(o))
-            for o in _as_list(snapshot.get("objectives"))
+            _objective_from_dict(_as_dict(o)) for o in _as_list(snapshot.get("objectives"))
         ],
         current_phase=str(snapshot.get("current_phase") or "not_started"),
         kill_chain_status=_as_dict(snapshot.get("kill_chain_status")),
         rules_of_engagement=_as_list(snapshot.get("rules_of_engagement")),
         hosts=[_host_from_dict(_as_dict(h)) for h in _as_list(snapshot.get("hosts"))],
-        accounts=[
-            _account_from_dict(_as_dict(a)) for a in _as_list(snapshot.get("accounts"))
-        ],
+        accounts=[_account_from_dict(_as_dict(a)) for a in _as_list(snapshot.get("accounts"))],
         defenses_observed=_as_list(snapshot.get("defenses_observed")),
         tools_used=[
-            _tool_usage_from_dict(_as_dict(t))
-            for t in _as_list(snapshot.get("tools_used"))
+            _tool_usage_from_dict(_as_dict(t)) for t in _as_list(snapshot.get("tools_used"))
         ],
         credentials=[
-            _credential_from_dict(_as_dict(c))
-            for c in _as_list(snapshot.get("credentials"))
+            _credential_from_dict(_as_dict(c)) for c in _as_list(snapshot.get("credentials"))
         ],
-        findings=[
-            _finding_from_dict(_as_dict(f))
-            for f in _as_list(snapshot.get("findings"))
-        ],
-        sessions=[
-            _session_from_dict(_as_dict(s))
-            for s in _as_list(snapshot.get("sessions"))
-        ],
+        findings=[_finding_from_dict(_as_dict(f)) for f in _as_list(snapshot.get("findings"))],
+        sessions=[_session_from_dict(_as_dict(s)) for s in _as_list(snapshot.get("sessions"))],
     )
 
 

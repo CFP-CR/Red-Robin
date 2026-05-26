@@ -10,6 +10,7 @@ This is the "smoke test we wish we'd written in Phase 1" for the operator's
 primary feedback loop: every command they dispatch through the TUI must
 surface a verdict line on the same socket within the request lifecycle.
 """
+
 from __future__ import annotations
 
 import pytest

@@ -110,9 +110,12 @@ def test_inspector_shows_dash_for_missing_client():
 
 def test_inspector_renders_credentials_and_findings():
     from redrobin.domain.memory import Credential, Finding
+
     wm = WorkingMemory(
         engagement_id="x",
-        credentials=[Credential(domain="CORP", username="admin", ntlm_hash="a" * 32, source_beacon_id="B-1")],
+        credentials=[
+            Credential(domain="CORP", username="admin", ntlm_hash="a" * 32, source_beacon_id="B-1")
+        ],
         findings=[Finding(kind="opsec_block", summary="blocked mimikatz", source_beacon_id="B-1")],
     )
     out = render_inspector(wm)

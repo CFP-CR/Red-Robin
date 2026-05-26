@@ -34,7 +34,9 @@ def test_rule_arg_pattern_is_case_insensitive():
         reason="Empire-era cmdlet",
     )
     assert rule.matches(EventContext(command="powershell", args="Invoke-Mimikatz -DumpCreds"))
-    assert rule.matches(EventContext(command="powershell", args="invoke-mimikatz -dumpcreds"))  # lowercase still matches
+    assert rule.matches(
+        EventContext(command="powershell", args="invoke-mimikatz -dumpcreds")
+    )  # lowercase still matches
 
 
 def test_rule_severity_enum_3_values():

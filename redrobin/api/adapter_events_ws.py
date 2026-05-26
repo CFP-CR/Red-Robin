@@ -9,6 +9,7 @@ Mirror of tui_ws.py with three differences:
   3. Dedicated endpoint keeps the adapter contract decoupled from the
      TUI protocol; both subscribe to the same EventBus internally.
 """
+
 from __future__ import annotations
 
 import logging
@@ -29,7 +30,7 @@ async def adapter_events_ws(websocket: WebSocket, token: str = Query(...)) -> No
     await websocket.accept()
     bus = websocket.app.state.event_bus
     queue = None  # Defensive: ensure `queue` is defined before the
-                  # try/finally even if bus.subscribe() raises (#127).
+    # try/finally even if bus.subscribe() raises (#127).
 
     try:
         queue = await bus.subscribe()

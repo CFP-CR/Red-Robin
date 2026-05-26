@@ -5,6 +5,7 @@ single-engagement ``WorkingMemoryRepo`` (Phase 1's JSON-backed repo). Each
 case below publishes one event onto the bus and asserts the JSON working
 memory reflects the change.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -236,7 +237,11 @@ async def test_reducer_republishes_snapshot_after_mutation(tmp_path):
                 "type": "beacon.command_output",
                 "payload": {
                     "bid": "B-9",
-                    "output": "Username: CORP\\admin\nNTLM: " + ("a" * 32) + ":" + ("b" * 32) + "\n",
+                    "output": "Username: CORP\\admin\nNTLM: "
+                    + ("a" * 32)
+                    + ":"
+                    + ("b" * 32)
+                    + "\n",
                 },
             }
         )
@@ -270,13 +275,15 @@ async def test_lifespan_starts_reducer_task(tmp_path, monkeypatch):
         assert app.state.reducer_task is not None
         assert not app.state.reducer_task.done()
         # Publish a beacon output with creds; reducer should write to working memory.
-        await app.state.event_bus.publish({
-            "type": "beacon.command_output",
-            "payload": {
-                "bid": "B-100",
-                "output": "Username: CORP\\alice\nNTLM: aad3b435b51404eeaad3b435b51404ee:11111111111111111111111111111111",
-            },
-        })
+        await app.state.event_bus.publish(
+            {
+                "type": "beacon.command_output",
+                "payload": {
+                    "bid": "B-100",
+                    "output": "Username: CORP\\alice\nNTLM: aad3b435b51404eeaad3b435b51404ee:11111111111111111111111111111111",
+                },
+            }
+        )
         # Give reducer a tick to process; tighter pause is fine since the bus
         # is local and the repo is sync.
         await asyncio.sleep(0.3)

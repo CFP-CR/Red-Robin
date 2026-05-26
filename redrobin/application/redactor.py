@@ -13,6 +13,7 @@ redacted text must produce the same output. This guards against double-
 redaction artifacts if the pipeline ever runs the redactor twice (e.g.,
 during a future replay path).
 """
+
 from __future__ import annotations
 
 import re
@@ -52,9 +53,7 @@ _RULES: tuple[_Rule, ...] = (
     ),
     # JWT (three base64url segments separated by dots; header starts `eyJ`).
     _Rule(
-        pattern=re.compile(
-            r"\b(eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,})\b"
-        ),
+        pattern=re.compile(r"\b(eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,})\b"),
         replacement="[REDACTED:JWT]",
     ),
     # AWS access key ID.

@@ -1,4 +1,5 @@
 """Slice 1: typed Settings via pydantic-settings."""
+
 from __future__ import annotations
 
 import pytest
@@ -8,13 +9,24 @@ from redrobin.infrastructure.config import Settings
 
 def test_settings_defaults_when_env_empty(monkeypatch, tmp_path):
     for k in [
-        "ANTHROPIC_API_KEY", "VOYAGE_API_KEY",
-        "REDROBIN_ROOT", "REDROBIN_RULES_DIR", "REDROBIN_WORKING_MEMORY_PATH",
-        "REDROBIN_EPISODIC_PATH", "REDROBIN_LONGTERM_PATH", "REDROBIN_SUMMARY_PATH",
-        "REDROBIN_ENGAGEMENTS_DIR", "REDROBIN_ENGAGEMENT_SLUG", "REDROBIN_ADAPTERS_DIR",
-        "REDROBIN_PROMOTER_INTERVAL_SEC", "REDROBIN_PROMOTER_MIN_OCCURRENCES",
-        "REDROBIN_L5_WINDOW", "REDROBIN_L5_INTERVAL_SEC",
-        "REDROBIN_PORT", "REDROBIN_HOST", "REDROBIN_PID_FILE",
+        "ANTHROPIC_API_KEY",
+        "VOYAGE_API_KEY",
+        "REDROBIN_ROOT",
+        "REDROBIN_RULES_DIR",
+        "REDROBIN_WORKING_MEMORY_PATH",
+        "REDROBIN_EPISODIC_PATH",
+        "REDROBIN_LONGTERM_PATH",
+        "REDROBIN_SUMMARY_PATH",
+        "REDROBIN_ENGAGEMENTS_DIR",
+        "REDROBIN_ENGAGEMENT_SLUG",
+        "REDROBIN_ADAPTERS_DIR",
+        "REDROBIN_PROMOTER_INTERVAL_SEC",
+        "REDROBIN_PROMOTER_MIN_OCCURRENCES",
+        "REDROBIN_L5_WINDOW",
+        "REDROBIN_L5_INTERVAL_SEC",
+        "REDROBIN_PORT",
+        "REDROBIN_HOST",
+        "REDROBIN_PID_FILE",
     ]:
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path))
@@ -87,6 +99,7 @@ def test_filesystem_root_reads_from_settings(monkeypatch, tmp_path):
     # Reload to ensure no cached module-level constant
     import importlib
     from redrobin.infrastructure import filesystem
+
     importlib.reload(filesystem)
     # Whatever accessor we expose (function or property), it must reflect env
     resolved = filesystem.redrobin_root()
@@ -97,6 +110,7 @@ def test_bearer_token_path_reads_from_settings(monkeypatch, tmp_path):
     monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path / "custom"))
     import importlib
     from redrobin.infrastructure.transport import bearer
+
     importlib.reload(bearer)
     path = bearer._token_path()
     assert path == tmp_path / "custom" / "transport.token"

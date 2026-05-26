@@ -15,6 +15,7 @@ init-driven flow — there is now one canonical way to set up a fresh
 have real Anthropic / Voyage credentials, but the rest of the bootstrap
 goes through the same code an operator runs from the shell.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -77,9 +78,9 @@ def test_init_to_running_daemon_e2e(operator_setup, capfd):
         # The sample lazagne rule that init drops on disk MUST be in the
         # loaded snapshot — otherwise we lost the rules-loader → init wiring.
         rules = app.state.rules_loader.list_rules()
-        assert any(
-            r.id == "rule-sample-lazagne" for r in rules
-        ), f"init's sample-lazagne.yaml rule not loaded: rules={[r.id for r in rules]}"
+        assert any(r.id == "rule-sample-lazagne" for r in rules), (
+            f"init's sample-lazagne.yaml rule not loaded: rules={[r.id for r in rules]}"
+        )
 
         # Engagement loaded from the init-produced engagement.yaml — the
         # slug AND name both come from the template's ``slug``/``name``

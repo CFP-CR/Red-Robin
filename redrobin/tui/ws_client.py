@@ -11,6 +11,7 @@ Connects to ``/v1/tui`` and translates each frame into a TUIState mutation:
 The asyncio loop reconnects forever using ``websockets``' async iterator helper;
 ``stop_event`` lets the host TUI cancel cleanly on shutdown.
 """
+
 from __future__ import annotations
 
 import asyncio

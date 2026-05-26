@@ -18,6 +18,7 @@ The correct order:
 
 These tests pin that contract.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -39,9 +40,7 @@ def _setup_env(tmp_path: Path, monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_inflight_adapter_dispatch_runs_with_open_adapter(
-    tmp_path: Path, monkeypatch
-):
+async def test_inflight_adapter_dispatch_runs_with_open_adapter(tmp_path: Path, monkeypatch):
     """A long-running adapter task scheduled during operation must finish
     BEFORE the adapter's httpx client is closed.
 
@@ -103,9 +102,7 @@ async def test_inflight_adapter_dispatch_runs_with_open_adapter(
 
 
 @pytest.mark.asyncio
-async def test_promoter_and_summarizer_cancel_on_shutdown(
-    tmp_path: Path, monkeypatch
-):
+async def test_promoter_and_summarizer_cancel_on_shutdown(tmp_path: Path, monkeypatch):
     """Promoter and summarizer are long-running loops — they SHOULD be
     cancelled promptly at shutdown (not drained), since they have no
     finite work to finish."""

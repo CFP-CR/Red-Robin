@@ -1,4 +1,5 @@
 """CLI helper tests for `engagement new` scope flags (Plan H, #135)."""
+
 from __future__ import annotations
 
 from redrobin.cli_helpers.engagement_cmd import _csv_list

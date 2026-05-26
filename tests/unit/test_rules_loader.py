@@ -187,8 +187,12 @@ def test_sigma_startswith_and_endswith(tmp_path):
     rule = rules[0]
     # Both predicates must hold.
     assert rule.matches(EventContext(command="powershell", args="Invoke-Mimikatz dump.ps1"))
-    assert not rule.matches(EventContext(command="powershell", args="Get-Process dump.ps1"))  # startswith fails
-    assert not rule.matches(EventContext(command="powershell", args="Invoke-Mimikatz dump.exe"))  # endswith fails
+    assert not rule.matches(
+        EventContext(command="powershell", args="Get-Process dump.ps1")
+    )  # startswith fails
+    assert not rule.matches(
+        EventContext(command="powershell", args="Invoke-Mimikatz dump.exe")
+    )  # endswith fails
 
 
 def test_sigma_exact_command_equality(tmp_path):

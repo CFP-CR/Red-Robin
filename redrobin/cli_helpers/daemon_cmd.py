@@ -5,6 +5,7 @@ construct ``Settings()``; :func:`run_daemon_start` / :func:`run_daemon_stop`
 here do the real work so the bodies are testable without going through
 argparse.
 """
+
 from __future__ import annotations
 
 import os

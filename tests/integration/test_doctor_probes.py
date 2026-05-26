@@ -1,11 +1,14 @@
 """Slice 6: doctor probes real connectivity."""
+
 from __future__ import annotations
 
 import httpx
 import pytest
 
 from redrobin.cli_helpers.doctor_probes import (
-    probe_anthropic, probe_voyage, probe_cs_adapter,
+    probe_anthropic,
+    probe_voyage,
+    probe_cs_adapter,
 )
 
 
@@ -70,8 +73,10 @@ async def test_probe_anthropic_missing_key():
 @pytest.mark.asyncio
 async def test_probe_cs_adapter_network_failure():
     """If transport raises (e.g., connection refused), probe returns ok=False with reason."""
+
     def handler(req: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("Connection refused")
+
     transport = httpx.MockTransport(handler)
     result = await probe_cs_adapter(
         teamserver_url="https://ts.unreachable.local",

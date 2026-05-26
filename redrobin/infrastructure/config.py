@@ -6,6 +6,7 @@ from a .env file that the CLI loads at command entry time — never at import).
 Root path REDROBIN_ROOT defaults to ~/.redrobin and drives derived paths;
 each derived path can be overridden individually if needed.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

@@ -12,6 +12,7 @@ The retroactive hook is the same method the factory binds onto
 contract holds end-to-end. Slice 5 confirmed kwargs: ``correlation_id,
 original_verdict, new_verdict, reason``.
 """
+
 from __future__ import annotations
 
 import pytest

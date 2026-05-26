@@ -5,6 +5,7 @@ wires the Voyage embedder + on-disk :class:`VectorStore` into the generic
 ``ingest_file`` helper and persists the resulting index to
 ``~/.redrobin/shared/kb-index/index.npz``.
 """
+
 from __future__ import annotations
 
 import asyncio

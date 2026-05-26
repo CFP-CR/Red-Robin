@@ -1,4 +1,5 @@
 """Real connectivity probes for `redrobin doctor`."""
+
 from __future__ import annotations
 
 import time

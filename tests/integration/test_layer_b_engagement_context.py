@@ -14,6 +14,7 @@ This slice wires:
      ``layer_b.set_engagement_summary(engagement.summary)`` immediately after
      the engagement.yaml is loaded.
 """
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock
@@ -56,9 +57,7 @@ async def test_layer_b_includes_engagement_summary_in_cached_system_block():
     llm = _mock_llm('```json\n{"action":"PASS","reason":"ok"}\n```')
     kb = _mock_kb()
     engine = LayerBEngine(llm=llm, kb=kb)
-    engine.set_engagement_summary(
-        "Engagement: op-redspark — low-detection priority, EU corp."
-    )
+    engine.set_engagement_summary("Engagement: op-redspark — low-detection priority, EU corp.")
 
     await engine.evaluate(command="mimikatz", raw="mimikatz")
 

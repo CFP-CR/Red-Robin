@@ -4,6 +4,7 @@ The CLI wrapper :func:`redrobin.cli.cmd_doctor` is a thin shell that loads
 ``.env`` and constructs ``Settings()``; :func:`run_doctor` here does the real
 work so the body is testable without going through argparse.
 """
+
 from __future__ import annotations
 
 import asyncio

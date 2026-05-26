@@ -16,6 +16,7 @@ synthetic ``c2.*`` types. Real CS adapters POST canonical wire envelopes
 (``beacon.command_output`` / ``beacon.initial``) to ``/v1/events``; this
 test exercises that exact path.
 """
+
 from __future__ import annotations
 
 import time
@@ -105,8 +106,7 @@ def test_post_events_canonical_command_output_reaches_reducer(daemon):
         time.sleep(0.05)
     else:
         pytest.fail(
-            "reducer never saw the bus-published wire event; creds=%r"
-            % repo.list_credentials()
+            "reducer never saw the bus-published wire event; creds=%r" % repo.list_credentials()
         )
 
     # Connect a fresh WS — the snapshot is built from the live repo.
@@ -153,8 +153,7 @@ def test_post_events_canonical_beacon_initial_creates_session(daemon):
         time.sleep(0.05)
     else:
         pytest.fail(
-            "reducer never recorded the beacon.initial session; sessions=%r"
-            % repo.load().sessions
+            "reducer never recorded the beacon.initial session; sessions=%r" % repo.load().sessions
         )
 
     sessions = repo.load().sessions

@@ -1,4 +1,5 @@
 """``redrobin memory edit`` business logic — extracted in Slice 12."""
+
 from __future__ import annotations
 
 import os

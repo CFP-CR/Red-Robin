@@ -8,6 +8,7 @@ Cases:
   - Server-side filter: only opsec.verdict events forwarded
   - Non-verdict events do NOT arrive (filter is selective, not blocking)
 """
+
 from __future__ import annotations
 
 import pytest

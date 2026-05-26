@@ -5,6 +5,7 @@ so we only assert that the bindings are present and call out the right side
 effects. The full Enter -> dispatch flow is exercised by the integration test
 in Slice 8 Task 8.6.
 """
+
 from __future__ import annotations
 
 from prompt_toolkit.buffer import Buffer

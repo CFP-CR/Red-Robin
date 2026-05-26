@@ -5,6 +5,7 @@ use X` was silently ignored by the daemon because Settings only read the
 REDROBIN_ENGAGEMENT_SLUG env var. The fix layers EngagementService.current()
 as a fallback in start_engagement.
 """
+
 from __future__ import annotations
 
 import pytest

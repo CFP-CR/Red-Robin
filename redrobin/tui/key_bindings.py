@@ -17,6 +17,7 @@ Binding semantics:
 Deliberately not bound: ``Ctrl+I`` — that is the terminal-protocol equivalent of
 ``Tab`` and binding it breaks tab traversal on Windows terminals.
 """
+
 from __future__ import annotations
 
 from typing import Awaitable, Callable

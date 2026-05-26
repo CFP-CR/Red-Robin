@@ -1,4 +1,5 @@
 """PID file helper (cross-platform; uses os.kill(pid, 0) for liveness)."""
+
 from __future__ import annotations
 
 import errno

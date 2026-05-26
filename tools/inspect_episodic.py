@@ -13,6 +13,7 @@ Usage:
 
 Closes backlog #131.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -57,7 +58,9 @@ def main(argv: list[str]) -> int:
         print()
 
     print("=== ROW COUNTS ===")
-    tables = [r[0] for r in cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+    tables = [
+        r[0] for r in cur.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    ]
     for tbl in tables:
         n = cur.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
         print(f"  {tbl}: {n}")

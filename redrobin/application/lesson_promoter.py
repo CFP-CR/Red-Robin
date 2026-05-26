@@ -16,6 +16,7 @@ inserted on this call.
 Closes phase-2 gap #15 — Phase 1 wired the repos but no caller exercised
 them, so L1 was permanently empty.
 """
+
 from __future__ import annotations
 
 import logging

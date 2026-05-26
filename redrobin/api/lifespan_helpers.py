@@ -14,6 +14,7 @@ slice is a pure refactor. Slice 10 will reorder shutdown
 (drain background tasks before adapter close); Slice 11 will touch the
 Sigma matcher — both happen on top of this one.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -51,9 +52,7 @@ logger = logging.getLogger(__name__)
 CloseHook = Callable[[], Awaitable[None]]
 
 
-async def start_event_bus(
-    app: FastAPI, settings: Settings
-) -> tuple[EventBus, CloseHook]:
+async def start_event_bus(app: FastAPI, settings: Settings) -> tuple[EventBus, CloseHook]:
     """Construct the in-memory event bus and register it on ``app.state``.
 
     Returned close hook calls :meth:`EventBus.close`, which broadcasts the
@@ -69,9 +68,7 @@ async def start_event_bus(
     return event_bus, close
 
 
-async def start_rules(
-    app: FastAPI, settings: Settings
-) -> tuple[RulesLoader, CloseHook]:
+async def start_rules(app: FastAPI, settings: Settings) -> tuple[RulesLoader, CloseHook]:
     """Load Sigma rules from ``settings.rules_dir`` and start hot-reload.
 
     Stores the loader plus its initial rule list on
@@ -261,9 +258,7 @@ async def start_engagement(app: FastAPI, settings: Settings) -> tuple[None, None
         app.state.engagement = None
         app.state.scope_empty = False
     else:
-        scope = ScopeEnforcer(
-            in_scope=engagement.in_scope, out_of_scope=engagement.out_of_scope
-        )
+        scope = ScopeEnforcer(in_scope=engagement.in_scope, out_of_scope=engagement.out_of_scope)
         app.state.engagement = engagement
         # Keep app.state.engagement_id consistent with the loaded slug so the
         # working-memory reducer + downstream consumers see a single ID.
@@ -290,9 +285,7 @@ async def start_engagement(app: FastAPI, settings: Settings) -> tuple[None, None
     return None, None
 
 
-async def start_pipeline(
-    app: FastAPI, settings: Settings
-) -> tuple[Any, CloseHook]:
+async def start_pipeline(app: FastAPI, settings: Settings) -> tuple[Any, CloseHook]:
     """Build the verdict pipeline (Layer A + Layer B) and wire it to the bus.
 
     Reuses ``app.state.initial_rules`` from ``start_rules`` to avoid a
@@ -358,9 +351,7 @@ async def start_pipeline(
     return verdict_pipeline, close
 
 
-async def start_adapters(
-    app: FastAPI, settings: Settings
-) -> tuple[dict[str, Any], CloseHook]:
+async def start_adapters(app: FastAPI, settings: Settings) -> tuple[dict[str, Any], CloseHook]:
     """Load CS adapter YAML configs and build a logged-in CSRestClient each.
 
     Slice 9 — closes gap #8: Phase 1 shipped the REST client but the
@@ -440,9 +431,7 @@ async def start_lesson_promoter(
     return promoter, close
 
 
-async def start_l5_summarizer(
-    app: FastAPI, settings: Settings
-) -> tuple[L5Summarizer, CloseHook]:
+async def start_l5_summarizer(app: FastAPI, settings: Settings) -> tuple[L5Summarizer, CloseHook]:
     """Schedule the periodic L5 sliding-window summariser.
 
     Slice 13 — reads recent episodes from the same ``episodic_repo`` the
