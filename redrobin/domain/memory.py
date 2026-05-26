@@ -28,6 +28,9 @@ class Host:
     integrity_level: str | None = None
     edr_detected: str | None = None
     access_level: str | None = None  # e.g., "user-token", "SYSTEM"
+    domain: str | None = None  # AD domain (systeminfo "Domain:") — drives AD reasoning
+    ip_addresses: list[str] = field(default_factory=list)  # NIC IPs — lateral movement
+    os_version: str | None = None  # build/patch level — exploit selection
 
 
 @dataclass

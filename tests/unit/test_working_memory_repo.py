@@ -62,3 +62,44 @@ def test_save_overwrites_stale_temp_file(tmp_path):
     repo.save(WorkingMemory(engagement_id="acme"))
     assert repo.load().engagement_id == "acme"
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_host_new_fields_round_trip(tmp_path):
+    """Host gains domain / ip_addresses / os_version; they survive save+load."""
+    repo = WorkingMemoryRepo(tmp_path / "wm.json")
+    wm = WorkingMemory(engagement_id="eng-host-fields")
+    wm.hosts.append(
+        Host(
+            name="WS01",
+            os="Windows 10 Pro",
+            os_version="10.0.19045",
+            domain="ACME",
+            ip_addresses=["10.0.0.5", "10.0.0.6"],
+        )
+    )
+    repo.save(wm)
+
+    loaded = repo.load().hosts[0]
+    assert loaded.domain == "ACME"
+    assert loaded.os_version == "10.0.19045"
+    assert loaded.ip_addresses == ["10.0.0.5", "10.0.0.6"]
+
+
+def test_host_back_compat_old_json_without_new_fields(tmp_path):
+    """A pre-existing wm.json whose host lacks the new keys loads with defaults."""
+    import json
+
+    path = tmp_path / "wm.json"
+    path.write_text(
+        json.dumps(
+            {
+                "engagement_id": "eng-old",
+                "hosts": [{"name": "DC01", "os": "Windows Server 2019"}],
+            }
+        )
+    )
+    host = WorkingMemoryRepo(path).load().hosts[0]
+    assert host.name == "DC01"
+    assert host.domain is None
+    assert host.ip_addresses == []
+    assert host.os_version is None
