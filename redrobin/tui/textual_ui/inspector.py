@@ -10,6 +10,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from rich.text import Text
+from textual.app import ComposeResult
+from textual.containers import Horizontal, Vertical
+from textual.screen import ModalScreen
+from textual.widgets import Input, OptionList, Static
+from textual.widgets.option_list import Option
+
 # Ordered (key, display title). Mirrors spec §3.3, plus KILL CHAIN (data is in the
 # snapshot and the legacy inspector showed it — kept for parity).
 SECTIONS: list[tuple[str, str]] = [
@@ -168,3 +175,80 @@ def _grouped_findings(snapshot: dict[str, Any], group_by: str) -> list[str]:
             for f in items
         ]
     return out
+
+
+class InspectorScreen(ModalScreen):
+    """Full-engagement-state inspector. ``i`` opens it (from the app), ``Esc`` closes.
+    Left nav picks a section; the content list shows that section's lines."""
+
+    BINDINGS = [
+        ("escape", "close", "Close"),
+        ("g", "cycle_group", "Group"),
+        ("y", "copy_row", "Copy"),
+    ]
+
+    def __init__(self, snapshot: dict[str, Any]) -> None:
+        super().__init__()
+        self._snapshot = snapshot
+        self._section = SECTIONS[0][0]
+        self._group_by: str | None = None
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="inspector"):
+            yield Static(
+                f"Memory Inspector — {self._snapshot.get('engagement_id') or '-'}",
+                id="inspector-title",
+            )
+            with Horizontal(id="inspector-main"):
+                yield OptionList(id="inspector-nav")
+                with Vertical(id="inspector-body"):
+                    yield Input(placeholder="filter…", id="inspector-filter")
+                    yield OptionList(id="inspector-content")
+            yield Static(
+                "Esc close · ↑↓ navigate · g group findings · y copy row", id="inspector-hint"
+            )
+
+    def on_mount(self) -> None:
+        nav = self.query_one("#inspector-nav", OptionList)
+        counts = section_counts(self._snapshot)
+        for key, title in SECTIONS:
+            count = counts.get(key)
+            label = f"{title} ({count})" if count is not None else title
+            nav.add_option(Option(Text(label), id=key))
+        nav.highlighted = 0
+        nav.focus()
+        self._render_content()
+
+    def _render_content(self) -> None:
+        content = self.query_one("#inspector-content", OptionList)
+        content.clear_options()
+        filter_text = self.query_one("#inspector-filter", Input).value
+        lines = render_section(
+            self._snapshot, self._section, filter_text=filter_text, group_by=self._group_by
+        )
+        content.add_options([Option(Text(line)) for line in lines])
+
+    def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+        # Only the nav switches sections; the content list's own highlight is for copy-row.
+        if event.option_list.id == "inspector-nav" and event.option_id:
+            self._section = event.option_id
+            self._render_content()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        self._render_content()
+
+    def action_cycle_group(self) -> None:
+        order: list[str | None] = [None, "kind", "beacon"]
+        self._group_by = order[(order.index(self._group_by) + 1) % len(order)]
+        self._render_content()
+
+    def action_copy_row(self) -> None:
+        content = self.query_one("#inspector-content", OptionList)
+        index = content.highlighted
+        if index is not None:
+            text = str(content.get_option_at_index(index).prompt)
+            self.app.copy_to_clipboard(text)
+            self.app.notify("Copied row to clipboard")
+
+    def action_close(self) -> None:
+        self.dismiss()
