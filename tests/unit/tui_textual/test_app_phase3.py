@@ -70,11 +70,29 @@ async def test_resize_hint_hidden_when_big_enough():
 
 
 @pytest.mark.asyncio
-async def test_events_log_wraps_long_lines():
-    # A long verdict reason must wrap inside the panel, not overflow horizontally
-    # (no horizontal scrollbar). RichLog defaults to wrap=False — we enable it.
-    app = RedRobinApp(start_worker=False)
-    async with app.run_test():
-        from redrobin.tui.textual_ui.panels import EventsLog
+async def test_events_log_long_reason_does_not_overflow_horizontally():
+    # A long verdict reason must wrap to the pane width — no horizontal scrollbar.
+    # RichLog defaults to wrap=False + min_width=78 (forces a 78-wide canvas that
+    # overflows a narrower pane); we set wrap=True + min_width=0.
+    from redrobin.tui.textual_ui.panels import EventsLog, format_verdict
 
-        assert app.query_one("#events-log", EventsLog).wrap is True
+    app = RedRobinApp(start_worker=False)
+    async with app.run_test() as pilot:
+        log = app.query_one("#events-log", EventsLog)
+        assert log.wrap is True
+        log.write(
+            format_verdict(
+                {
+                    "verdict": "BLOCK",
+                    "command": "mimikatz sekurlsa::logonpasswords",
+                    "source": "layer_a",
+                    "reason": (
+                        "lsass touch + plaintext credential matches T1003.001. Sysmon EID 10 "
+                        "and most EDRs (CrowdStrike, Defender, SentinelOne) flag this signature."
+                    ),
+                }
+            )
+        )
+        await pilot.pause()
+        # virtual width must not exceed the visible pane width → no horizontal scroll.
+        assert log.virtual_size.width <= log.size.width
