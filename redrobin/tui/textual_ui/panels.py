@@ -22,6 +22,12 @@ VERDICT_COLORS: dict[str, str] = {
 }
 _SEV_HIGH = "#f0883e"
 _MUTED = "#8b949e"
+# Daemon-connection status colors — mirror $status-ok/$status-warn/$status-err in theme.tcss.
+_STATUS_COLORS: dict[str, str] = {
+    "connected": "#3fb950",
+    "connecting": "#e3b341",
+    "disconnected": "#f85149",
+}
 _MAX_EVENTS = 500
 
 
@@ -42,6 +48,32 @@ def format_verdict(payload: dict[str, Any]) -> Text:
     return line
 
 
+def verdict_counts(events: list[dict[str, Any]]) -> dict[str, int]:
+    """Tally events by verdict action (only the four known actions are counted)."""
+    counts = {"BLOCK": 0, "WARN": 0, "PASS": 0, "ESCALATE": 0}
+    for event in events:
+        verdict = event.get("verdict")
+        if verdict in counts:
+            counts[verdict] += 1
+    return counts
+
+
+def format_topbar(engagement: str, connection_state: str, counts: dict[str, int]) -> Text:
+    """Header line: 'Red Robin · <engagement> · ●<connection> · <verdict counts>'.
+
+    16-color-safe: the connection state and each verdict carry a text label + weight,
+    so meaning survives non-truecolor terminals and color-blindness."""
+    line = Text()
+    line.append("Red Robin", style="bold")
+    line.append(f"  ·  {engagement or '-'}  ·  ", style=_MUTED)
+    line.append("●", style=_STATUS_COLORS.get(connection_state, _MUTED))
+    line.append(f" {connection_state}", style=_MUTED)
+    for verdict in ("BLOCK", "WARN", "PASS", "ESCALATE"):
+        line.append("   ")
+        line.append(f"{counts.get(verdict, 0)} {verdict}", style=f"bold {VERDICT_COLORS[verdict]}")
+    return line
+
+
 def apply_verdict(events: list[dict[str, Any]], payload: dict[str, Any]) -> list[dict[str, Any]]:
     """Return a NEW events list with the verdict applied. A Layer B correction
     (``source == "layer_b"`` with a matching ``correlation_id``) updates the most
@@ -58,6 +90,13 @@ def apply_verdict(events: list[dict[str, Any]], payload: dict[str, Any]) -> list
                 return new[-_MAX_EVENTS:]
     new.append(payload)
     return new[-_MAX_EVENTS:]
+
+
+class TopBar(Static):
+    """Docked header: engagement id + daemon-connection status + verdict counts."""
+
+    def update_status(self, engagement: str, connection_state: str, counts: dict[str, int]) -> None:
+        self.update(format_topbar(engagement, connection_state, counts))
 
 
 class SessionsTable(DataTable):
