@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from typing import Any
 
 
 @dataclass
@@ -176,7 +177,7 @@ class ContextSummary:
     created_at: datetime = field(default_factory=datetime.now)
 
 
-def working_memory_to_snapshot(wm: WorkingMemory) -> dict:
+def working_memory_to_snapshot(wm: WorkingMemory) -> dict[str, Any]:
     """Serialize a :class:`WorkingMemory` to the WS ``working_memory_snapshot``
     payload dict — the inverse of
     ``redrobin.tui.snapshot_adapter.working_memory_from_snapshot``.
