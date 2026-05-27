@@ -145,3 +145,27 @@ async def test_enricher_malformed_json_emits_failed_not_crash(tmp_path):
         assert llm.calls == 2  # one call + one retry
     finally:
         await _drain(bus, task)
+
+
+@pytest.mark.asyncio
+async def test_lifespan_starts_enricher_task(tmp_path, monkeypatch):
+    monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path))
+    monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
+    monkeypatch.delenv("REDROBIN_ENGAGEMENT_SLUG", raising=False)
+    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
+    monkeypatch.setenv("REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json"))
+    monkeypatch.setenv("REDROBIN_ENGAGEMENT_ID", "eng-enr")
+    # No ANTHROPIC_API_KEY -> enricher boots in degraded mode (llm None), task still runs.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    from redrobin.api.app import create_app
+
+    app = create_app()
+    async with app.router.lifespan_context(app):
+        assert app.state.enricher_task is not None
+        assert not app.state.enricher_task.done()
+
+    # Clean teardown: the enricher drains via the bus _close sentinel (close_bus
+    # runs before close_enricher), NOT via the 2.0s cancel fallback (invariant 2).
+    assert app.state.enricher_task.done()
+    assert app.state.enricher_task.cancelled() is False

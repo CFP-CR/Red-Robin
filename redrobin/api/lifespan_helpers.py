@@ -27,6 +27,8 @@ from fastapi import FastAPI
 
 from redrobin.application.config import Settings
 from redrobin.application.cs_adapter_lifecycle import build_adapter, load_adapter_configs
+from redrobin.application.enrichment.enricher import WorkingMemoryEnricher
+from redrobin.application.enrichment.llm import build_enricher_llm
 from redrobin.application.engagement_loader import Engagement, EngagementLoader
 from redrobin.application.engagement_service import EngagementService
 from redrobin.application.event_bus import EventBus
@@ -490,10 +492,45 @@ async def start_l5_summarizer(app: FastAPI, settings: Settings) -> tuple[L5Summa
     return summarizer, close
 
 
+async def start_enricher(
+    app: FastAPI, settings: Settings
+) -> tuple[WorkingMemoryEnricher, CloseHook]:
+    """Start the working-memory LLM enricher (Plan B).
+
+    Subscribes to ``beacon.command_output`` and publishes ``working_memory.deltas``
+    events the reducer (started earlier) merges. When ANTHROPIC_API_KEY is missing,
+    ``build_enricher_llm`` returns None and the enricher short-circuits — daemon
+    still boots (degraded), the regex path still populates working memory.
+    """
+    enricher = WorkingMemoryEnricher(
+        bus=app.state.event_bus,
+        llm=build_enricher_llm(model=settings.enrichment_model),
+        denylist=settings.enrichment_denylist,
+        min_output_chars=settings.enrichment_min_output_chars,
+        chunk_max_chars=settings.enrichment_chunk_max_chars,
+        enabled=settings.enrichment_enabled,
+    )
+    started = asyncio.Event()
+    enricher.on_started = started.set  # type: ignore[attr-defined]
+    enricher_task = asyncio.create_task(enricher.run(), name="wm_enricher")
+    await started.wait()
+    app.state.enricher = enricher
+    app.state.enricher_task = enricher_task
+
+    async def close() -> None:
+        try:
+            await asyncio.wait_for(enricher_task, timeout=2.0)
+        except asyncio.TimeoutError:
+            enricher_task.cancel()
+
+    return enricher, close
+
+
 __all__ = [
     "CloseHook",
     "start_adapters",
     "start_engagement",
+    "start_enricher",
     "start_event_bus",
     "start_l5_summarizer",
     "start_lesson_promoter",
