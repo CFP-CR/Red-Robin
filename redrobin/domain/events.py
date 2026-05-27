@@ -57,6 +57,7 @@ class BeaconCommandInputEvent:
     command: str
     raw: str
     task_id: str | None = None
+    correlation_id: str | None = None
     type: Literal["beacon.command_input"] = "beacon.command_input"
 
 
@@ -66,6 +67,7 @@ class BeaconCommandOutputEvent:
     task_id: str
     output: str
     exit_status: int | None = None
+    correlation_id: str | None = None
     type: Literal["beacon.command_output"] = "beacon.command_output"
 
 
@@ -163,6 +165,12 @@ class Envelope:
         # Drop None for optional exit_status on output events (schema allows null OR omit)
         if isinstance(self.event, BeaconCommandOutputEvent) and self.event.exit_status is None:
             d["event"].pop("exit_status", None)
+        # Drop None for optional correlation_id on command input/output events
+        if (
+            isinstance(self.event, (BeaconCommandInputEvent, BeaconCommandOutputEvent))
+            and self.event.correlation_id is None
+        ):
+            d["event"].pop("correlation_id", None)
         # Drop None for optional rule_id on verdict events
         if isinstance(self.event, OpsecVerdictEvent) and self.event.rule_id is None:
             d["event"].pop("rule_id", None)
