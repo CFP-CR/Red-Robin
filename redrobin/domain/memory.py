@@ -57,11 +57,19 @@ class Credential:
     plaintext/ticket material captured by hand; ``Credential`` is reducer-derived
     from event parsing and always carries a ``source_beacon_id`` so the operator
     can trace provenance.
+
+    ``secret_type`` is an OPEN vocabulary (not an Enum) so non-AD material
+    (aws_key, azure_token, ...) needs no schema change. ``ntlm_hash`` is retained
+    for back-compat with working_memory.json written before this generalization;
+    it is transitional — once the regex producer is retired (Plan B), NTLM material
+    moves into ``secret``/``secret_type`` and ``ntlm_hash`` is removed.
     """
 
     domain: str
     username: str
     ntlm_hash: str | None = None
+    secret_type: str = "ntlm"  # ntlm | plaintext | aes256 | dcc2 | kerberos_ticket | aws_key | ...
+    secret: str | None = None  # the captured material (hash/password/key/ticket ref)
     source_beacon_id: str | None = None
 
 

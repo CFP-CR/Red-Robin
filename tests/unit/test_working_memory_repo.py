@@ -2,7 +2,7 @@
 
 import pytest
 
-from redrobin.domain.memory import Account, Host, Objective, WorkingMemory
+from redrobin.domain.memory import Account, Credential, Host, Objective, WorkingMemory
 from redrobin.infrastructure.persistence.working_memory_repo import WorkingMemoryRepo
 
 
@@ -103,3 +103,46 @@ def test_host_back_compat_old_json_without_new_fields(tmp_path):
     assert host.domain is None
     assert host.ip_addresses == []
     assert host.os_version is None
+
+
+def test_credential_generalized_round_trip(tmp_path):
+    """Credential gains secret_type + secret; plaintext is captured, not dropped."""
+    repo = WorkingMemoryRepo(tmp_path / "wm.json")
+    wm = WorkingMemory(engagement_id="eng-cred")
+    wm.credentials.append(
+        Credential(
+            domain="ACME",
+            username="jdoe",
+            secret_type="plaintext",
+            secret="Summer2026!",
+            source_beacon_id="B-1",
+        )
+    )
+    repo.save(wm)
+
+    cred = repo.load().credentials[0]
+    assert cred.secret_type == "plaintext"
+    assert cred.secret == "Summer2026!"
+    assert cred.source_beacon_id == "B-1"
+    assert cred.ntlm_hash is None  # plaintext cred must not bleed into ntlm_hash
+
+
+def test_credential_back_compat_old_json_defaults_to_ntlm(tmp_path):
+    """A pre-existing credential dict (ntlm_hash only) loads with secret_type='ntlm'."""
+    import json
+
+    path = tmp_path / "wm.json"
+    path.write_text(
+        json.dumps(
+            {
+                "engagement_id": "eng-old",
+                "credentials": [
+                    {"domain": "CORP", "username": "admin", "ntlm_hash": "a" * 32 + ":" + "b" * 32}
+                ],
+            }
+        )
+    )
+    cred = WorkingMemoryRepo(path).load().credentials[0]
+    assert cred.secret_type == "ntlm"
+    assert cred.secret is None
+    assert cred.ntlm_hash == "a" * 32 + ":" + "b" * 32
