@@ -274,13 +274,15 @@ sub redrobin_envelope {
 #   beacon.command_output requires {type, bid, task_id, output}
 
 sub redrobin_emit_command_input {
-    local('$bid $operator $command $raw $event_json $body');
-    ($bid, $operator, $command, $raw) = @_;
+    local('$bid $operator $command $raw $correlation_id $event_json $body');
+    ($bid, $operator, $command, $raw, $correlation_id) = @_;
     $event_json = '{"type":"beacon.command_input",' .
                   '"bid":"' . redrobin_escape_json($bid) . '",' .
                   '"operator":"' . redrobin_escape_json($operator) . '",' .
                   '"command":"' . redrobin_escape_json($command) . '",' .
-                  '"raw":"' . redrobin_escape_json($raw) . '"}';
+                  '"raw":"' . redrobin_escape_json($raw) . '"' .
+                  iff(strlen($correlation_id) > 0, ',"correlation_id":"' . redrobin_escape_json($correlation_id) . '"', "") .
+                  '}';
     $body = redrobin_envelope($event_json);
     try {
         redrobin_http_post("/v1/events", $body);
@@ -290,12 +292,14 @@ sub redrobin_emit_command_input {
 }
 
 sub redrobin_emit_command_output {
-    local('$bid $task_id $output $event_json $body');
-    ($bid, $task_id, $output) = @_;
+    local('$bid $task_id $output $correlation_id $event_json $body');
+    ($bid, $task_id, $output, $correlation_id) = @_;
     $event_json = '{"type":"beacon.command_output",' .
                   '"bid":"' . redrobin_escape_json($bid) . '",' .
                   '"task_id":"' . redrobin_escape_json($task_id) . '",' .
-                  '"output":"' . redrobin_escape_json($output) . '"}';
+                  '"output":"' . redrobin_escape_json($output) . '"' .
+                  iff(strlen($correlation_id) > 0, ',"correlation_id":"' . redrobin_escape_json($correlation_id) . '"', "") .
+                  '}';
     $body = redrobin_envelope($event_json);
     try {
         redrobin_http_post("/v1/events", $body);
@@ -454,9 +458,14 @@ include(script_resource("aliases/popup_beacon.sleep"));
 # without a backing job), default to "" — the schema requires the field
 # but allows any string value.
 set BEACON_OUTPUT {
-    local('$task_id');
+    local('$task_id $correlation_id');
     $task_id = iff($4 !is $null, $4, "");
-    redrobin_emit_command_output($1, $task_id, $2);
+    # $5 is a per-command correlation id (verified live 2026-05-27 via the hook
+    # debug spike). The official Aggressor events doc omits it. It is identical
+    # across this command's beacon_input / beacon_tasked / beacon_output and
+    # unique per command, so the enricher can pair output to its exact command.
+    $correlation_id = iff($5 !is $null, $5, "");
+    redrobin_emit_command_output($1, $task_id, $2, $correlation_id);
     return $2;
 }
 
@@ -469,10 +478,13 @@ set BEACON_OUTPUT {
 # ($1=bid, $2=task_summary) — missing the operator + command fields
 # required by the v0.1 schema for beacon.command_input. See #138.
 on beacon_input {
-    local('@parts $command');
+    local('@parts $command $correlation_id');
     @parts = split(' ', $3);
     $command = iff(size(@parts) > 0, @parts[0], "");
-    redrobin_emit_command_input($1, $2, $command, $3);
+    # $5 = per-command correlation id (see BEACON_OUTPUT note). Forward it so the
+    # enricher can pair this command's raw text to its later output exactly.
+    $correlation_id = iff($5 !is $null, $5, "");
+    redrobin_emit_command_input($1, $2, $command, $3, $correlation_id);
 }
 
 # New-beacon observation event (Aggressor `on beacon_initial`): $1 = bid.
