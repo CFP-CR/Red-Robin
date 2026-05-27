@@ -23,14 +23,19 @@ Live tracker of **open work**. Resolved history + deep per-issue detail live in 
 - [x] **Phase 5 — navigation** ✅ — `Tab`/`Shift+Tab` focus-cycle the 3 panes (active = accent border); `?` keymap help overlay (`HelpScreen`); Command Palette (`Ctrl+P`) via a provider seam (`commands.py`: Inspector + focus-pane + help commands). Plan: [plans/2026-05-26-tui-textual-phase5-navigation.md](./plans/2026-05-26-tui-textual-phase5-navigation.md). *(branch `tui/phase-5-navigation`; audit-clean; 7 new tests; 546 suite green.)*
 - [x] **Phase 6 — #156 + entrypoint swap + retire legacy** ✅ — `apply_engagement_scope` seeds WM client+scope from `engagement.yaml` at creation + daemon-load (#156, fixes the live `(none)`); `redrobin tui` launches the Textual app; the legacy prompt_toolkit client (9 modules + `panels/` + `labels/` + 10 test files, −2616 lines) DELETED — no dead code. Plan: [plans/2026-05-26-tui-textual-phase6-swap-and-retire.md](./plans/2026-05-26-tui-textual-phase6-swap-and-retire.md). *(branch `tui/phase-6-swap-and-retire`; audit-clean; 454 suite green; legacy gone.)*
 - [ ] **(future, separate plan)** — AI Advisor *logic* (UI mapped in the spec §3.6; bus-subscriber LLM agent reacting to WM+lessons+notes → next-step recommendations; can't bypass the gate). Its seam (frame-routing registry + `#advisor-dock`) is reserved by Phase 1.
+- [ ] **(future, separate brainstorm)** — Operational Journal + memory-system for the Assistant: a 6th layer holding the raw `(command, output)` transcript + RAG retrieval, so the Advisor is aware of the *whole* operation (WM + L5 summary + RAG-over-Journal + L1 lessons). The WM-AI-Enrichment Enricher is the natural write-point. Detail → [WM enrichment spec §13](./specs/2026-05-26-working-memory-ai-enrichment-design.md).
 - **Accept (per phase):** tests green + live operator smoke. Final: TUI visibly updates live (no reconnect), verdicts color-coded, Inspector scroll/filter, engagement scope/client/ROE shown.
 
+### Plan WM-AI-Enrichment · P2 · accuracy  *(spec ready → `/writing-plans`; proposed branch `wm/ai-enrichment` off `dev-juan`)*
+> Replace the brittle regex extraction in `WorkingMemoryReducer` (`beacon.command_output`) with LLM-based enrichment — Haiku + prompt caching, map-reduce for large outputs, validated JSON deltas → single-writer deterministic merge. Fixes **#149** + **#145** at the root. Spec: [specs/2026-05-26-working-memory-ai-enrichment-design.md](./specs/2026-05-26-working-memory-ai-enrichment-design.md).
+- [ ] Enricher + `EnrichmentTrigger` (denylist) + delta contract + `apply_deltas` merge; schema: Host (+`domain`/`ip_addresses`/`os_version`), Credential (generalized `secret_type`/`secret`); **delete** regex + orphaned `upsert_host`/`upsert_credential` (no dead code); 3-tier observability; cost controls (Haiku/cache/chunk/token-tracking).
+
 ### Plan J · P2 · robustness
-- [ ] **#145** — kerberos finding false-positive (fires on `Cached Tickets: (0)`).
+- [ ] **#145** — kerberos finding false-positive (fires on `Cached Tickets: (0)`). → **superseded by Plan WM-AI-Enrichment** (fixed via LLM extraction).
 - [ ] **#147** — Inspector "LESSONS" is just the latest verdict — mislabeled + not accumulated. *(Investigated 2026-05-25, **deferred from Plan I**: real lessons live in `longterm`/`episodic` DBs that are NOT in the WM snapshot and are never streamed to the TUI → needs a NEW lessons-streaming pipe, not the Plan I snapshot re-emit. Stays its own task here in J. Full root cause → [backlog.md](./backlog.md) #147.)*
 - [ ] **#91** — rules loader fails on UTF-8 BOM → open with `utf-8-sig`.
 - [ ] **#109** — `.cna` handshake retry should distinguish network vs response-shape failure.
-- [ ] **#149** — reducer lands only `Host Name` from `systeminfo` (drops OS / domain / NIC IPs).
+- [ ] **#149** — reducer lands only `Host Name` from `systeminfo` (drops OS / domain / NIC IPs). → **superseded by Plan WM-AI-Enrichment**.
 - [ ] **#152** — beacon `/v1/verdict/quick` sends empty `source_event_id` → Layer B retro can't correlate to Layer A. `.cna` should mint a ULID per gated command.
 
 ### Plan K · P3 · polish + tech-debt

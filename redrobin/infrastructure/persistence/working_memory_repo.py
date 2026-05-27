@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 from redrobin.domain.memory import (
@@ -28,6 +28,7 @@ from redrobin.domain.memory import (
     Session,
     ToolUsage,
     WorkingMemory,
+    WorkingMemoryDeltas,
 )
 
 
@@ -115,6 +116,66 @@ class WorkingMemoryRepo:
         wm = self.load()
         wm.findings.append(finding)
         self.save(wm)
+
+    def apply_deltas(self, deltas: WorkingMemoryDeltas) -> None:
+        """Merge a whole deltas batch in one load->merge->save (single writer).
+
+        Host: dedup by upper(name), non-null scalar overwrite, IP union (order-preserving).
+        Credential: dedup/replace by (domain, username, secret_type).
+        Finding: append-only (audit stream). Defenses: union (order-preserving).
+        Tool: dedup by (name, used_on).
+        """
+        wm = self.load()
+        for host in deltas.hosts:
+            self._merge_host(wm, host)
+        for cred in deltas.credentials:
+            self._merge_credential(wm, cred)
+        for finding in deltas.findings:
+            wm.findings.append(finding)
+        for tool in deltas.tools_used:
+            self._merge_tool(wm, tool)
+        for defense in deltas.defenses_observed:
+            if defense not in wm.defenses_observed:
+                wm.defenses_observed.append(defense)
+        self.save(wm)
+
+    @staticmethod
+    def _merge_host(wm: WorkingMemory, host: Host) -> None:
+        normalized = host.name.upper()
+        for existing in wm.hosts:
+            if existing.name.upper() == normalized:
+                existing.os = host.os or existing.os
+                existing.os_version = host.os_version or existing.os_version
+                existing.domain = host.domain or existing.domain
+                existing.integrity_level = host.integrity_level or existing.integrity_level
+                existing.edr_detected = host.edr_detected or existing.edr_detected
+                existing.access_level = host.access_level or existing.access_level
+                for ip in host.ip_addresses:
+                    if ip not in existing.ip_addresses:
+                        existing.ip_addresses.append(ip)
+                return
+        # Append a copy with the normalized name so the caller's incoming Host
+        # (the delta) is never mutated in place — apply_deltas must not surprise
+        # a future reusing producer.
+        wm.hosts.append(replace(host, name=normalized))
+
+    @staticmethod
+    def _merge_credential(wm: WorkingMemory, cred: Credential) -> None:
+        key = (cred.domain.lower(), cred.username.lower(), cred.secret_type.lower())
+        wm.credentials = [
+            c
+            for c in wm.credentials
+            if (c.domain.lower(), c.username.lower(), c.secret_type.lower()) != key
+        ]
+        wm.credentials.append(cred)
+
+    @staticmethod
+    def _merge_tool(wm: WorkingMemory, tool: ToolUsage) -> None:
+        key = (tool.name.lower(), tool.used_on.lower())
+        for existing in wm.tools_used:
+            if (existing.name.lower(), existing.used_on.lower()) == key:
+                return
+        wm.tools_used.append(tool)
 
     # --- (de)serialization ---------------------------------------------- #
 

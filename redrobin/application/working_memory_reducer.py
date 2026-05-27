@@ -10,6 +10,8 @@ Event dispatch table (canonical wire types from ``redrobin/domain/events.py``):
   hostnames, and Kerberos artifacts; write credentials/hosts/findings.
 * ``beacon.initial``         → upsert a ``Session`` keyed by ``bid``.
 * ``opsec.verdict``          → when ``verdict == "BLOCK"``, append a finding.
+* ``working_memory.deltas``  → merge an enrichment deltas batch via
+  ``WorkingMemoryRepo.apply_deltas`` (single writer; provenance system-supplied).
 
 All other event types are silently ignored. Repo helpers are synchronous JSON
 load/save; they run on the loop thread because per-event payload size is tiny.
@@ -39,6 +41,7 @@ from redrobin.domain.memory import (
     Finding,
     Host,
     Session,
+    WorkingMemoryDeltas,
     working_memory_to_snapshot,
 )
 from redrobin.infrastructure.persistence.episodic_repo import EpisodicRepo
@@ -141,6 +144,9 @@ class WorkingMemoryReducer:
         elif etype == "opsec.verdict":
             self._on_verdict(payload)
             return True
+        elif etype == "working_memory.deltas":
+            self._on_enrichment_deltas(payload)
+            return True
         # else: silently ignore — the bus is fan-out, not all events are for us.
         return False
 
@@ -223,6 +229,17 @@ class WorkingMemoryReducer:
             source_beacon_id=beacon_id,
         )
         self._repo.append_finding(finding)
+
+    def _on_enrichment_deltas(self, payload: dict[str, Any]) -> None:
+        """Merge an enrichment deltas batch. Provenance is taken from the
+        event's top-level ``source_beacon_id`` (system-supplied), not from any
+        per-item value, so the producer cannot spoof it. The reducer is the
+        single writer to working memory (see ``apply_deltas``)."""
+        src = payload.get("source_beacon_id")
+        deltas = WorkingMemoryDeltas.from_payload(
+            payload, source_beacon_id=str(src) if src is not None else None
+        )
+        self._repo.apply_deltas(deltas)
 
 
 __all__ = ["WorkingMemoryReducer"]

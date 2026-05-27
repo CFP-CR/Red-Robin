@@ -289,3 +289,69 @@ async def test_lifespan_starts_reducer_task(tmp_path, monkeypatch):
         await asyncio.sleep(0.3)
         creds = app.state.working_memory_repo.list_credentials()
         assert any(getattr(c, "username", None) == "alice" for c in creds)
+
+
+@pytest.mark.asyncio
+async def test_working_memory_deltas_event_merges_and_reemits(tmp_path):
+    """A working_memory.deltas event is merged via apply_deltas + re-emits a snapshot."""
+    bus = EventBus()
+    repo = _new_repo(tmp_path, "eng-deltas")
+    observer = await bus.subscribe()  # stands in for a connected TUI
+    _, task = await _start_reducer(bus, repo, "eng-deltas")
+    try:
+        await bus.publish(
+            {
+                "type": "working_memory.deltas",
+                "payload": {
+                    "source_beacon_id": "B-7",
+                    "hosts": [
+                        {
+                            "name": "ws01",
+                            "os": "Windows 10",
+                            "os_version": "10.0.19045",
+                            "domain": "ACME",
+                            "ip_addresses": ["10.0.0.5"],
+                        }
+                    ],
+                    "credentials": [
+                        {
+                            "domain": "ACME",
+                            "username": "jdoe",
+                            "secret_type": "plaintext",
+                            "secret": "pw",
+                        }
+                    ],
+                    "findings": [{"kind": "gpp_password", "summary": "Groups.xml cpassword"}],
+                },
+            }
+        )
+        host = None
+        for _ in range(50):
+            await asyncio.sleep(0.02)
+            hosts = repo.load().hosts
+            if hosts:
+                host = hosts[0]
+                break
+        assert host is not None and host.domain == "ACME"
+        assert host.ip_addresses == ["10.0.0.5"]
+        wm = repo.load()
+        assert any(
+            c.username == "jdoe" and c.secret_type == "plaintext" and c.source_beacon_id == "B-7"
+            for c in wm.credentials
+        )
+        assert any(f.kind == "gpp_password" and f.source_beacon_id == "B-7" for f in wm.findings)
+
+        # #146: a snapshot must be re-emitted so the TUI updates live.
+        saw_snapshot = False
+        for _ in range(50):
+            try:
+                evt = observer.get_nowait()
+            except asyncio.QueueEmpty:
+                await asyncio.sleep(0.02)
+                continue
+            if evt.get("type") == "working_memory_snapshot":
+                saw_snapshot = True
+                break
+        assert saw_snapshot, "reducer did not re-publish a snapshot after deltas merge"
+    finally:
+        await _drain(bus, task)

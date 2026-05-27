@@ -28,6 +28,9 @@ class Host:
     integrity_level: str | None = None
     edr_detected: str | None = None
     access_level: str | None = None  # e.g., "user-token", "SYSTEM"
+    domain: str | None = None  # AD domain (systeminfo "Domain:") — drives AD reasoning
+    ip_addresses: list[str] = field(default_factory=list)  # NIC IPs — lateral movement
+    os_version: str | None = None  # build/patch level — exploit selection
 
 
 @dataclass
@@ -54,11 +57,19 @@ class Credential:
     plaintext/ticket material captured by hand; ``Credential`` is reducer-derived
     from event parsing and always carries a ``source_beacon_id`` so the operator
     can trace provenance.
+
+    ``secret_type`` is an OPEN vocabulary (not an Enum) so non-AD material
+    (aws_key, azure_token, ...) needs no schema change. ``ntlm_hash`` is retained
+    for back-compat with working_memory.json written before this generalization;
+    it is transitional — once the regex producer is retired (Plan B), NTLM material
+    moves into ``secret``/``secret_type`` and ``ntlm_hash`` is removed.
     """
 
     domain: str
     username: str
     ntlm_hash: str | None = None
+    secret_type: str = "ntlm"  # ntlm | plaintext | aes256 | dcc2 | kerberos_ticket | aws_key | ...
+    secret: str | None = None  # the captured material (hash/password/key/ticket ref)
     source_beacon_id: str | None = None
 
 
@@ -175,6 +186,111 @@ class ContextSummary:
     text: str
     window_size: int
     created_at: datetime = field(default_factory=datetime.now)
+
+
+def _opt_str(value: Any) -> str | None:
+    return None if value is None else str(value)
+
+
+def _str_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(x) for x in value if isinstance(x, (str, int, float))]
+
+
+@dataclass
+class WorkingMemoryDeltas:
+    """A batch of facts extracted from one beacon command output.
+
+    Produced by the enrichment path (Plan B) and merged into WorkingMemory by
+    the reducer via :meth:`WorkingMemoryRepo.apply_deltas`. ``from_payload``
+    whitelists keys (unknown keys are dropped — the LLM cannot inject fields)
+    and system-attaches ``source_beacon_id`` to credentials/findings so
+    provenance is never LLM-supplied. Only output-derived fact types appear
+    here; objectives/phase/kill-chain (interpretation) and sessions/scope
+    (other event sources) are intentionally absent.
+    """
+
+    hosts: list[Host] = field(default_factory=list)
+    credentials: list[Credential] = field(default_factory=list)
+    findings: list[Finding] = field(default_factory=list)
+    tools_used: list[ToolUsage] = field(default_factory=list)
+    defenses_observed: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_payload(cls, payload: Any, *, source_beacon_id: str | None) -> WorkingMemoryDeltas:
+        if not isinstance(payload, dict):
+            return cls()
+        hosts: list[Host] = []
+        for h in payload.get("hosts") or []:
+            if not isinstance(h, dict) or not h.get("name"):
+                continue
+            hosts.append(
+                Host(
+                    name=str(h["name"]),
+                    os=_opt_str(h.get("os")),
+                    integrity_level=_opt_str(h.get("integrity_level")),
+                    edr_detected=_opt_str(h.get("edr_detected")),
+                    access_level=_opt_str(h.get("access_level")),
+                    domain=_opt_str(h.get("domain")),
+                    ip_addresses=_str_list(h.get("ip_addresses")),
+                    os_version=_opt_str(h.get("os_version")),
+                )
+            )
+        credentials: list[Credential] = []
+        for c in payload.get("credentials") or []:
+            if not isinstance(c, dict) or not c.get("username"):
+                continue
+            credentials.append(
+                Credential(
+                    domain=str(c.get("domain", "")),
+                    username=str(c["username"]),
+                    ntlm_hash=_opt_str(c.get("ntlm_hash")),
+                    secret_type=str(c.get("secret_type") or "ntlm"),
+                    secret=_opt_str(c.get("secret")),
+                    source_beacon_id=source_beacon_id,
+                )
+            )
+        findings: list[Finding] = []
+        for f in payload.get("findings") or []:
+            if not isinstance(f, dict) or not f.get("kind"):
+                continue
+            findings.append(
+                Finding(
+                    kind=str(f["kind"]),
+                    summary=str(f.get("summary", "")),
+                    source_beacon_id=source_beacon_id,
+                )
+            )
+        tools_used: list[ToolUsage] = []
+        now_iso = datetime.now().isoformat()
+        for t in payload.get("tools_used") or []:
+            if not isinstance(t, dict) or not t.get("name"):
+                continue
+            tools_used.append(
+                ToolUsage(
+                    name=str(t["name"]),
+                    used_on=str(t.get("used_on", "")),
+                    used_at=str(t.get("used_at") or now_iso),
+                    detection_observed=str(t.get("detection_observed", "none")),
+                )
+            )
+        return cls(
+            hosts=hosts,
+            credentials=credentials,
+            findings=findings,
+            tools_used=tools_used,
+            defenses_observed=_str_list(payload.get("defenses_observed")),
+        )
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "hosts": [asdict(h) for h in self.hosts],
+            "credentials": [asdict(c) for c in self.credentials],
+            "findings": [asdict(f) for f in self.findings],
+            "tools_used": [asdict(t) for t in self.tools_used],
+            "defenses_observed": list(self.defenses_observed),
+        }
 
 
 def working_memory_to_snapshot(wm: WorkingMemory) -> dict[str, Any]:
