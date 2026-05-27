@@ -818,6 +818,12 @@ class WorkingMemoryEnricher:
             await self._emit_failed(command, src, f"llm_error: {exc}")
             return
 
+        # All chunks unparseable (even after the per-chunk retry) → fail loud,
+        # do NOT publish an empty deltas event. Matches test_enricher_malformed_json.
+        if per_chunk and all(d is None for d in per_chunk):
+            await self._emit_failed(command, src, "all_chunks_unparseable")
+            return
+
         merged = WorkingMemoryDeltas()
         for deltas in per_chunk:
             if deltas is None:
@@ -884,14 +890,7 @@ class WorkingMemoryEnricher:
 __all__ = ["WorkingMemoryEnricher"]
 ```
 
-Note on the malformed-JSON test: when EVERY chunk fails to parse (all `None`) the enricher still publishes an empty `working_memory.deltas` AND `enrichment.completed`. To make the failed-path test deterministic, the implementer must emit `enrichment.failed` when **all** chunks dropped. Adjust `_enrich`: after the merge loop, if `all(d is None for d in per_chunk)` and `per_chunk`, call `await self._emit_failed(command, src, "all_chunks_unparseable")` and `return` BEFORE publishing the (empty) deltas. Add that guard:
-
-```python
-        if per_chunk and all(d is None for d in per_chunk):
-            await self._emit_failed(command, src, "all_chunks_unparseable")
-            return
-```
-(place it immediately after the `per_chunk = await asyncio.gather(...)` try/except block, before building `merged`).
+*(The all-chunks-unparseable guard already in the code above is what makes `test_enricher_malformed_json_emits_failed_not_crash` pass: when every chunk fails to parse — even after the per-chunk retry — the enricher emits `enrichment.failed` and returns, rather than publishing an empty `working_memory.deltas` + `enrichment.completed`. That test asserts `llm.calls == 2` (one call + one retry on the single chunk) and an `enrichment.failed` event.)*
 
 - [ ] **Step 4: Run to verify it passes**
 
@@ -989,13 +988,22 @@ Add `"start_enricher"` to the `__all__` list.
 
 Add `start_enricher` to the import block (line ~32-40, the `from redrobin.api.lifespan_helpers import (...)`).
 
-In the `lifespan` function, after the `start_working_memory` call (line ~90, `_, close_wm = await start_working_memory(app, settings)`), add:
+The lifespan keeps close hooks **by name** (not a list) and awaits them in an explicit ordered `finally` block. Two precise edits:
 
+(i) **Startup** — in `lifespan`, immediately after line 90 (`_, close_wm = await start_working_memory(app, settings)`) and BEFORE `start_pipeline`, add:
 ```python
     _, close_enricher = await start_enricher(app, settings)
 ```
+This guarantees the reducer (started by `start_working_memory`) is subscribed before the enricher can publish `working_memory.deltas`.
 
-And register its close hook so it's torn down in reverse with the others (follow the existing close-hook collection pattern — add `close_enricher` to whatever list/sequence the lifespan awaits in reverse during shutdown; if the lifespan closes hooks inline, add `await close_enricher()` symmetrically with `close_wm`/`close_promoter`/`close_summarizer`).
+(ii) **Shutdown** — in the `finally` block, the enricher is a bus subscriber that exits when `close_bus()` broadcasts the `_close` sentinel; its close hook then waits for the task to drain. So it MUST be awaited AFTER `close_bus()`. Add this block immediately AFTER the existing `close_wm()` block (after `logger.exception("close_wm failed")`, before the `stop_rules()` block):
+```python
+        # Wait for the enricher to drain after the bus sentinel (like the reducer).
+        try:
+            await close_enricher()
+        except Exception:
+            logger.exception("close_enricher failed")
+```
 
 - [ ] **Step 4: Run to verify it passes**
 
