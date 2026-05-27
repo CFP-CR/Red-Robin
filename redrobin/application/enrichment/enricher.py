@@ -18,6 +18,7 @@ from typing import Any
 from redrobin.application.enrichment.chunker import chunk_output
 from redrobin.application.enrichment.llm import EnricherLLM
 from redrobin.application.enrichment.parser import DeltaParseError, parse_deltas
+from redrobin.application.enrichment.sanitize import strip_self_annotations
 from redrobin.application.enrichment.trigger import should_enrich
 from redrobin.application.event_bus import EventBus
 from redrobin.domain.memory import WorkingMemoryDeltas
@@ -83,8 +84,18 @@ class WorkingMemoryEnricher:
     async def _enrich(self, payload: dict[str, Any]) -> None:
         if self._llm is None or not self._enabled:
             return
-        command = str(payload.get("command") or payload.get("cmd") or "")
-        output = str(payload.get("output", ""))
+        # Recover the command behind this output (exact via correlation_id, then
+        # per-bid fallback, then ""). A wire payload may also carry "command"
+        # directly (older traces / hand-crafted fixtures) — prefer it when the
+        # recovery caches have nothing, so existing behavior is preserved.
+        command = self._recover_command(payload) or str(
+            payload.get("command") or payload.get("cmd") or ""
+        )
+        # Strip Red Robin's own console annotations before any gate or LLM call,
+        # so a self-annotation never becomes a junk finding (Area 3).
+        output = strip_self_annotations(
+            str(payload.get("output", "")), prefix=self._self_annotation_prefix
+        )
         bid = payload.get("bid")
         src = str(bid) if bid is not None else None
         if not should_enrich(

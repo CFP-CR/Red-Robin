@@ -243,3 +243,239 @@ async def test_golden_klist_zero_tickets_no_finding_145(tmp_path):
         assert deltas["findings"] == []  # no spurious kerberos finding
     finally:
         await _drain(bus, task)
+
+
+@pytest.mark.asyncio
+async def test_enricher_recovers_command_via_correlation_id(tmp_path):
+    """command_input then command_output with the same correlation_id → the
+    enricher enriches with the recovered command (the stub records what it saw)."""
+    bus = EventBus()
+    await bus.subscribe()
+
+    class _RecordingLLM:
+        def __init__(self) -> None:
+            self.seen_commands: list[str] = []
+
+        async def extract(self, *, command, beacon_id, output) -> str:
+            self.seen_commands.append(command)
+            return "{}"
+
+    llm = _RecordingLLM()
+    _, task = await _start(bus, llm)
+    try:
+        await bus.publish(
+            {
+                "type": "beacon.command_input",
+                "payload": {
+                    "bid": "B-7",
+                    "operator": "juan",
+                    "command": "shell",
+                    "raw": "shell systeminfo",
+                    "correlation_id": "18ff",
+                },
+            }
+        )
+        await bus.publish(
+            {
+                "type": "beacon.command_output",
+                "payload": {
+                    "bid": "B-7",
+                    "task_id": "30",
+                    "output": "Host Name: WS01\n" * 5,
+                    "correlation_id": "18ff",
+                },
+            }
+        )
+        for _ in range(80):
+            await asyncio.sleep(0.02)
+            if llm.seen_commands:
+                break
+        assert llm.seen_commands == ["shell systeminfo"]
+    finally:
+        await _drain(bus, task)
+
+
+@pytest.mark.asyncio
+async def test_recovered_denylisted_command_is_skipped(tmp_path):
+    """A bare output whose command is recovered as a denylisted verb → no LLM
+    call (the denylist works now that the command is known)."""
+    bus = EventBus()
+    await bus.subscribe()
+    llm = _StubLLM("{}")
+    _, task = await _start(bus, llm)
+    try:
+        await bus.publish(
+            {
+                "type": "beacon.command_input",
+                "payload": {
+                    "bid": "B-1",
+                    "operator": "juan",
+                    "command": "ls",
+                    "raw": "ls -la /tmp",
+                    "correlation_id": "aa11",
+                },
+            }
+        )
+        await bus.publish(
+            {
+                "type": "beacon.command_output",
+                "payload": {
+                    "bid": "B-1",
+                    "task_id": "30",
+                    "output": "a" * 50,
+                    "correlation_id": "aa11",
+                },
+            }
+        )
+        await asyncio.sleep(0.2)
+        assert llm.calls == 0  # recovered "ls -la /tmp" is denylisted -> skipped
+    finally:
+        await _drain(bus, task)
+
+
+@pytest.mark.asyncio
+async def test_rapid_fire_each_output_uses_its_own_command(tmp_path):
+    """Two inputs then two outputs, interleaved by correlation_id (the §3 proof
+    case): each output is enriched with ITS OWN command, not the last one."""
+    bus = EventBus()
+    await bus.subscribe()
+
+    class _PairRecordingLLM:
+        def __init__(self) -> None:
+            # output -> command, so we can assert the pairing regardless of order
+            self.pairs: dict[str, str] = {}
+
+        async def extract(self, *, command, beacon_id, output) -> str:
+            self.pairs[output.strip()] = command
+            return "{}"
+
+    llm = _PairRecordingLLM()
+    _, task = await _start(bus, llm)
+    try:
+        # input A then input B (both queued before any output, like a sleep+trio)
+        await bus.publish(
+            {
+                "type": "beacon.command_input",
+                "payload": {
+                    "bid": "B-1",
+                    "operator": "j",
+                    "command": "shell",
+                    "raw": "shell whoami",
+                    "correlation_id": "18ff",
+                },
+            }
+        )
+        await bus.publish(
+            {
+                "type": "beacon.command_input",
+                "payload": {
+                    "bid": "B-1",
+                    "operator": "j",
+                    "command": "shell",
+                    "raw": "shell hostname",
+                    "correlation_id": "272d",
+                },
+            }
+        )
+        await bus.publish(
+            {
+                "type": "beacon.command_output",
+                "payload": {
+                    "bid": "B-1",
+                    "task_id": "30",
+                    "output": "OUT_A" + "x" * 20,
+                    "correlation_id": "18ff",
+                },
+            }
+        )
+        await bus.publish(
+            {
+                "type": "beacon.command_output",
+                "payload": {
+                    "bid": "B-1",
+                    "task_id": "31",
+                    "output": "OUT_B" + "y" * 20,
+                    "correlation_id": "272d",
+                },
+            }
+        )
+        for _ in range(100):
+            await asyncio.sleep(0.02)
+            if len(llm.pairs) >= 2:
+                break
+        assert llm.pairs[("OUT_A" + "x" * 20).strip()] == "shell whoami"
+        assert llm.pairs[("OUT_B" + "y" * 20).strip()] == "shell hostname"
+    finally:
+        await _drain(bus, task)
+
+
+@pytest.mark.asyncio
+async def test_self_annotation_only_output_skips_enrichment(tmp_path):
+    """An output that is ONLY a [Red Robin] annotation strips to empty → below
+    min_output_chars → no LLM call, no deltas."""
+    bus = EventBus()
+    observer = await bus.subscribe()
+    llm = _StubLLM('{"findings":[{"kind":"novel_pattern","summary":"x"}]}')
+    _, task = await _start(bus, llm)
+    try:
+        await bus.publish(
+            {
+                "type": "beacon.command_output",
+                "payload": {
+                    "bid": "B-2",
+                    "task_id": "30",
+                    "output": "[Red Robin] novel pattern — Layer B reviewing async",
+                },
+            }
+        )
+        await asyncio.sleep(0.2)
+        assert llm.calls == 0  # stripped to empty -> skipped before any LLM call
+        seen = []
+        try:
+            while True:
+                seen.append(observer.get_nowait().get("type"))
+        except asyncio.QueueEmpty:
+            pass
+        assert "working_memory.deltas" not in seen
+    finally:
+        await _drain(bus, task)
+
+
+@pytest.mark.asyncio
+async def test_self_annotation_stripped_but_real_output_still_enriched(tmp_path):
+    """A [Red Robin] line interleaved with real output → the annotation is
+    stripped, the real output still reaches the LLM."""
+    bus = EventBus()
+    await bus.subscribe()
+
+    class _RecordingLLM:
+        def __init__(self) -> None:
+            self.seen_outputs: list[str] = []
+
+        async def extract(self, *, command, beacon_id, output) -> str:
+            self.seen_outputs.append(output)
+            return "{}"
+
+    llm = _RecordingLLM()
+    _, task = await _start(bus, llm)
+    try:
+        await bus.publish(
+            {
+                "type": "beacon.command_output",
+                "payload": {
+                    "bid": "B-3",
+                    "task_id": "30",
+                    "output": "Host Name: JCSP\n[Red Robin] novel pattern\nDomain: WORKGROUP",
+                },
+            }
+        )
+        for _ in range(80):
+            await asyncio.sleep(0.02)
+            if llm.seen_outputs:
+                break
+        assert llm.seen_outputs, "expected the stripped output to be enriched"
+        assert "[Red Robin]" not in llm.seen_outputs[0]
+        assert "Host Name: JCSP" in llm.seen_outputs[0]
+        assert "Domain: WORKGROUP" in llm.seen_outputs[0]
+    finally:
+        await _drain(bus, task)
