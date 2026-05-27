@@ -509,6 +509,8 @@ async def start_enricher(
         min_output_chars=settings.enrichment_min_output_chars,
         chunk_max_chars=settings.enrichment_chunk_max_chars,
         enabled=settings.enrichment_enabled,
+        max_concurrency=settings.enrichment_max_concurrency,
+        self_annotation_prefix=settings.enrichment_self_annotation_prefix,
     )
     started = asyncio.Event()
     enricher.on_started = started.set  # type: ignore[attr-defined]

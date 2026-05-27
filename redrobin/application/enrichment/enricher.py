@@ -200,10 +200,16 @@ class WorkingMemoryEnricher:
     async def _extract_chunk(
         self, command: str, src: str | None, chunk: str
     ) -> WorkingMemoryDeltas | None:
-        """Extract one chunk; ONE retry on malformed JSON, then log + drop (None)."""
+        """Extract one chunk; ONE retry on malformed JSON, then log + drop (None).
+
+        Each LLM call acquires the shared semaphore so a many-chunk output (e.g.
+        ``dir /s C:\\Windows``) throttles through at most ``max_concurrency`` calls
+        at once instead of fanning the whole batch out and blowing the rate limit
+        (Area 2). The SDK's own retry/``retry-after`` handles the rate ceiling."""
         assert self._llm is not None
         for attempt in (1, 2):
-            raw = await self._llm.extract(command=command, beacon_id=src, output=chunk)
+            async with self._sem:
+                raw = await self._llm.extract(command=command, beacon_id=src, output=chunk)
             try:
                 return parse_deltas(raw, source_beacon_id=src)
             except DeltaParseError as exc:
