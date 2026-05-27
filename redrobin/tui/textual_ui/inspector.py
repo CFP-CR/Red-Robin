@@ -78,36 +78,62 @@ def _kill_chain_lines(s: dict[str, Any]) -> list[str]:
     return [f"{phase}: {status}" for phase, status in (s.get("kill_chain_status") or {}).items()]
 
 
+def _fmt_value(v: Any) -> str:
+    """List/tuple -> comma-joined non-empty items; scalars -> str()."""
+    if isinstance(v, (list, tuple)):
+        return ", ".join(str(x) for x in v if x is not None and x != "")
+    return str(v)
+
+
+def _kv_body(item: dict[str, Any], *, skip: set[str]) -> str:
+    """Every POPULATED field (except ``skip``) as 'key=value', in field order.
+
+    Schema-driven: renders whatever keys are present — any secret_type, any OS,
+    fields added later — nothing hardcoded. None / "" / [] / {} are dropped.
+    """
+    parts: list[str] = []
+    for k, v in item.items():
+        if k in skip or v is None or v == "" or v == [] or v == {}:
+            continue
+        rendered = _fmt_value(v)
+        if rendered == "":
+            continue
+        parts.append(f"{k}={rendered}")
+    return " ".join(parts)
+
+
+def _named_lines(records: list[dict[str, Any]]) -> list[str]:
+    """Identity = ``name``, then every other populated field (host/account/tool)."""
+    out: list[str] = []
+    for r in records:
+        ident = r.get("name") or "?"
+        body = _kv_body(r, skip={"name"})
+        out.append(f"{ident} {body}".rstrip())
+    return out
+
+
 def _host_lines(s: dict[str, Any]) -> list[str]:
-    return [
-        f"{h.get('name', '?')} [{h.get('os') or '-'}] EDR={h.get('edr_detected') or '-'} "
-        f"access={h.get('access_level') or '-'} integrity={h.get('integrity_level') or '-'}"
-        for h in (s.get("hosts") or [])
-    ]
+    return _named_lines(s.get("hosts") or [])
 
 
 def _account_lines(s: dict[str, Any]) -> list[str]:
-    return [
-        f"{a.get('name', '?')} [{a.get('kind', '?')}] source={a.get('source_host') or '-'} "
-        f"captured={a.get('captured_at') or '-'}"
-        for a in (s.get("accounts") or [])
-    ]
+    return _named_lines(s.get("accounts") or [])
 
 
 def _tool_lines(s: dict[str, Any]) -> list[str]:
-    return [
-        f"{t.get('name', '?')} on {t.get('used_on') or '-'} at {t.get('used_at') or '-'} "
-        f"— {t.get('detection_observed') or '-'}"
-        for t in (s.get("tools_used") or [])
-    ]
+    return _named_lines(s.get("tools_used") or [])
 
 
 def _credential_lines(s: dict[str, Any]) -> list[str]:
-    return [
-        f"{c.get('domain', '?')}\\{c.get('username', '?')} "
-        f"hash={c.get('ntlm_hash') or '-'} src={c.get('source_beacon_id') or '-'}"
-        for c in (s.get("credentials") or [])
-    ]
+    out: list[str] = []
+    for c in s.get("credentials") or []:
+        dom = c.get("domain") or ""
+        user = c.get("username") or ""
+        ident = f"{dom}\\{user}" if dom else (user or "?")
+        body = _kv_body(c, skip={"domain", "username", "source_beacon_id"})
+        src = c.get("source_beacon_id") or "-"
+        out.append(" ".join(p for p in (ident, body, f"src={src}") if p))
+    return out
 
 
 def _finding_lines(s: dict[str, Any]) -> list[str]:

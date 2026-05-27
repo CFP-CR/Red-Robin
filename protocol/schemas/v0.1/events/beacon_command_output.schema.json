@@ -9,7 +9,8 @@
     "bid": {"type": "string"},
     "task_id": {"type": "string"},
     "output": {"type": "string"},
-    "exit_status": {"type": ["integer", "null"]}
+    "exit_status": {"type": ["integer", "null"]},
+    "correlation_id": {"type": "string"}
   },
   "additionalProperties": false
 }

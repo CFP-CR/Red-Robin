@@ -10,7 +10,8 @@
     "operator": {"type": "string"},
     "command": {"type": "string"},
     "raw": {"type": "string"},
-    "task_id": {"type": "string"}
+    "task_id": {"type": "string"},
+    "correlation_id": {"type": "string"}
   },
   "additionalProperties": false
 }

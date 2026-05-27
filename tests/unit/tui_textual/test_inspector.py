@@ -240,3 +240,161 @@ async def test_inspector_copy_row_copies_highlighted(monkeypatch):
         await pilot.press("y")
         await pilot.pause()
         assert copied and copied[0] == str(content.get_option_at_index(0).prompt)
+
+
+# --- Schema-driven (dynamic) record rendering: any secret_type / OS, not AD-only ---
+
+
+def test_credential_plaintext_shows_secret_and_type():
+    s = {
+        "credentials": [
+            {
+                "domain": "",
+                "username": "admin",
+                "ntlm_hash": None,
+                "secret_type": "plaintext",
+                "secret": "P@ssw0rd!",
+                "source_beacon_id": "997410512",
+            }
+        ]
+    }
+    line = inspector._credential_lines(s)[0]
+    assert "secret_type=plaintext" in line
+    assert "secret=P@ssw0rd!" in line
+    assert "src=997410512" in line
+    assert "hash=" not in line  # no stale ntlm-only label
+    assert not line.startswith("\\")  # empty domain -> no dangling backslash
+    assert line.startswith("admin")
+
+
+def test_credential_ntlm_shows_hash_and_domain():
+    s = {
+        "credentials": [
+            {
+                "domain": "CORP",
+                "username": "alice",
+                "ntlm_hash": "aad3b435:1111",
+                "secret_type": "ntlm",
+                "secret": None,
+                "source_beacon_id": "B-100",
+            }
+        ]
+    }
+    line = inspector._credential_lines(s)[0]
+    assert line.startswith("CORP\\alice")
+    assert "ntlm_hash=aad3b435:1111" in line
+    assert "secret_type=ntlm" in line
+    assert "secret=" not in line  # null secret dropped
+
+
+def test_credential_non_ad_secret_type_is_dynamic():
+    # proves it is NOT hardcoded to AD/NTLM: an aws_key cred renders fully
+    s = {
+        "credentials": [
+            {
+                "domain": "",
+                "username": "deploy",
+                "secret_type": "aws_key",
+                "secret": "AKIAEXAMPLE",
+                "source_beacon_id": "b1",
+            }
+        ]
+    }
+    line = inspector._credential_lines(s)[0]
+    assert "secret_type=aws_key" in line
+    assert "secret=AKIAEXAMPLE" in line
+
+
+def test_credential_unknown_future_field_auto_displays():
+    # a field not in today's schema still shows -> schema-driven
+    s = {
+        "credentials": [
+            {
+                "username": "svc",
+                "secret_type": "kerberos_ticket",
+                "ticket_flags": "forwardable,renewable",
+                "source_beacon_id": "b1",
+            }
+        ]
+    }
+    line = inspector._credential_lines(s)[0]
+    assert "ticket_flags=forwardable,renewable" in line
+
+
+def test_host_shows_plan_a_fields():
+    s = {
+        "hosts": [
+            {
+                "name": "JCSP",
+                "os": "Microsoft Windows 11 Pro",
+                "os_version": "10.0.26200",
+                "domain": "WORKGROUP",
+                "ip_addresses": ["192.168.130.1", "100.103.167.36"],
+                "edr_detected": None,
+                "access_level": None,
+                "integrity_level": None,
+            }
+        ]
+    }
+    line = inspector._host_lines(s)[0]
+    assert line.startswith("JCSP")
+    assert "os=Microsoft Windows 11 Pro" in line
+    assert "os_version=10.0.26200" in line
+    assert "domain=WORKGROUP" in line
+    assert "192.168.130.1" in line and "100.103.167.36" in line  # list joined
+    assert "edr_detected=" not in line  # null fields dropped
+
+
+def test_host_linux_minimal_no_empty_fields():
+    s = {
+        "hosts": [
+            {
+                "name": "web01",
+                "os": "Ubuntu 22.04",
+                "os_version": None,
+                "domain": None,
+                "ip_addresses": [],
+                "edr_detected": None,
+                "access_level": None,
+                "integrity_level": None,
+            }
+        ]
+    }
+    line = inspector._host_lines(s)[0]
+    assert line.startswith("web01")
+    assert "os=Ubuntu 22.04" in line
+    assert "ip_addresses=" not in line  # empty list dropped
+    assert "domain=" not in line
+
+
+def test_empty_sections_return_empty_lists():
+    assert inspector._host_lines({}) == []
+    assert inspector._credential_lines({}) == []
+
+
+def test_false_and_zero_field_values_are_kept():
+    # A False/0 field is a real value and must be SHOWN, not dropped by the
+    # empty-skip predicate. Locks behavior against a future "skip falsy" refactor.
+    s = {"hosts": [{"name": "h1", "edr_detected": False, "open_ports": 0}]}
+    line = inspector._host_lines(s)[0]
+    assert "edr_detected=False" in line
+    assert "open_ports=0" in line
+
+
+def test_credential_identity_when_no_principal():
+    # Both domain and username empty (e.g. a bare token) -> "?" identity, body still renders.
+    s = {
+        "credentials": [
+            {
+                "domain": "",
+                "username": "",
+                "secret_type": "token",
+                "secret": "abc123",
+                "source_beacon_id": "b1",
+            }
+        ]
+    }
+    line = inspector._credential_lines(s)[0]
+    assert line.startswith("?")
+    assert "secret_type=token" in line
+    assert "secret=abc123" in line

@@ -160,3 +160,69 @@ class AnthropicSummarizerClient:
             messages=[{"role": "user", "content": episodes_text}],
         )
         return response.content[0].text
+
+
+class AnthropicEnricherClient:
+    """Working-memory enricher LLM — one cached-prompt extraction call per chunk.
+
+    The large STATIC system prompt (extraction instructions + the JSON delta
+    schema + grounding rules + an inline negative example) is sent as an ephemeral
+    1h cached block, so per-call cost is ~the dynamic command-output tokens.
+    Implements the ``EnricherLLM`` protocol; Haiku-class model (extraction is not
+    reasoning-heavy). Prompt strength (a fuller few-shot) and the ``max_tokens``
+    headroom are tuned against real output during the live-beacon smoke.
+    """
+
+    _SYSTEM_PROMPT = (
+        "You are the Red Robin working-memory extraction engine. Read one red-team "
+        "beacon command and its raw output, and return ONLY a JSON object with these "
+        "keys (any may be empty):\n"
+        '{"hosts":[{"name","os","os_version","domain","ip_addresses":[],'
+        '"integrity_level","edr_detected","access_level"}],'
+        '"credentials":[{"domain","username","secret_type","secret","ntlm_hash"}],'
+        '"findings":[{"kind","summary"}],'
+        '"tools_used":[{"name","used_on","detection_observed"}],'
+        '"defenses_observed":[]}\n'
+        "Rules: Extract ONLY facts literally present in the output. Do NOT infer, "
+        "guess, or invent. If a field is absent, omit it. Understand semantics: "
+        "'Cached Tickets: (0)' means ZERO tickets — do NOT emit a finding for it. "
+        "A host is a distinct machine/system identity: a hostname, an FQDN, or an "
+        "IP address. A host is NOT a username, a file or directory path, a "
+        "drive/volume label, a service name, or a generic word. Cross-OS examples "
+        "of NOT-a-host: 'jcspi' (a username), 'Windows' or 'C:' (a drive/volume "
+        "label, e.g. from 'Volume in drive C is Windows'), 'web-svc' (a service "
+        "name), '/etc/passwd' (a path). Only emit a host when the output names an "
+        "actual machine. "
+        "secret_type is an open vocabulary (ntlm|plaintext|aes256|kerberos_ticket|"
+        "aws_key|...). Return ONLY the JSON object, no prose, no markdown fences."
+    )
+
+    def __init__(
+        self, *, model: str = "claude-haiku-4-5", max_retries: int = 5, max_tokens: int = 2048
+    ) -> None:
+        self._model = model
+        self._max_tokens = max_tokens
+        self._client = anthropic.AsyncAnthropic(
+            api_key=get_anthropic_key(),
+            max_retries=max_retries,
+        )
+
+    async def extract(self, *, command: str, beacon_id: str | None, output: str) -> str:
+        response = await self._client.messages.create(
+            model=self._model,
+            max_tokens=self._max_tokens,
+            system=[
+                {
+                    "type": "text",
+                    "text": self._SYSTEM_PROMPT,
+                    "cache_control": {"type": "ephemeral", "ttl": "1h"},
+                }
+            ],
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"Command: {command}\nBeacon: {beacon_id}\nOutput:\n{output}",
+                }
+            ],
+        )
+        return response.content[0].text

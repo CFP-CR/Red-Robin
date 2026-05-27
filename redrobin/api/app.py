@@ -32,6 +32,7 @@ from redrobin.api.events_router import router as events_router
 from redrobin.api.lifespan_helpers import (
     start_adapters,
     start_engagement,
+    start_enricher,
     start_event_bus,
     start_l5_summarizer,
     start_lesson_promoter,
@@ -88,6 +89,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app, settings
     )  # no close hook — must run before working_memory so the reducer captures the resolved engagement_id
     _, close_wm = await start_working_memory(app, settings)
+    _, close_enricher = await start_enricher(app, settings)
     _, _close_pipeline = await start_pipeline(app, settings)  # no-op close
     _, close_adapters = await start_adapters(app, settings)
     _, close_promoter = await start_lesson_promoter(app, settings)
@@ -186,6 +188,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await close_wm()
         except Exception:
             logger.exception("close_wm failed")
+        # Wait for the enricher to drain after the bus sentinel (like the reducer).
+        try:
+            await close_enricher()
+        except Exception:
+            logger.exception("close_enricher failed")
         # 6. Stop the rules-loader hot-reload watchdog last.
         try:
             await stop_rules()

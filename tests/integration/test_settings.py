@@ -114,3 +114,51 @@ def test_bearer_token_path_reads_from_settings(monkeypatch, tmp_path):
     importlib.reload(bearer)
     path = bearer._token_path()
     assert path == tmp_path / "custom" / "transport.token"
+
+
+def test_enrichment_settings_defaults_and_override(monkeypatch):
+    from redrobin.infrastructure.config import Settings
+
+    s = Settings()
+    assert s.enrichment_enabled is True
+    assert s.enrichment_model == "claude-haiku-4-5"
+    assert s.enrichment_min_output_chars == 8
+    assert s.enrichment_chunk_max_chars == 16000
+    assert s.enrichment_denylist == []  # enrich-by-default; denylist is opt-in via env
+
+    monkeypatch.setenv("REDROBIN_ENRICHMENT_ENABLED", "false")
+    monkeypatch.setenv("REDROBIN_ENRICHMENT_CHUNK_MAX_CHARS", "32000")
+    s2 = Settings()
+    assert s2.enrichment_enabled is False
+    assert s2.enrichment_chunk_max_chars == 32000
+
+    # denylist env override accepts a comma-separated string OR a JSON array
+    monkeypatch.setenv("REDROBIN_ENRICHMENT_DENYLIST", "foo, bar ,baz")
+    assert Settings().enrichment_denylist == ["foo", "bar", "baz"]
+    monkeypatch.setenv("REDROBIN_ENRICHMENT_DENYLIST", '["x", "y"]')
+    assert Settings().enrichment_denylist == ["x", "y"]
+
+
+def test_enrichment_hardening_settings_defaults_and_override(monkeypatch):
+    from redrobin.infrastructure.config import Settings
+
+    s = Settings()
+    assert s.enrichment_max_concurrency == 4
+    assert s.enrichment_self_annotation_prefix == "[Red Robin]"
+
+    monkeypatch.setenv("REDROBIN_ENRICHMENT_MAX_CONCURRENCY", "8")
+    monkeypatch.setenv("REDROBIN_ENRICHMENT_SELF_ANNOTATION_PREFIX", "[RR]")
+    s2 = Settings()
+    assert s2.enrichment_max_concurrency == 8
+    assert s2.enrichment_self_annotation_prefix == "[RR]"
+
+
+def test_enrichment_max_concurrency_rejects_below_one(monkeypatch):
+    import pytest
+
+    from redrobin.infrastructure.config import Settings
+
+    monkeypatch.setenv("REDROBIN_ENRICHMENT_MAX_CONCURRENCY", "0")
+    with pytest.raises(Exception) as exc:
+        Settings()
+    assert ">= 1" in str(exc.value) or "enrichment_max_concurrency" in str(exc.value).lower()

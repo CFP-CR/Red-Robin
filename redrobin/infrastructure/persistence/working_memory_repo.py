@@ -122,7 +122,7 @@ class WorkingMemoryRepo:
 
         Host: dedup by upper(name), non-null scalar overwrite, IP union (order-preserving).
         Credential: dedup/replace by (domain, username, secret_type).
-        Finding: append-only (audit stream). Defenses: union (order-preserving).
+        Finding: dedup by (kind, summary, source_beacon_id). Defenses: union (order-preserving).
         Tool: dedup by (name, used_on).
         """
         wm = self.load()
@@ -130,7 +130,12 @@ class WorkingMemoryRepo:
             self._merge_host(wm, host)
         for cred in deltas.credentials:
             self._merge_credential(wm, cred)
+        seen_findings = {(f.kind, f.summary, f.source_beacon_id) for f in wm.findings}
         for finding in deltas.findings:
+            key = (finding.kind, finding.summary, finding.source_beacon_id)
+            if key in seen_findings:
+                continue
+            seen_findings.add(key)
             wm.findings.append(finding)
         for tool in deltas.tools_used:
             self._merge_tool(wm, tool)

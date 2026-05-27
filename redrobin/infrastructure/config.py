@@ -10,9 +10,10 @@ each derived path can be overridden individually if needed.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 def _default_root() -> Path:
@@ -57,6 +58,28 @@ class Settings(BaseSettings):
     l5_window: int = Field(default=25, alias="REDROBIN_L5_WINDOW")
     l5_interval_sec: float = Field(default=30.0, alias="REDROBIN_L5_INTERVAL_SEC")
 
+    # Working-memory enrichment (Plan B)
+    enrichment_enabled: bool = Field(default=True, alias="REDROBIN_ENRICHMENT_ENABLED")
+    enrichment_model: str = Field(default="claude-haiku-4-5", alias="REDROBIN_ENRICHMENT_MODEL")
+    enrichment_min_output_chars: int = Field(
+        default=8, alias="REDROBIN_ENRICHMENT_MIN_OUTPUT_CHARS"
+    )
+    enrichment_chunk_max_chars: int = Field(
+        default=16000, alias="REDROBIN_ENRICHMENT_CHUNK_MAX_CHARS"
+    )
+    enrichment_denylist: Annotated[list[str], NoDecode] = Field(
+        # Empty by default: enrich-by-default surfaces loot from dir/ls/ps output
+        # (the min_output_chars floor already skips no-output commands like cd/sleep).
+        # Operator-tunable via REDROBIN_ENRICHMENT_DENYLIST (CSV or JSON) to mute a
+        # command that proves noisy in a live op.
+        default_factory=list,
+        alias="REDROBIN_ENRICHMENT_DENYLIST",
+    )
+    enrichment_max_concurrency: int = Field(default=4, alias="REDROBIN_ENRICHMENT_MAX_CONCURRENCY")
+    enrichment_self_annotation_prefix: str = Field(
+        default="[Red Robin]", alias="REDROBIN_ENRICHMENT_SELF_ANNOTATION_PREFIX"
+    )
+
     # Operator policy
     allow_degraded_layer_b: bool = Field(default=False, alias="REDROBIN_ALLOW_DEGRADED")
 
@@ -89,7 +112,13 @@ class Settings(BaseSettings):
             raise ValueError(f"REDROBIN_PORT out of range: {v}")
         return v
 
-    @field_validator("promoter_min_occurrences", "l5_window")
+    @field_validator(
+        "promoter_min_occurrences",
+        "l5_window",
+        "enrichment_min_output_chars",
+        "enrichment_chunk_max_chars",
+        "enrichment_max_concurrency",
+    )
     @classmethod
     def _positive_int(cls, v: int) -> int:
         if v < 1:
@@ -101,4 +130,24 @@ class Settings(BaseSettings):
     def _positive_float(cls, v: float) -> float:
         if v <= 0:
             raise ValueError(f"must be > 0, got {v}")
+        return v
+
+    @field_validator("enrichment_denylist", mode="before")
+    @classmethod
+    def _parse_denylist(cls, v: object) -> object:
+        """Accept the env override as a JSON array OR a comma-separated string.
+
+        ``NoDecode`` on the field stops pydantic-settings from JSON-decoding the
+        env value first, so a natural ``REDROBIN_ENRICHMENT_DENYLIST=ls,cd`` works
+        as well as ``'["ls","cd"]'`` — matching how scope lists are CSV-parsed
+        elsewhere (cli_helpers/engagement_cmd). The default_factory list is not a
+        string and passes through unchanged.
+        """
+        if isinstance(v, str):
+            s = v.strip()
+            if s.startswith("["):
+                import json
+
+                return json.loads(s)
+            return [item.strip() for item in s.split(",") if item.strip()]
         return v
