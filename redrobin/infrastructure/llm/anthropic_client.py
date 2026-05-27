@@ -186,6 +186,13 @@ class AnthropicEnricherClient:
         "Rules: Extract ONLY facts literally present in the output. Do NOT infer, "
         "guess, or invent. If a field is absent, omit it. Understand semantics: "
         "'Cached Tickets: (0)' means ZERO tickets — do NOT emit a finding for it. "
+        "A host is a distinct machine/system identity: a hostname, an FQDN, or an "
+        "IP address. A host is NOT a username, a file or directory path, a "
+        "drive/volume label, a service name, or a generic word. Cross-OS examples "
+        "of NOT-a-host: 'jcspi' (a username), 'Windows' or 'C:' (a drive/volume "
+        "label, e.g. from 'Volume in drive C is Windows'), 'web-svc' (a service "
+        "name), '/etc/passwd' (a path). Only emit a host when the output names an "
+        "actual machine. "
         "secret_type is an open vocabulary (ntlm|plaintext|aes256|kerberos_ticket|"
         "aws_key|...). Return ONLY the JSON object, no prose, no markdown fences."
     )
