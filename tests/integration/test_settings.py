@@ -114,3 +114,26 @@ def test_bearer_token_path_reads_from_settings(monkeypatch, tmp_path):
     importlib.reload(bearer)
     path = bearer._token_path()
     assert path == tmp_path / "custom" / "transport.token"
+
+
+def test_enrichment_settings_defaults_and_override(monkeypatch):
+    from redrobin.infrastructure.config import Settings
+
+    s = Settings()
+    assert s.enrichment_enabled is True
+    assert s.enrichment_model == "claude-haiku-4-5"
+    assert s.enrichment_min_output_chars == 8
+    assert s.enrichment_chunk_max_chars == 16000
+    assert "ls" in s.enrichment_denylist and "sleep" in s.enrichment_denylist
+
+    monkeypatch.setenv("REDROBIN_ENRICHMENT_ENABLED", "false")
+    monkeypatch.setenv("REDROBIN_ENRICHMENT_CHUNK_MAX_CHARS", "32000")
+    s2 = Settings()
+    assert s2.enrichment_enabled is False
+    assert s2.enrichment_chunk_max_chars == 32000
+
+    # denylist env override accepts a comma-separated string OR a JSON array
+    monkeypatch.setenv("REDROBIN_ENRICHMENT_DENYLIST", "foo, bar ,baz")
+    assert Settings().enrichment_denylist == ["foo", "bar", "baz"]
+    monkeypatch.setenv("REDROBIN_ENRICHMENT_DENYLIST", '["x", "y"]')
+    assert Settings().enrichment_denylist == ["x", "y"]
