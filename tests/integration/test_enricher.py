@@ -169,3 +169,77 @@ async def test_lifespan_starts_enricher_task(tmp_path, monkeypatch):
     # runs before close_enricher), NOT via the 2.0s cancel fallback (invariant 2).
     assert app.state.enricher_task.done()
     assert app.state.enricher_task.cancelled() is False
+
+
+@pytest.mark.asyncio
+async def test_golden_systeminfo_carries_host_fields_149(tmp_path):
+    """#149: a systeminfo extraction yields a host with os/os_version/domain/ips."""
+    bus = EventBus()
+    observer = await bus.subscribe()
+    llm = _StubLLM(
+        '{"hosts":[{"name":"EC2AMAZ-IJVFMFN","os":"Microsoft Windows Server 2019",'
+        '"os_version":"10.0.17763 Build 17763","domain":"CORP",'
+        '"ip_addresses":["10.100.0.21"]}]}'
+    )
+    _, task = await _start(bus, llm)
+    try:
+        await bus.publish(
+            {
+                "type": "beacon.command_output",
+                "payload": {
+                    "bid": "B-149",
+                    "command": "shell systeminfo",
+                    "output": "Host Name: EC2AMAZ-IJVFMFN\nDomain: CORP\n" + ("x\n" * 10),
+                },
+            }
+        )
+        host = None
+        for _ in range(80):
+            await asyncio.sleep(0.02)
+            try:
+                evt = observer.get_nowait()
+            except asyncio.QueueEmpty:
+                continue
+            if evt.get("type") == "working_memory.deltas" and evt["payload"]["hosts"]:
+                host = evt["payload"]["hosts"][0]
+                break
+        assert host is not None
+        assert host["domain"] == "CORP"
+        assert host["os_version"] == "10.0.17763 Build 17763"
+        assert host["ip_addresses"] == ["10.100.0.21"]
+    finally:
+        await _drain(bus, task)
+
+
+@pytest.mark.asyncio
+async def test_golden_klist_zero_tickets_no_finding_145(tmp_path):
+    """#145: klist with 'Cached Tickets: (0)' yields NO kerberos finding (LLM returns [])."""
+    bus = EventBus()
+    observer = await bus.subscribe()
+    llm = _StubLLM('{"findings":[]}')  # the grounded LLM emits no finding for (0)
+    _, task = await _start(bus, llm)
+    try:
+        await bus.publish(
+            {
+                "type": "beacon.command_output",
+                "payload": {
+                    "bid": "B-145",
+                    "command": "klist",
+                    "output": "Current LogonId is 0:0x12345\nCached Tickets: (0)\n",
+                },
+            }
+        )
+        deltas = None
+        for _ in range(80):
+            await asyncio.sleep(0.02)
+            try:
+                evt = observer.get_nowait()
+            except asyncio.QueueEmpty:
+                continue
+            if evt.get("type") == "working_memory.deltas":
+                deltas = evt["payload"]
+                break
+        assert deltas is not None
+        assert deltas["findings"] == []  # no spurious kerberos finding
+    finally:
+        await _drain(bus, task)
