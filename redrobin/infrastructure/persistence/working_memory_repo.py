@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 from redrobin.domain.memory import (
@@ -154,8 +154,10 @@ class WorkingMemoryRepo:
                     if ip not in existing.ip_addresses:
                         existing.ip_addresses.append(ip)
                 return
-        host.name = normalized
-        wm.hosts.append(host)
+        # Append a copy with the normalized name so the caller's incoming Host
+        # (the delta) is never mutated in place — apply_deltas must not surprise
+        # a future reusing producer.
+        wm.hosts.append(replace(host, name=normalized))
 
     @staticmethod
     def _merge_credential(wm: WorkingMemory, cred: Credential) -> None:
