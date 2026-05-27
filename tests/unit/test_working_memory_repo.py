@@ -2,7 +2,16 @@
 
 import pytest
 
-from redrobin.domain.memory import Account, Credential, Host, Objective, WorkingMemory
+from redrobin.domain.memory import (
+    Account,
+    Credential,
+    Finding,
+    Host,
+    Objective,
+    ToolUsage,
+    WorkingMemory,
+    WorkingMemoryDeltas,
+)
 from redrobin.infrastructure.persistence.working_memory_repo import WorkingMemoryRepo
 
 
@@ -146,3 +155,73 @@ def test_credential_back_compat_old_json_defaults_to_ntlm(tmp_path):
     assert cred.secret_type == "ntlm"
     assert cred.secret is None
     assert cred.ntlm_hash == "a" * 32 + ":" + "b" * 32
+
+
+def test_apply_deltas_merges_host_nonnull_overwrite_and_ip_union(tmp_path):
+    repo = WorkingMemoryRepo(tmp_path / "wm.json")
+    wm = WorkingMemory(engagement_id="eng")
+    wm.hosts.append(Host(name="WS01", os="Windows 10", ip_addresses=["10.0.0.5"]))
+    repo.save(wm)
+
+    # Second observation: same host (case-insensitive), new domain + a new NIC.
+    repo.apply_deltas(
+        WorkingMemoryDeltas(hosts=[Host(name="ws01", domain="ACME", ip_addresses=["10.0.0.6"])])
+    )
+
+    hosts = repo.load().hosts
+    assert len(hosts) == 1  # merged, not duplicated
+    assert hosts[0].os == "Windows 10"  # preserved (incoming was None)
+    assert hosts[0].domain == "ACME"  # filled
+    assert hosts[0].ip_addresses == ["10.0.0.5", "10.0.0.6"]  # union
+
+
+def test_apply_deltas_credentials_dedup_by_domain_user_secrettype(tmp_path):
+    repo = WorkingMemoryRepo(tmp_path / "wm.json")
+    repo.save(WorkingMemory(engagement_id="eng"))
+
+    # Same user, two DIFFERENT secret types -> both kept. Same user+type twice -> deduped.
+    repo.apply_deltas(
+        WorkingMemoryDeltas(
+            credentials=[
+                Credential(domain="ACME", username="jdoe", secret_type="ntlm", secret="hashA"),
+                Credential(domain="ACME", username="jdoe", secret_type="plaintext", secret="pw"),
+            ]
+        )
+    )
+    repo.apply_deltas(
+        WorkingMemoryDeltas(
+            credentials=[
+                Credential(domain="ACME", username="jdoe", secret_type="ntlm", secret="hashB")
+            ]
+        )
+    )
+
+    creds = repo.load().credentials
+    by_type = {c.secret_type: c.secret for c in creds}
+    assert by_type == {"ntlm": "hashB", "plaintext": "pw"}  # ntlm replaced, plaintext kept
+
+
+def test_apply_deltas_findings_append_defenses_union_tools_dedup(tmp_path):
+    repo = WorkingMemoryRepo(tmp_path / "wm.json")
+    repo.save(WorkingMemory(engagement_id="eng"))
+
+    repo.apply_deltas(
+        WorkingMemoryDeltas(
+            findings=[Finding(kind="k1", summary="a")],
+            defenses_observed=["Defender"],
+            tools_used=[ToolUsage(name="nanodump", used_on="WS01", used_at="t")],
+        )
+    )
+    repo.apply_deltas(
+        WorkingMemoryDeltas(
+            findings=[Finding(kind="k1", summary="a")],  # findings always append
+            defenses_observed=["Defender", "AMSI"],  # union
+            tools_used=[ToolUsage(name="nanodump", used_on="WS01", used_at="t2")],  # dedup
+        )
+    )
+
+    wm = repo.load()
+    assert len(wm.findings) == 2  # append-only audit stream
+    assert sorted(wm.defenses_observed) == ["AMSI", "Defender"]
+    assert len(wm.tools_used) == 1
+    assert wm.tools_used[0].used_at == "t"  # first-wins dedup, not overwritten
