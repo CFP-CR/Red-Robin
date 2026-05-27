@@ -137,3 +137,28 @@ def test_enrichment_settings_defaults_and_override(monkeypatch):
     assert Settings().enrichment_denylist == ["foo", "bar", "baz"]
     monkeypatch.setenv("REDROBIN_ENRICHMENT_DENYLIST", '["x", "y"]')
     assert Settings().enrichment_denylist == ["x", "y"]
+
+
+def test_enrichment_hardening_settings_defaults_and_override(monkeypatch):
+    from redrobin.infrastructure.config import Settings
+
+    s = Settings()
+    assert s.enrichment_max_concurrency == 4
+    assert s.enrichment_self_annotation_prefix == "[Red Robin]"
+
+    monkeypatch.setenv("REDROBIN_ENRICHMENT_MAX_CONCURRENCY", "8")
+    monkeypatch.setenv("REDROBIN_ENRICHMENT_SELF_ANNOTATION_PREFIX", "[RR]")
+    s2 = Settings()
+    assert s2.enrichment_max_concurrency == 8
+    assert s2.enrichment_self_annotation_prefix == "[RR]"
+
+
+def test_enrichment_max_concurrency_rejects_below_one(monkeypatch):
+    import pytest
+
+    from redrobin.infrastructure.config import Settings
+
+    monkeypatch.setenv("REDROBIN_ENRICHMENT_MAX_CONCURRENCY", "0")
+    with pytest.raises(Exception) as exc:
+        Settings()
+    assert ">= 1" in str(exc.value) or "enrichment_max_concurrency" in str(exc.value).lower()

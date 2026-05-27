@@ -82,6 +82,10 @@ class Settings(BaseSettings):
         ],
         alias="REDROBIN_ENRICHMENT_DENYLIST",
     )
+    enrichment_max_concurrency: int = Field(default=4, alias="REDROBIN_ENRICHMENT_MAX_CONCURRENCY")
+    enrichment_self_annotation_prefix: str = Field(
+        default="[Red Robin]", alias="REDROBIN_ENRICHMENT_SELF_ANNOTATION_PREFIX"
+    )
 
     # Operator policy
     allow_degraded_layer_b: bool = Field(default=False, alias="REDROBIN_ALLOW_DEGRADED")
@@ -120,6 +124,7 @@ class Settings(BaseSettings):
         "l5_window",
         "enrichment_min_output_chars",
         "enrichment_chunk_max_chars",
+        "enrichment_max_concurrency",
     )
     @classmethod
     def _positive_int(cls, v: int) -> int:
