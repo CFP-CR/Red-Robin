@@ -214,14 +214,76 @@ def test_apply_deltas_findings_append_defenses_union_tools_dedup(tmp_path):
     )
     repo.apply_deltas(
         WorkingMemoryDeltas(
-            findings=[Finding(kind="k1", summary="a")],  # findings always append
+            findings=[
+                Finding(kind="k1", summary="a"),  # identical -> deduped (same key)
+                Finding(kind="k2", summary="b"),  # distinct -> appended
+            ],
             defenses_observed=["Defender", "AMSI"],  # union
             tools_used=[ToolUsage(name="nanodump", used_on="WS01", used_at="t2")],  # dedup
         )
     )
 
     wm = repo.load()
-    assert len(wm.findings) == 2  # append-only audit stream
+    # apply_deltas dedups findings by (kind, summary, source_beacon_id): the repeat
+    # k1 collapses, the new k2 is added -> 2 unique.
+    assert len(wm.findings) == 2
+    assert {(f.kind, f.summary) for f in wm.findings} == {("k1", "a"), ("k2", "b")}
     assert sorted(wm.defenses_observed) == ["AMSI", "Defender"]
     assert len(wm.tools_used) == 1
     assert wm.tools_used[0].used_at == "t"  # first-wins dedup, not overwritten
+
+
+def test_apply_deltas_dedups_findings_within_batch(tmp_path):
+    from redrobin.domain.memory import Finding, WorkingMemory, WorkingMemoryDeltas
+    from redrobin.infrastructure.persistence.working_memory_repo import WorkingMemoryRepo
+
+    repo = WorkingMemoryRepo(tmp_path / "wm.json")
+    repo.save(WorkingMemory(engagement_id="eng-1"))
+    deltas = WorkingMemoryDeltas(
+        findings=[
+            Finding(kind="gpp", summary="cpassword found", source_beacon_id="B-1"),
+            Finding(kind="gpp", summary="cpassword found", source_beacon_id="B-1"),  # dup
+            Finding(kind="gpp", summary="cpassword found", source_beacon_id="B-2"),  # diff bid
+        ]
+    )
+    repo.apply_deltas(deltas)
+    findings = repo.load().findings
+    assert len(findings) == 2
+    keys = {(f.kind, f.summary, f.source_beacon_id) for f in findings}
+    assert keys == {("gpp", "cpassword found", "B-1"), ("gpp", "cpassword found", "B-2")}
+
+
+def test_apply_deltas_skips_finding_already_in_working_memory(tmp_path):
+    from redrobin.domain.memory import Finding, WorkingMemory, WorkingMemoryDeltas
+    from redrobin.infrastructure.persistence.working_memory_repo import WorkingMemoryRepo
+
+    repo = WorkingMemoryRepo(tmp_path / "wm.json")
+    repo.save(
+        WorkingMemory(
+            engagement_id="eng-1",
+            findings=[Finding(kind="gpp", summary="cpassword found", source_beacon_id="B-1")],
+        )
+    )
+    repo.apply_deltas(
+        WorkingMemoryDeltas(
+            findings=[Finding(kind="gpp", summary="cpassword found", source_beacon_id="B-1")]
+        )
+    )
+    assert len(repo.load().findings) == 1
+
+
+def test_apply_deltas_keeps_distinct_findings(tmp_path):
+    from redrobin.domain.memory import Finding, WorkingMemory, WorkingMemoryDeltas
+    from redrobin.infrastructure.persistence.working_memory_repo import WorkingMemoryRepo
+
+    repo = WorkingMemoryRepo(tmp_path / "wm.json")
+    repo.save(WorkingMemory(engagement_id="eng-1"))
+    repo.apply_deltas(
+        WorkingMemoryDeltas(
+            findings=[
+                Finding(kind="gpp", summary="cpassword found", source_beacon_id="B-1"),
+                Finding(kind="uac_disabled", summary="UAC off", source_beacon_id="B-1"),
+            ]
+        )
+    )
+    assert len(repo.load().findings) == 2

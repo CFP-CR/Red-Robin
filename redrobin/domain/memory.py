@@ -75,11 +75,14 @@ class Credential:
 
 @dataclass
 class Finding:
-    """Append-only observation produced by the reducer.
+    """Observation produced by the enrichment/reducer path.
 
     ``kind`` is a short stable identifier (e.g., ``kerberos_ticket_observed``,
-    ``opsec_block``). ``summary`` is a human-readable one-liner. Findings are
-    never deduplicated or upserted — every occurrence is recorded.
+    ``opsec_block``). ``summary`` is a human-readable one-liner. In the deltas
+    merge (``WorkingMemoryRepo.apply_deltas``) findings are deduped by
+    ``(kind, summary, source_beacon_id)`` so re-emission / overlapping chunks
+    do not pile up duplicates; the legacy ``append_finding`` helper remains
+    append-only for the regex producer until it is retired (Plan B2).
     """
 
     kind: str

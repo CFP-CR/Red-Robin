@@ -3,9 +3,10 @@ with overlap, so a record straddling a boundary appears intact in the next chunk
 
 Returns ``[output]`` unchanged when it fits (the 99% case). char-based budget
 (~4 chars/token) avoids a tokenizer dependency. The reduce step
-(``WorkingMemoryRepo.apply_deltas``) dedups hosts/credentials/tools by key;
-findings are append-only, so overlap may duplicate a straddling finding —
-acceptable, since the whole point of overlap is to never DROP a straddling record.
+(``WorkingMemoryRepo.apply_deltas``) dedups hosts/credentials/tools by key and
+findings by ``(kind, summary, source_beacon_id)``, so a finding duplicated by an
+overlapping boundary collapses on merge — overlap never DROPS a straddling record,
+and the dedup keeps the duplicate it may introduce from piling up.
 """
 
 from __future__ import annotations
