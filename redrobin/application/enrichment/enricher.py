@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
 
@@ -25,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 
 class WorkingMemoryEnricher:
+    _CORR_CACHE_MAX = 256
+
     def __init__(
         self,
         *,
@@ -34,6 +37,8 @@ class WorkingMemoryEnricher:
         min_output_chars: int,
         chunk_max_chars: int,
         enabled: bool = True,
+        max_concurrency: int = 4,
+        self_annotation_prefix: str = "[Red Robin]",
     ) -> None:
         self._bus = bus
         self._llm = llm
@@ -41,6 +46,13 @@ class WorkingMemoryEnricher:
         self._min_output_chars = min_output_chars
         self._chunk_max_chars = chunk_max_chars
         self._enabled = enabled
+        self._self_annotation_prefix = self_annotation_prefix
+        # Bounded correlation_id -> raw command cache (FIFO eviction at cap), and a
+        # per-bid last-command fallback for outputs that arrive without (or with an
+        # unknown) correlation_id.
+        self._cmd_by_corr: OrderedDict[str, str] = OrderedDict()
+        self._cmd_by_bid: dict[str, str] = {}
+        self._sem = asyncio.Semaphore(max_concurrency)
         self.on_started: Callable[[], None] | None = None
 
     async def run(self) -> None:
@@ -55,7 +67,11 @@ class WorkingMemoryEnricher:
                 evt = await sub.get()
                 if evt.get("_type") == "_close":
                     return
-                if evt.get("type") != "beacon.command_output":
+                etype = evt.get("type")
+                if etype == "beacon.command_input":
+                    self._remember_command(evt.get("payload") or {})
+                    continue
+                if etype != "beacon.command_output":
                     continue
                 try:
                     await self._enrich(evt.get("payload") or {})
@@ -136,6 +152,39 @@ class WorkingMemoryEnricher:
                 },
             }
         )
+
+    def _remember_command(self, payload: dict[str, Any]) -> None:
+        """Cache the command behind a future output. Prefers the full ``raw``
+        command line, then the first-token ``command``, then ``""``. Keyed by
+        ``correlation_id`` (exact, FIFO-bounded) with a per-``bid`` last-command
+        fallback for outputs that arrive without a correlation id."""
+        command = str(payload.get("raw") or payload.get("command") or "")
+        corr = payload.get("correlation_id")
+        bid = payload.get("bid")
+        if bid is not None:
+            self._cmd_by_bid[str(bid)] = command
+        if corr is not None:
+            corr_key = str(corr)
+            self._cmd_by_corr[corr_key] = command
+            self._cmd_by_corr.move_to_end(corr_key)
+            while len(self._cmd_by_corr) > self._CORR_CACHE_MAX:
+                self._cmd_by_corr.popitem(last=False)  # evict oldest (FIFO)
+
+    def _recover_command(self, payload: dict[str, Any]) -> str:
+        """Recover the command that produced this output: exact correlation_id
+        lookup (popped on hit so the entry doesn't leak) → per-bid last command
+        → ``""`` (degraded — pre-correlation-id CS, or input not yet seen)."""
+        corr = payload.get("correlation_id")
+        if corr is not None:
+            cmd = self._cmd_by_corr.pop(str(corr), None)
+            if cmd is not None:
+                return cmd
+        bid = payload.get("bid")
+        if bid is not None:
+            cmd = self._cmd_by_bid.get(str(bid))
+            if cmd is not None:
+                return cmd
+        return ""
 
     async def _extract_chunk(
         self, command: str, src: str | None, chunk: str
