@@ -1,4 +1,5 @@
-"""Enrich-by-default trigger: skip a small denylist of trivial commands + short output.
+"""Enrich-by-default trigger: enrich unless output is too short or the command's
+verb is on the operator-supplied denylist (empty by default — see config).
 
 Fails TOWARD enrichment — an unknown/novel command is enriched by default, so a
 new tool is never silently missed (the failure mode an allowlist would have).

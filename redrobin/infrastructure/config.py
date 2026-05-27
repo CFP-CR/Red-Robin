@@ -68,18 +68,11 @@ class Settings(BaseSettings):
         default=16000, alias="REDROBIN_ENRICHMENT_CHUNK_MAX_CHARS"
     )
     enrichment_denylist: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: [
-            "ls",
-            "dir",
-            "pwd",
-            "cd",
-            "sleep",
-            "cls",
-            "clear",
-            "help",
-            "jobs",
-            "ps",
-        ],
+        # Empty by default: enrich-by-default surfaces loot from dir/ls/ps output
+        # (the min_output_chars floor already skips no-output commands like cd/sleep).
+        # Operator-tunable via REDROBIN_ENRICHMENT_DENYLIST (CSV or JSON) to mute a
+        # command that proves noisy in a live op.
+        default_factory=list,
         alias="REDROBIN_ENRICHMENT_DENYLIST",
     )
     enrichment_max_concurrency: int = Field(default=4, alias="REDROBIN_ENRICHMENT_MAX_CONCURRENCY")

@@ -124,7 +124,7 @@ def test_enrichment_settings_defaults_and_override(monkeypatch):
     assert s.enrichment_model == "claude-haiku-4-5"
     assert s.enrichment_min_output_chars == 8
     assert s.enrichment_chunk_max_chars == 16000
-    assert "ls" in s.enrichment_denylist and "sleep" in s.enrichment_denylist
+    assert s.enrichment_denylist == []  # enrich-by-default; denylist is opt-in via env
 
     monkeypatch.setenv("REDROBIN_ENRICHMENT_ENABLED", "false")
     monkeypatch.setenv("REDROBIN_ENRICHMENT_CHUNK_MAX_CHARS", "32000")
