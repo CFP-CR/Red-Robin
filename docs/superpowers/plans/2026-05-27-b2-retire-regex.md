@@ -28,7 +28,7 @@
 | `Finding`, `Session`, `WorkingMemoryDeltas`, `working_memory_to_snapshot` (reducer imports) | reducer | **KEEP** | used by `_on_verdict` / `_on_beacon_initial` / `_on_enrichment_deltas` |
 | `append_finding` | `working_memory_repo.py:114` | **KEEP** | `_on_verdict:231` (opsec.verdict BLOCK) still uses it |
 | `upsert_session` | `working_memory_repo.py:107` | **KEEP** | `_on_beacon_initial:196` uses it |
-| `list_credentials` | `working_memory_repo.py:83` | **KEEP** | read helper used by tests + the snapshot/e2e path |
+| `list_credentials` | `working_memory_repo.py:83` | **KEEP** | public read helper used by the e2e + integration tests (NOT the snapshot path — that uses `working_memory_to_snapshot`/`repo.load()`) |
 | `apply_deltas` + `_merge_*` | `working_memory_repo.py:120+` | **KEEP** | the enricher's single-writer merge |
 
 > **Import cleanup is ruff-driven:** after deleting code, `uv run --no-sync ruff check .` flags any now-unused import (e.g. `re`, `Credential`, `Host`). Remove exactly what ruff flags — do not guess. In the *repo* module, `Credential`/`Host` are likely still referenced by `apply_deltas`/`_merge_host`; trust ruff, not this note.
@@ -37,6 +37,7 @@
 
 - `tests/integration/test_working_memory_reducer.py`: 3 pure-regex tests **deleted**; 2 regex-*dependent* tests (`test_reducer_republishes_snapshot_after_mutation`, `test_lifespan_starts_reducer_task`) **rewritten** to the new path; 1 new "command_output is ignored" test **added**. The structured-event tests (beacon.initial, opsec verdicts, unknown, `test_working_memory_deltas_event_merges_and_reemits`) are untouched.
 - `tests/e2e/test_memory_journey.py`: `test_beacon_output_propagates_to_snapshot` **rewritten** (it replays a regex command_output expecting creds/host; that path is gone + the enricher is off in CI).
+- `tests/e2e/test_events_to_memory_journey.py`: `test_post_events_canonical_command_output_reaches_reducer` **deleted** (audit catch — the canonical-envelope twin asserting cred `bob`/host `WIN11` from the regex; the canonical→reducer path stays covered by the sibling `test_post_events_canonical_beacon_initial_creates_session`).
 - `tests/unit/tui_textual/test_inspector.py`: uses `kerberos_ticket_observed` only as **fixture data** to test rendering — **untouched** (it constructs the finding directly, never the regex).
 
 ---
@@ -154,13 +155,13 @@ git commit -m "test(reducer): decouple snapshot/lifespan tests from the regex pa
 
 **Files:**
 - Modify: `tests/e2e/test_memory_journey.py` (`test_beacon_output_propagates_to_snapshot` ~56-103)
+- Modify: `tests/e2e/test_events_to_memory_journey.py` (DELETE `test_post_events_canonical_command_output_reaches_reducer` ~71-119 — audit catch)
 
 The e2e replays a `beacon.command_output` carrying NTLM+hostname and asserts the snapshot exposes the cred + host — pure regex behavior. After B2 the regex is gone and the enricher is disabled in CI (no API key), so replay a structured `beacon.initial` and assert the **session** propagates end-to-end (wire → replay endpoint → bus → reducer → snapshot).
 
-- [ ] **Step 1: First confirm the replay endpoint accepts `beacon.initial`**
+- [ ] **Step 1: (audit-confirmed) `/v1/events/replay` accepts `beacon.initial` as a bus-shape dict**
 
-Run: `grep -n "beacon.initial" protocol/schemas/v0.1/events/ -r; ls protocol/schemas/v0.1/events/`
-Expected: a `beacon_initial.schema.json` (or equivalent) exists — confirming `beacon.initial` is a valid wire event the `/v1/events/replay` endpoint will accept. If the exact type string differs, use the real one.
+The audit verified `redrobin/api/events_router.py::replay_event` **skips schema validation** ("the operator owns the trace contents") and publishes a non-envelope dict verbatim onto the bus. So `{"type":"beacon.initial","payload":{"bid","host","user","integrity_level"}}` is accepted (202) and the reducer's `_on_beacon_initial` reads exactly those fields. No schema check needed — the existing `tests/e2e/test_memory_journey.py` already replays a bus-shape dict the same way. **Do NOT** route this through `POST /v1/events` — that path IS schema-validated (`additionalProperties:false`, requires `arch`/`pid`/`ppid`) and would 400.
 
 - [ ] **Step 2: Rewrite the test (rename to reflect the structured path)**
 
@@ -211,18 +212,18 @@ Also update the module docstring (lines ~1-18) to describe the `beacon.initial �
 - [ ] **Step 3: Check for any OTHER regex-dependent e2e tests in the file**
 
 Run: `grep -n "beacon.command_output\|NTLM\|Hostname:\|list_credentials\|\"hosts\"" tests/e2e/test_memory_journey.py`
-Expected: no remaining test relies on regex extraction of creds/hosts from command output. If one does, apply the same `beacon.initial`/`working_memory.deltas` rewrite.
+Expected: the audit found ONE the first pass missed — `tests/e2e/test_events_to_memory_journey.py::test_post_events_canonical_command_output_reaches_reducer` (~71-119) POSTs a canonical `beacon.command_output` envelope (NTLM+hostname) via `/v1/events` and asserts cred `bob`/host `WIN11` from the regex. **DELETE that whole test function** — the canonical→reducer contract stays covered by its sibling `test_post_events_canonical_beacon_initial_creates_session` (uses `beacon.initial`), and reducer-ignores-command_output is covered by the new Task 3 test. Then grep `beacon.command_output` across `tests/e2e/` + `tests/integration/test_working_memory_reducer.py` and confirm no other test asserts a cred/host/`kerberos_ticket_observed` from the reducer (only the Task-3 ignored-test + the enricher tests should remain).
 
 - [ ] **Step 4: Run the e2e — must PASS**
 
-Run: `REDROBIN_ALLOW_DEGRADED=1 uv run --no-sync pytest tests/e2e/test_memory_journey.py -v`
+Run: `REDROBIN_ALLOW_DEGRADED=1 uv run --no-sync pytest tests/e2e/test_memory_journey.py tests/e2e/test_events_to_memory_journey.py -v`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add tests/e2e/test_memory_journey.py
-git commit -m "test(e2e): drive memory-journey via beacon.initial, not the regex path"
+git add tests/e2e/test_memory_journey.py tests/e2e/test_events_to_memory_journey.py
+git commit -m "test(e2e): drive memory-journey via beacon.initial; drop the regex command_output twin"
 ```
 
 ---
