@@ -60,9 +60,10 @@ class Credential:
 
     ``secret_type`` is an OPEN vocabulary (not an Enum) so non-AD material
     (aws_key, azure_token, ...) needs no schema change. ``ntlm_hash`` is retained
-    for back-compat with working_memory.json written before this generalization;
-    it is transitional — once the regex producer is retired (Plan B), NTLM material
-    moves into ``secret``/``secret_type`` and ``ntlm_hash`` is removed.
+    for back-compat with working_memory.json written before this generalization.
+    New NTLM material flows into ``secret``/``secret_type`` via the LLM enricher
+    (Plan B2 retired the regex producer); ``ntlm_hash`` removal is a separate
+    follow-up once historic WM files are migrated.
     """
 
     domain: str
@@ -81,8 +82,11 @@ class Finding:
     ``opsec_block``). ``summary`` is a human-readable one-liner. In the deltas
     merge (``WorkingMemoryRepo.apply_deltas``) findings are deduped by
     ``(kind, summary, source_beacon_id)`` so re-emission / overlapping chunks
-    do not pile up duplicates; the legacy ``append_finding`` helper remains
-    append-only for the regex producer until it is retired (Plan B2).
+    do not pile up duplicates. ``append_finding`` is kept for the BLOCK-verdict
+    audit stream (``_on_verdict`` writes through it; no dedup — every BLOCK
+    matters); ``apply_deltas`` is the dedup'd path for enrichment-derived
+    findings (since Plan B2 retired the regex producer, that is the only other
+    write path).
     """
 
     kind: str
