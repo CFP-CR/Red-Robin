@@ -44,93 +44,6 @@ async def _drain(bus: EventBus, task: asyncio.Task[None]) -> None:
 
 
 @pytest.mark.asyncio
-async def test_beacon_command_output_with_ntlm_writes_credential(tmp_path):
-    bus = EventBus()
-    repo = _new_repo(tmp_path, "eng-ntlm")
-    _, task = await _start_reducer(bus, repo, "eng-ntlm")
-
-    try:
-        await bus.publish(
-            {
-                "type": "beacon.command_output",
-                "payload": {
-                    "bid": "B-001",
-                    "output": (
-                        "Username: CORP\\admin\n"
-                        "NTLM: aad3b435b51404eeaad3b435b51404ee:"
-                        "31d6cfe0d16ae931b73c59d7e0c089c0\n"
-                    ),
-                },
-            }
-        )
-        # Drive the loop so the reducer dequeues + writes.
-        for _ in range(50):
-            await asyncio.sleep(0.02)
-            creds = repo.list_credentials()
-            if creds:
-                break
-        creds = repo.list_credentials()
-        assert any(c.username == "admin" and c.domain == "CORP" for c in creds)
-        assert all(c.source_beacon_id == "B-001" for c in creds)
-    finally:
-        await _drain(bus, task)
-
-
-@pytest.mark.asyncio
-async def test_beacon_command_output_hostname_writes_host(tmp_path):
-    bus = EventBus()
-    repo = _new_repo(tmp_path, "eng-host")
-    _, task = await _start_reducer(bus, repo, "eng-host")
-
-    try:
-        await bus.publish(
-            {
-                "type": "beacon.command_output",
-                "payload": {
-                    "bid": "B-002",
-                    "output": "Hostname: dc01\n",
-                },
-            }
-        )
-        for _ in range(50):
-            await asyncio.sleep(0.02)
-            hosts = repo.load().hosts
-            if hosts:
-                break
-        hosts = repo.load().hosts
-        assert any(h.name == "DC01" for h in hosts)
-    finally:
-        await _drain(bus, task)
-
-
-@pytest.mark.asyncio
-async def test_beacon_command_output_kerberos_appends_finding(tmp_path):
-    bus = EventBus()
-    repo = _new_repo(tmp_path, "eng-krb")
-    _, task = await _start_reducer(bus, repo, "eng-krb")
-
-    try:
-        await bus.publish(
-            {
-                "type": "beacon.command_output",
-                "payload": {
-                    "bid": "B-003",
-                    "output": "klist\nCached Tickets: (1)\n   Server: krbtgt/CORP\n",
-                },
-            }
-        )
-        for _ in range(50):
-            await asyncio.sleep(0.02)
-            findings = repo.load().findings
-            if findings:
-                break
-        findings = repo.load().findings
-        assert any(f.kind == "kerberos_ticket_observed" for f in findings)
-    finally:
-        await _drain(bus, task)
-
-
-@pytest.mark.asyncio
 async def test_beacon_initial_writes_session(tmp_path):
     bus = EventBus()
     repo = _new_repo(tmp_path, "eng-sess")
@@ -223,9 +136,46 @@ async def test_unknown_event_type_is_ignored(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_beacon_command_output_is_ignored_by_reducer(tmp_path):
+    """B2: the reducer no longer regex-extracts from command output — the LLM
+    enricher is the sole extraction path (it publishes working_memory.deltas,
+    a separate bus consumer). A command_output carrying NTLM / hostname /
+    kerberos patterns must therefore produce NO creds / hosts / findings via
+    the reducer."""
+    bus = EventBus()
+    repo = _new_repo(tmp_path, "eng-noextract")
+    _, task = await _start_reducer(bus, repo, "eng-noextract")
+    try:
+        await bus.publish(
+            {
+                "type": "beacon.command_output",
+                "payload": {
+                    "bid": "B-001",
+                    "output": (
+                        "Username: CORP\\admin\n"
+                        "NTLM: aad3b435b51404eeaad3b435b51404ee:"
+                        "31d6cfe0d16ae931b73c59d7e0c089c0\n"
+                        "Hostname: dc01\n"
+                        "klist\nCached Tickets: (1)\n"
+                    ),
+                },
+            }
+        )
+        await asyncio.sleep(0.2)
+        wm = repo.load()
+        assert wm.credentials == []
+        assert wm.hosts == []
+        assert wm.findings == []
+    finally:
+        await _drain(bus, task)
+
+
+@pytest.mark.asyncio
 async def test_reducer_republishes_snapshot_after_mutation(tmp_path):
     """#146: after handling a mutating event the reducer must publish a
-    complete working_memory_snapshot back to the bus so the TUI updates live."""
+    complete working_memory_snapshot back to the bus so the TUI updates live.
+    Uses beacon.initial (a structured event) — the regex command_output path
+    was retired in B2."""
     bus = EventBus()
     repo = _new_repo(tmp_path, "eng-reemit")
     # A second subscriber stands in for a connected TUI client.
@@ -234,14 +184,12 @@ async def test_reducer_republishes_snapshot_after_mutation(tmp_path):
     try:
         await bus.publish(
             {
-                "type": "beacon.command_output",
+                "type": "beacon.initial",
                 "payload": {
                     "bid": "B-9",
-                    "output": "Username: CORP\\admin\nNTLM: "
-                    + ("a" * 32)
-                    + ":"
-                    + ("b" * 32)
-                    + "\n",
+                    "host": "DC01",
+                    "user": "CORP\\admin",
+                    "integrity_level": "high",
                 },
             }
         )
@@ -256,8 +204,8 @@ async def test_reducer_republishes_snapshot_after_mutation(tmp_path):
                 snapshot = evt
                 break
         assert snapshot is not None, "reducer did not re-publish a snapshot"
-        creds = snapshot["payload"]["credentials"]
-        assert any(c["username"] == "admin" and c["domain"] == "CORP" for c in creds)
+        sessions = snapshot["payload"]["sessions"]
+        assert any(s["beacon_id"] == "B-9" for s in sessions)
     finally:
         await _drain(bus, task)
 
@@ -267,6 +215,7 @@ async def test_lifespan_starts_reducer_task(tmp_path, monkeypatch):
     monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     monkeypatch.setenv("REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json"))
     monkeypatch.setenv("REDROBIN_ENGAGEMENT_ID", "eng-test-001")
+    monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
 
     from redrobin.api.app import create_app
 
@@ -274,18 +223,24 @@ async def test_lifespan_starts_reducer_task(tmp_path, monkeypatch):
     async with app.router.lifespan_context(app):
         assert app.state.reducer_task is not None
         assert not app.state.reducer_task.done()
-        # Publish a beacon output with creds; reducer should write to working memory.
+        # Drive the live extraction path (enricher -> deltas -> reducer). The
+        # enricher is off without an API key, so publish the deltas directly.
         await app.state.event_bus.publish(
             {
-                "type": "beacon.command_output",
+                "type": "working_memory.deltas",
                 "payload": {
-                    "bid": "B-100",
-                    "output": "Username: CORP\\alice\nNTLM: aad3b435b51404eeaad3b435b51404ee:11111111111111111111111111111111",
+                    "source_beacon_id": "B-100",
+                    "credentials": [
+                        {
+                            "domain": "CORP",
+                            "username": "alice",
+                            "secret_type": "plaintext",
+                            "secret": "pw",
+                        }
+                    ],
                 },
             }
         )
-        # Give reducer a tick to process; tighter pause is fine since the bus
-        # is local and the repo is sync.
         await asyncio.sleep(0.3)
         creds = app.state.working_memory_repo.list_credentials()
         assert any(getattr(c, "username", None) == "alice" for c in creds)

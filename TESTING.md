@@ -853,9 +853,11 @@ side for the operator's session being active.
 Either:
 - BEACON_OUTPUT hook isn't installed (check .cna source)
 - POST `/v1/events` is failing auth (check daemon log)
-- Reducer regex doesn't match the output format (CS mimikatz BOF format may
-  differ; check `redrobin/application/working_memory_reducer.py::_NTLM_LINE`
-  regex against the actual output text)
+- Enricher is short-circuited (no `ANTHROPIC_API_KEY`, or the LLM provider
+  failed) — the reducer no longer regex-parses command output since Plan B2.
+  Check `redrobin/application/enrichment/enricher.py` + daemon logs for
+  `enrichment failed` warnings, and confirm the engagement was started with
+  the key set (not `REDROBIN_ALLOW_DEGRADED=1`)
 
 ---
 

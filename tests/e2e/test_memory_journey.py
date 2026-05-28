@@ -1,20 +1,21 @@
-"""E2E: beacon output replayed → reducer parses → working memory snapshot exposes creds + host.
+"""E2E: structured beacon.initial event replayed → reducer writes a Session → snapshot exposes it.
 
-Slice 15 Task 15.2. Exercises the full real path with canonical wire types:
+Exercises the full real path:
 
     POST /v1/events/replay (auth) → EventBus → WorkingMemoryReducer
                                                        ↓
-                                                  Credential/Host upserts
+                                                  Session upsert
                                                        ↓
-    WS /v1/tui connect → working_memory_snapshot frame includes the new state.
+    WS /v1/tui connect → working_memory_snapshot frame includes the new session.
 
-The replay endpoint requires Bearer auth (Slice 11). Replay payloads use
-the canonical wire shape ``{type: "beacon.command_output", payload: {bid, ...}}``
-so the same trace fixture that exercises the bus also matches the wire
-schema for in-process replay.
-
-The Host serializer emits the ``name`` field (uppercased by the reducer's
-normalisation), and Credentials emit ``domain`` + ``username`` + ``ntlm_hash``.
+The replay endpoint requires Bearer auth (Slice 11) and SKIPS schema validation
+(operator owns trace contents) — a bare bus-shape dict is published verbatim.
+beacon.initial is the structured event the reducer handles to upsert a Session
+keyed by ``bid``. (The legacy regex extraction of creds/hosts from
+``beacon.command_output`` was retired in Plan B2; the LLM enricher (Plan B1)
+is the sole extraction path now, via ``working_memory.deltas`` events the
+reducer merges through ``apply_deltas`` — see
+``test_working_memory_deltas_event_merges_and_reemits`` for that path.)
 """
 
 from __future__ import annotations
@@ -53,20 +54,17 @@ def _token() -> str:
     return get_or_create_token()
 
 
-def test_beacon_output_propagates_to_snapshot(daemon):
+def test_beacon_initial_propagates_to_snapshot(daemon):
     app, client = daemon
     token = _token()
 
     payload = {
-        "type": "beacon.command_output",
+        "type": "beacon.initial",
         "payload": {
             "bid": "B-1",
-            "output": (
-                "Username: CORP\\alice\n"
-                "NTLM: aad3b435b51404eeaad3b435b51404ee:"
-                "11111111111111111111111111111111\n"
-                "Hostname: WIN10\n"
-            ),
+            "host": "WIN10",
+            "user": "CORP\\alice",
+            "integrity_level": "high",
         },
     }
     resp = client.post(
@@ -76,27 +74,20 @@ def test_beacon_output_propagates_to_snapshot(daemon):
     )
     assert resp.status_code == 202
 
-    # Poll the live working-memory repo for the reducer to finish writing.
-    # The repo is the same one feeding the snapshot builder; once it sees the
-    # credential the snapshot frame on a fresh WS connection will too.
+    # Poll the live working-memory repo until the reducer records the session.
     deadline = time.time() + 2.0
     repo = app.state.working_memory_repo
     while time.time() < deadline:
-        creds = repo.list_credentials()
-        if any(c.username == "alice" for c in creds):
+        sessions = repo.load().sessions
+        if any(s.beacon_id == "B-1" for s in sessions):
             break
         time.sleep(0.05)
     else:
-        pytest.fail(
-            "reducer did not record credential within 2s; creds=%r" % repo.list_credentials()
-        )
+        pytest.fail("reducer did not record session within 2s; sessions=%r" % repo.load().sessions)
 
     # Connect a fresh WS — the initial snapshot is built from the live repo.
     with client.websocket_connect(f"/v1/tui?token={token}") as ws:
         snap = ws.receive_json()
     assert snap["type"] == "working_memory_snapshot"
-    creds = snap["payload"]["credentials"]
-    assert any(c["username"] == "alice" and c["domain"] == "CORP" for c in creds), creds
-    hosts = snap["payload"]["hosts"]
-    # Host.name is normalised to upper-case by upsert_host.
-    assert any(h["name"] == "WIN10" for h in hosts), hosts
+    sessions = snap["payload"]["sessions"]
+    assert any(s["beacon_id"] == "B-1" and s["hostname"] == "WIN10" for s in sessions), sessions

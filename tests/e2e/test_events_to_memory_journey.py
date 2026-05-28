@@ -68,57 +68,6 @@ def _envelope(event: dict) -> dict:
     }
 
 
-def test_post_events_canonical_command_output_reaches_reducer(daemon):
-    """Real CS path: POST /v1/events with canonical beacon.command_output."""
-    app, client = daemon
-    token = _token()
-
-    envelope = _envelope(
-        {
-            "type": "beacon.command_output",
-            "bid": "B-wire-1",
-            "task_id": "task-1",
-            "output": (
-                "Username: CORP\\bob\n"
-                "NTLM: aad3b435b51404eeaad3b435b51404ee:"
-                "22222222222222222222222222222222\n"
-                "Hostname: WIN11\n"
-            ),
-            "exit_status": 0,
-        }
-    )
-
-    resp = client.post(
-        "/v1/events",
-        json=envelope,
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["ok"] is True
-
-    # Poll for the reducer to consume the bus event and update working memory.
-    deadline = time.time() + 2.0
-    repo = app.state.working_memory_repo
-    while time.time() < deadline:
-        creds = repo.list_credentials()
-        if any(c.username == "bob" for c in creds):
-            break
-        time.sleep(0.05)
-    else:
-        pytest.fail(
-            "reducer never saw the bus-published wire event; creds=%r" % repo.list_credentials()
-        )
-
-    # Connect a fresh WS — the snapshot is built from the live repo.
-    with client.websocket_connect(f"/v1/tui?token={token}") as ws:
-        snap = ws.receive_json()
-    assert snap["type"] == "working_memory_snapshot"
-    creds = snap["payload"]["credentials"]
-    assert any(c["username"] == "bob" and c["domain"] == "CORP" for c in creds), creds
-    hosts = snap["payload"]["hosts"]
-    assert any(h["name"] == "WIN11" for h in hosts), hosts
-
-
 def test_post_events_canonical_beacon_initial_creates_session(daemon):
     """Real CS path: POST /v1/events with canonical beacon.initial."""
     app, client = daemon
