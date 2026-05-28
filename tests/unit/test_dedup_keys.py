@@ -131,3 +131,30 @@ async def test_clear_drops_all_keys(tmp_path: Path) -> None:
     keys.clear()
     assert await keys.check_and_insert("k1") is True
     assert await keys.check_and_insert("k2") is True
+
+
+@pytest.mark.asyncio
+async def test_lock_blocks_concurrent_inserts_while_held(tmp_path: Path) -> None:
+    """Prove the asyncio.Lock actually serializes — not just the synchronous
+    critical section accidentally doing so. With the lock manually held,
+    a concurrent check_and_insert must NOT complete; on release it must."""
+    keys = _build(tmp_path)
+    await keys._lock.acquire()
+    try:
+        task = asyncio.create_task(keys.check_and_insert("k1"))
+        # Give the loop a chance to schedule the task.
+        await asyncio.sleep(0.01)
+        assert not task.done(), "lock failed to block a concurrent insert"
+    finally:
+        keys._lock.release()
+    # After release, the task completes.
+    assert await task is True
+
+
+@pytest.mark.asyncio
+async def test_check_and_insert_rejects_non_str_key(tmp_path: Path) -> None:
+    """Defensive: a None key would silently poison the in-memory set, then
+    raise TypeError on the next save. Reject at the boundary instead."""
+    keys = _build(tmp_path)
+    with pytest.raises(TypeError):
+        await keys.check_and_insert(None)  # type: ignore[arg-type]

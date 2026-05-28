@@ -85,6 +85,8 @@ class DedupKeys:
         unchanged (no drift where memory has the key but disk doesn't, which
         would silently un-dedup the next process restart).
         """
+        if not isinstance(key, str):
+            raise TypeError(f"DedupKeys.check_and_insert expects str, got {type(key).__name__}")
         async with self._lock:
             if key in self._keys:
                 return False
