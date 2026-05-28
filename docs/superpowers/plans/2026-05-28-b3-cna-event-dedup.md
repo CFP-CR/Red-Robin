@@ -487,12 +487,19 @@ class DedupKeys:
         return cls(repo=repo, keys=repo.load())
 
     async def check_and_insert(self, key: str) -> bool:
-        """Atomically check + insert + persist. Returns True iff key is new."""
+        """Atomically check + insert + persist. Returns True iff key is new.
+
+        Save-first-then-mutate: persist the candidate set BEFORE mutating the
+        in-memory set, so a ``save()`` failure leaves disk and memory both
+        unchanged (no drift where memory has the key but disk doesn't, which
+        would silently un-dedup the next process restart).
+        """
         async with self._lock:
             if key in self._keys:
                 return False
-            self._keys.add(key)
-            self._repo.save(self._keys)
+            new_keys = self._keys | {key}
+            self._repo.save(new_keys)  # may raise — both stores unchanged on failure
+            self._keys = new_keys
             return True
 
     def clear(self) -> None:
@@ -604,35 +611,47 @@ Then append this function at the bottom of the module (after the last existing `
 ```python
 async def start_dedup(
     app: FastAPI, settings: Settings
-) -> tuple[DedupKeys, CloseHook | None]:
+) -> tuple[DedupKeys, CloseHook]:
     """Load the per-engagement dedup-key set into ``app.state.dedup_keys``.
 
-    Resolution: if an active engagement is set (REDROBIN_ENGAGEMENT_SLUG or the
-    ``.active_engagement`` file), load
-    ``~/.redrobin/engagements/<slug>/dedup_keys.json``. In degraded mode (no
-    active engagement) we attach a memory-only DedupKeys backed by a repo at
-    the configured root so the events router can always call into it.
+    Reads the engagement already resolved by ``start_engagement`` (which
+    handles the ``REDROBIN_ENGAGEMENT_SLUG`` env var → ``.active_engagement``
+    file precedence). MUST be called AFTER ``start_engagement`` so that
+    ``app.state.engagement`` is populated — calling it earlier silently falls
+    to the degraded path and writes the dedup file under root instead of
+    under the engagement dir.
+
+    Degraded path (no engagement resolved): a DedupKeys backed by a per-root
+    file (``<root>/dedup_keys.json``) so the events router can always call
+    into ``app.state.dedup_keys`` without a None-check.
     """
-    svc = EngagementService()
-    active = svc.current()
-    if active is not None and (settings.root / "engagements" / active).exists():
-        keys_path = settings.root / "engagements" / active / "dedup_keys.json"
+    active_engagement = getattr(app.state, "engagement", None)
+    if active_engagement is not None and settings.engagements_dir is not None:
+        keys_path = (
+            settings.engagements_dir / active_engagement.slug / "dedup_keys.json"
+        )
     else:
-        # Degraded — keep a non-persistent path under root so the file is
-        # contained but isolated from any engagement.
         keys_path = settings.root / "dedup_keys.json"
     repo = DedupKeysRepo(keys_path)
     dedup_keys = DedupKeys.load(repo)
     app.state.dedup_keys = dedup_keys
     logger.info("dedup_keys: loaded %d keys from %s", len(repo.load()), keys_path)
-    return dedup_keys, None
+
+    async def _close_dedup() -> None:
+        # No background tasks / sockets to close; in-memory + disk state is
+        # already durable. A no-op closer matches the existing helper
+        # convention — every other resource-returning helper provides a real
+        # or no-op CloseHook (never ``None``).
+        return None
+
+    return dedup_keys, _close_dedup
 ```
 
 - [ ] **Step 4: Wire `start_dedup` into the lifespan orchestrator**
 
-In `redrobin/api/app.py`, find the `lifespan(app)` async-context block and add a call to `start_dedup(app, settings)` immediately after the existing engagement-resolving call (`start_engagement`) and BEFORE `start_working_memory`. The exact insertion point and surrounding helpers must be read from the file at implementation time; add the call alongside the other helpers, and append its close hook to the close-hook list (the close is `None` for this helper, so no entry is needed in the close list — keep the registration uniform by importing and calling `start_dedup` only).
+In `redrobin/api/app.py`, find the `lifespan(app)` async-context block and add a call to `start_dedup(app, settings)` immediately after the existing engagement-resolving call (`start_engagement`) and BEFORE `start_working_memory`. **Ordering is load-bearing**: `start_dedup` reads `app.state.engagement` (populated by `start_engagement`); calling it earlier silently degrades to the per-root path. `start_dedup` returns `(DedupKeys, CloseHook)` — capture the closer to match the file's existing helper-registration shape (the closer is a no-op so it's harmless to call at shutdown but stays consistent with `close_bus` / `close_wm`).
 
-Example (pattern only — match the file's actual orchestration shape):
+Example (pattern only — match the file's actual orchestration shape; if `app.py` uses a different close-hook list shape, adopt that shape):
 
 ```python
 from redrobin.api.lifespan_helpers import (
@@ -643,13 +662,18 @@ from redrobin.api.lifespan_helpers import (
 
 async with ...:
     ...
-    await start_engagement(app, settings)
-    await start_dedup(app, settings)  # <-- NEW: after engagement is resolved
-    working_memory_repo, close_wm = await start_working_memory(app, settings)
+    await start_engagement(app, settings)             # populates app.state.engagement
+    _, close_dedup = await start_dedup(app, settings) # NEW: must be after engagement
+    _, close_wm = await start_working_memory(app, settings)
+    ...
+    # On shutdown (LIFO):
+    #   await close_wm()
+    #   await close_dedup()   # NEW — no-op but stays in the close list
+    #   await close_bus()
     ...
 ```
 
-If a refactor of `app.py` is required to fit `start_dedup` cleanly, keep the diff minimal — do NOT reorder existing helpers.
+If `app.py` uses a different list/loop shape for closers (e.g., appending to a list and awaiting in reverse), append `close_dedup` to the same list in the same position relative to the existing helpers. Keep the diff minimal — do NOT reorder existing helpers.
 
 - [ ] **Step 5: Run the test to verify it passes**
 
@@ -987,7 +1011,7 @@ uv run --no-sync mypy redrobin/domain redrobin/application
 uv run --no-sync lint-imports --config importlinter.cfg
 REDROBIN_ALLOW_DEGRADED=1 uv run --no-sync pytest tests/ -q
 ```
-Expected: every gate green. If any pre-existing events_router test asserts the old `/replay` always-202 contract, update it to match the new behavior (202 on miss, 200 on dup); flag in the commit message.
+Expected: every gate green. The miss-path response bodies are **byte-identical to today** (`{"ok": True, "stored": <bool>}` for `ingest`; `{"status": "accepted"}` at 202 for `replay_event`) — the `"duplicate": True` field is ONLY added on the hit path (200). The audit confirmed two existing exact-equality assertions that depend on this invariant: `tests/integration/test_cli_commands.py:256` (`assert r.json() == {"status": "accepted"}` on a fresh replay) and `tests/integration/test_e2e_path3.py:63` (`assert r.json() == {"ok": True, "stored": True}` on a fresh ingest) — both pass under this plan because their POSTs are first-seen events that hit the miss path. If implementation reality diverges from "miss-path body unchanged", relax those assertions to subset checks (e.g. `r.json()["status"] == "accepted"`) — do NOT change the miss-path body.
 
 - [ ] **Step 6: Commit**
 
@@ -1123,10 +1147,20 @@ set BEACON_OUTPUT {
 set BEACON_OUTPUT {
     local('$task_id $correlation_id');
     # B3 auto-obs ROOT: skip emit for Red Robin's own blogged lines.
-    # Display is preserved (we still return $2 unchanged); only the emission
-    # to /v1/events is suppressed, breaking the self-ingestion loop where
-    # CS treats our blog() output as beacon output and the hook re-POSTs it.
-    if ($2 isnot $null && [$2 startsWith "[Red Robin]"]) {
+    # Display is preserved (return $2 unchanged); only the emission to
+    # /v1/events is suppressed, breaking the self-ingestion loop where CS
+    # treats our blog() output as beacon output and the hook re-POSTs it.
+    #
+    # Uses `!is $null` + `ismatch` — both are the file's established Sleep
+    # idioms (`!is $null` x15 occurrences; `ismatch` x10+ for verdict parsing
+    # at lines ~86-92, ~202-212, ~373). The earlier candidate using
+    # `[$str startsWith "X"]` (Sleep's Java-HOA-on-scalar) had ZERO precedent
+    # in this `.cna` — and since this hook is smoke-only (no CI), the first
+    # regression would surface on the operator's keyboard. Stay in-idiom.
+    #
+    # Regex anchor `^` makes the prefix intent explicit; `\[` and `\]` are
+    # required because `[` is a regex metacharacter.
+    if ($2 !is $null && $2 ismatch '^\[Red Robin\].*') {
         return $2;
     }
     $task_id = iff($4 !is $null, $4, "");
