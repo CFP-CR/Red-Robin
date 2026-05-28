@@ -44,93 +44,6 @@ async def _drain(bus: EventBus, task: asyncio.Task[None]) -> None:
 
 
 @pytest.mark.asyncio
-async def test_beacon_command_output_with_ntlm_writes_credential(tmp_path):
-    bus = EventBus()
-    repo = _new_repo(tmp_path, "eng-ntlm")
-    _, task = await _start_reducer(bus, repo, "eng-ntlm")
-
-    try:
-        await bus.publish(
-            {
-                "type": "beacon.command_output",
-                "payload": {
-                    "bid": "B-001",
-                    "output": (
-                        "Username: CORP\\admin\n"
-                        "NTLM: aad3b435b51404eeaad3b435b51404ee:"
-                        "31d6cfe0d16ae931b73c59d7e0c089c0\n"
-                    ),
-                },
-            }
-        )
-        # Drive the loop so the reducer dequeues + writes.
-        for _ in range(50):
-            await asyncio.sleep(0.02)
-            creds = repo.list_credentials()
-            if creds:
-                break
-        creds = repo.list_credentials()
-        assert any(c.username == "admin" and c.domain == "CORP" for c in creds)
-        assert all(c.source_beacon_id == "B-001" for c in creds)
-    finally:
-        await _drain(bus, task)
-
-
-@pytest.mark.asyncio
-async def test_beacon_command_output_hostname_writes_host(tmp_path):
-    bus = EventBus()
-    repo = _new_repo(tmp_path, "eng-host")
-    _, task = await _start_reducer(bus, repo, "eng-host")
-
-    try:
-        await bus.publish(
-            {
-                "type": "beacon.command_output",
-                "payload": {
-                    "bid": "B-002",
-                    "output": "Hostname: dc01\n",
-                },
-            }
-        )
-        for _ in range(50):
-            await asyncio.sleep(0.02)
-            hosts = repo.load().hosts
-            if hosts:
-                break
-        hosts = repo.load().hosts
-        assert any(h.name == "DC01" for h in hosts)
-    finally:
-        await _drain(bus, task)
-
-
-@pytest.mark.asyncio
-async def test_beacon_command_output_kerberos_appends_finding(tmp_path):
-    bus = EventBus()
-    repo = _new_repo(tmp_path, "eng-krb")
-    _, task = await _start_reducer(bus, repo, "eng-krb")
-
-    try:
-        await bus.publish(
-            {
-                "type": "beacon.command_output",
-                "payload": {
-                    "bid": "B-003",
-                    "output": "klist\nCached Tickets: (1)\n   Server: krbtgt/CORP\n",
-                },
-            }
-        )
-        for _ in range(50):
-            await asyncio.sleep(0.02)
-            findings = repo.load().findings
-            if findings:
-                break
-        findings = repo.load().findings
-        assert any(f.kind == "kerberos_ticket_observed" for f in findings)
-    finally:
-        await _drain(bus, task)
-
-
-@pytest.mark.asyncio
 async def test_beacon_initial_writes_session(tmp_path):
     bus = EventBus()
     repo = _new_repo(tmp_path, "eng-sess")
@@ -218,6 +131,41 @@ async def test_unknown_event_type_is_ignored(tmp_path):
         await asyncio.sleep(0.1)
         wm = repo.load()
         assert wm.credentials == [] and wm.hosts == [] and wm.findings == []
+    finally:
+        await _drain(bus, task)
+
+
+@pytest.mark.asyncio
+async def test_beacon_command_output_is_ignored_by_reducer(tmp_path):
+    """B2: the reducer no longer regex-extracts from command output — the LLM
+    enricher is the sole extraction path (it publishes working_memory.deltas,
+    a separate bus consumer). A command_output carrying NTLM / hostname /
+    kerberos patterns must therefore produce NO creds / hosts / findings via
+    the reducer."""
+    bus = EventBus()
+    repo = _new_repo(tmp_path, "eng-noextract")
+    _, task = await _start_reducer(bus, repo, "eng-noextract")
+    try:
+        await bus.publish(
+            {
+                "type": "beacon.command_output",
+                "payload": {
+                    "bid": "B-001",
+                    "output": (
+                        "Username: CORP\\admin\n"
+                        "NTLM: aad3b435b51404eeaad3b435b51404ee:"
+                        "31d6cfe0d16ae931b73c59d7e0c089c0\n"
+                        "Hostname: dc01\n"
+                        "klist\nCached Tickets: (1)\n"
+                    ),
+                },
+            }
+        )
+        await asyncio.sleep(0.2)
+        wm = repo.load()
+        assert wm.credentials == []
+        assert wm.hosts == []
+        assert wm.findings == []
     finally:
         await _drain(bus, task)
 
