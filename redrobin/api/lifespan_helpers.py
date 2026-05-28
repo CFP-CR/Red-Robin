@@ -27,6 +27,7 @@ from fastapi import FastAPI
 
 from redrobin.application.config import Settings
 from redrobin.application.cs_adapter_lifecycle import build_adapter, load_adapter_configs
+from redrobin.application.dedup_keys import DedupKeys, DedupKeysRepo
 from redrobin.application.enrichment.enricher import WorkingMemoryEnricher
 from redrobin.application.enrichment.llm import build_enricher_llm
 from redrobin.application.engagement_loader import Engagement, EngagementLoader
@@ -528,9 +529,44 @@ async def start_enricher(
     return enricher, close
 
 
+async def start_dedup(app: FastAPI, settings: Settings) -> tuple[DedupKeys, CloseHook]:
+    """Load the per-engagement dedup-key set into ``app.state.dedup_keys``.
+
+    Reads the engagement already resolved by ``start_engagement`` (which
+    handles the ``REDROBIN_ENGAGEMENT_SLUG`` env var → ``.active_engagement``
+    file precedence). MUST be called AFTER ``start_engagement`` so that
+    ``app.state.engagement`` is populated — calling it earlier silently falls
+    to the degraded path and writes the dedup file under root instead of
+    under the engagement dir.
+
+    Degraded path (no engagement resolved): a DedupKeys backed by a per-root
+    file (``<root>/dedup_keys.json``) so the events router can always call
+    into ``app.state.dedup_keys`` without a None-check.
+    """
+    active_engagement = getattr(app.state, "engagement", None)
+    if active_engagement is not None and settings.engagements_dir is not None:
+        keys_path = settings.engagements_dir / active_engagement.slug / "dedup_keys.json"
+    else:
+        keys_path = settings.root / "dedup_keys.json"
+    repo = DedupKeysRepo(keys_path)
+    dedup_keys = DedupKeys.load(repo)
+    app.state.dedup_keys = dedup_keys
+    logger.info("dedup_keys: loaded %d keys from %s", len(dedup_keys), keys_path)
+
+    async def _close_dedup() -> None:
+        # No background tasks / sockets to close; in-memory + disk state is
+        # already durable. A no-op closer matches the existing helper
+        # convention — every other resource-returning helper provides a real
+        # or no-op CloseHook (never ``None``).
+        return None
+
+    return dedup_keys, _close_dedup
+
+
 __all__ = [
     "CloseHook",
     "start_adapters",
+    "start_dedup",
     "start_engagement",
     "start_enricher",
     "start_event_bus",

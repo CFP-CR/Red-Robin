@@ -31,6 +31,7 @@ from redrobin.api.auth import require_bearer
 from redrobin.api.events_router import router as events_router
 from redrobin.api.lifespan_helpers import (
     start_adapters,
+    start_dedup,
     start_engagement,
     start_enricher,
     start_event_bus,
@@ -88,6 +89,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await start_engagement(
         app, settings
     )  # no close hook — must run before working_memory so the reducer captures the resolved engagement_id
+    _, close_dedup = await start_dedup(
+        app, settings
+    )  # must run AFTER start_engagement; reads app.state.engagement to pick the per-engagement keys file
     _, close_wm = await start_working_memory(app, settings)
     _, close_enricher = await start_enricher(app, settings)
     _, _close_pipeline = await start_pipeline(app, settings)  # no-op close
@@ -193,6 +197,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await close_enricher()
         except Exception:
             logger.exception("close_enricher failed")
+        # No-op close for dedup keys (in-memory + already-durable disk state);
+        # kept in the close list to match the helper convention so a future
+        # real closer slots in here without re-wiring the lifespan.
+        try:
+            await close_dedup()
+        except Exception:
+            logger.exception("close_dedup failed")
         # 6. Stop the rules-loader hot-reload watchdog last.
         try:
             await stop_rules()
