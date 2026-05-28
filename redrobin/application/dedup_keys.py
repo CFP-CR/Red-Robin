@@ -99,3 +99,12 @@ class DedupKeys:
         """Drop the in-memory set and the on-disk file."""
         self._keys.clear()
         self._repo.clear()
+
+    def __len__(self) -> int:
+        """Number of dedup keys currently held in memory.
+
+        Cheap O(1) accessor so callers (lifespan boot log, observability
+        endpoints) don't have to re-read the file via ``repo.load()`` just
+        to know the size of the already-loaded set.
+        """
+        return len(self._keys)

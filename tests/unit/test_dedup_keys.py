@@ -158,3 +158,16 @@ async def test_check_and_insert_rejects_non_str_key(tmp_path: Path) -> None:
     keys = _build(tmp_path)
     with pytest.raises(TypeError):
         await keys.check_and_insert(None)  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_len_reflects_in_memory_set(tmp_path: Path) -> None:
+    """``len(dedup_keys)`` reads from the already-loaded in-memory set —
+    no second disk read. Boot-log + observability rely on this being O(1)."""
+    keys = _build(tmp_path, preload={"a", "b", "c"})
+    assert len(keys) == 3
+    await keys.check_and_insert("d")
+    assert len(keys) == 4
+    # Duplicate insert does NOT grow the set.
+    await keys.check_and_insert("d")
+    assert len(keys) == 4

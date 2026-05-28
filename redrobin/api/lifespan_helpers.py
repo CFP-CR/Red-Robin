@@ -551,7 +551,7 @@ async def start_dedup(app: FastAPI, settings: Settings) -> tuple[DedupKeys, Clos
     repo = DedupKeysRepo(keys_path)
     dedup_keys = DedupKeys.load(repo)
     app.state.dedup_keys = dedup_keys
-    logger.info("dedup_keys: loaded %d keys from %s", len(repo.load()), keys_path)
+    logger.info("dedup_keys: loaded %d keys from %s", len(dedup_keys), keys_path)
 
     async def _close_dedup() -> None:
         # No background tasks / sockets to close; in-memory + disk state is
