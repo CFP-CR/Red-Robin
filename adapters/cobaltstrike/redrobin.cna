@@ -459,11 +459,25 @@ include(script_resource("aliases/popup_beacon.sleep"));
 # but allows any string value.
 set BEACON_OUTPUT {
     local('$task_id $correlation_id');
+    # B3 auto-obs ROOT: skip emit for Red Robin's own blogged lines.
+    # Display is preserved (return $2 unchanged); only the emission to
+    # /v1/events is suppressed, breaking the self-ingestion loop where CS
+    # treats our blog() output as beacon output and the hook re-POSTs it.
+    #
+    # Uses `!is $null` + `ismatch` — both are the file's established Sleep
+    # idioms (`!is $null` x15 occurrences; `ismatch` x10+ for verdict parsing
+    # at lines ~86-92, ~202-212, ~373). The earlier candidate using
+    # `[$str startsWith "X"]` (Sleep's Java-HOA-on-scalar) had ZERO precedent
+    # in this `.cna` — and since this hook is smoke-only (no CI), the first
+    # regression would surface on the operator's keyboard. Stay in-idiom.
+    #
+    # Regex anchor `^` makes the prefix intent explicit; `\[` and `\]` are
+    # required because `[` is a regex metacharacter.
+    if ($2 !is $null && $2 ismatch '^\[Red Robin\].*') {
+        return $2;
+    }
     $task_id = iff($4 !is $null, $4, "");
-    # $5 is a per-command correlation id (verified live 2026-05-27 via the hook
-    # debug spike). The official Aggressor events doc omits it. It is identical
-    # across this command's beacon_input / beacon_tasked / beacon_output and
-    # unique per command, so the enricher can pair output to its exact command.
+    # $5 is the per-command correlation id (verified live 2026-05-27).
     $correlation_id = iff($5 !is $null, $5, "");
     redrobin_emit_command_output($1, $task_id, $2, $correlation_id);
     return $2;
