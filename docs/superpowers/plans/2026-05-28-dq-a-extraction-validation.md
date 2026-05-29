@@ -207,21 +207,19 @@ Expected: FAIL on `assert "jcspi" not in prompt`.
 
 - [ ] **Step 3: De-personalize the prompt**
 
-In `redrobin/infrastructure/llm/anthropic_client.py`, in `AnthropicEnricherClient._SYSTEM_PROMPT`, find the not-a-host examples sentence (currently):
+In `redrobin/infrastructure/llm/anthropic_client.py`, in `AnthropicEnricherClient._SYSTEM_PROMPT`, the not-a-host examples are on this string-literal line (verified — `anthropic_client.py:192`; the prompt is built from concatenated literals, so this is the EXACT contiguous literal):
 
 ```python
-        "name): 'jcspi' (a username), 'Windows' or 'C:' (a drive/volume "
+        "of NOT-a-host: 'jcspi' (a username), 'Windows' or 'C:' (a drive/volume "
 ```
 
-(the full current fragment reads: `"Cross-OS examples of NOT-a-host: 'jcspi' (a username), 'Windows' or 'C:' (a drive/volume label, e.g. from 'Volume in drive C is Windows'), 'web-svc' (a service name), '/etc/passwd' (a path)."`)
-
-Replace `'jcspi'` with the generic example `'administrator'`:
+`'jcspi'` occurs EXACTLY ONCE in `redrobin/` (only here), so the simplest robust edit is to replace just the token. Change that line to:
 
 ```python
-        "name): 'administrator' (a username), 'Windows' or 'C:' (a drive/volume "
+        "of NOT-a-host: 'administrator' (a username), 'Windows' or 'C:' (a drive/volume "
 ```
 
-Result: `"Cross-OS examples of NOT-a-host: 'administrator' (a username), 'Windows' or 'C:' (a drive/volume label, e.g. from 'Volume in drive C is Windows'), 'web-svc' (a service name), '/etc/passwd' (a path)."` — a universal example, no victim data.
+Result: the full sentence becomes `"...Cross-OS examples of NOT-a-host: 'administrator' (a username), 'Windows' or 'C:' (a drive/volume label, e.g. from 'Volume in drive C is Windows'), 'web-svc' (a service name), '/etc/passwd' (a path)."` — a universal example, no victim data. (If your editor matches the bare token, replacing `'jcspi'` → `'administrator'` is unambiguous since it appears once.)
 
 - [ ] **Step 4: Run the test to verify it passes**
 
@@ -277,7 +275,7 @@ def test_build_user_message_with_grounding() -> None:
 Append to `tests/integration/test_enricher.py` (add imports as needed: `import pytest`, `from redrobin.application.enrichment.enricher import WorkingMemoryEnricher`):
 
 ```python
-class _RecordingLLM:
+class _GroundingRecordingLLM:
     """EnricherLLM stub that records every extract() call and returns empty deltas."""
 
     def __init__(self) -> None:
@@ -300,7 +298,7 @@ class _NoopBus:
 
 @pytest.mark.asyncio
 async def test_enricher_grounds_extract_with_beacon_host_user() -> None:
-    llm = _RecordingLLM()
+    llm = _GroundingRecordingLLM()
     enricher = WorkingMemoryEnricher(
         bus=_NoopBus(),  # type: ignore[arg-type]
         llm=llm,  # type: ignore[arg-type]
@@ -319,7 +317,7 @@ async def test_enricher_grounds_extract_with_beacon_host_user() -> None:
 
 @pytest.mark.asyncio
 async def test_enricher_grounding_is_none_for_unknown_beacon() -> None:
-    llm = _RecordingLLM()
+    llm = _GroundingRecordingLLM()
     enricher = WorkingMemoryEnricher(
         bus=_NoopBus(),  # type: ignore[arg-type]
         llm=llm,  # type: ignore[arg-type]
@@ -503,10 +501,22 @@ In `redrobin/application/enrichment/enricher.py`:
 
 (Keep the existing docstring/comment in `_extract_chunk`; only the signature + the `extract(...)` call gain `host`/`user`.)
 
+(f) **CRITICAL — update the existing enricher-driven test fakes (audit C2).** Once `_extract_chunk` calls `extract(..., host=host, user=user)`, EVERY fake LLM that the real enricher drives must accept those kwargs or it raises `TypeError: extract() got an unexpected keyword argument 'host'`. `EnricherLLM` is a structural Protocol, so the defaults on the protocol/client do NOT propagate to hand-written fakes — each fake's own signature must be widened. In `tests/integration/test_enricher.py` there are **five** such fakes (the audit found them at ~lines 19 `_StubLLM`, 259 `_RecordingLLM`, 348 `_PairRecordingLLM`, 455 `_RecordingLLM`, 500 `_GatingLLM` — verify by grepping `async def extract` in that file). For EACH one, widen its `extract` signature to accept and ignore the new kwargs:
+
+```python
+    async def extract(
+        self, *, command: str, beacon_id: str | None, output: str,
+        host: str | None = None, user: str | None = None,
+    ) -> str:
+        ...  # existing body unchanged — these fakes don't assert on grounding
+```
+
+(Do NOT touch `_StubLLM` in `tests/unit/enrichment/test_llm.py:~12` — it is called directly, never through the enricher, so it never receives `host`/`user` and stays conformant.) This widening lands in THIS task's commit (keep-green): the enricher change and the fakes must move together.
+
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `REDROBIN_ALLOW_DEGRADED=1 uv run --no-sync pytest tests/unit/enrichment/test_llm.py tests/integration/test_enricher.py -v`
-Expected: all pass (the 4 new + every pre-existing enricher/llm test — the existing tests pass because `host`/`user` default to `None`, so existing `extract` callers and fakes are unaffected).
+Expected: all pass — the 4 new tests AND every pre-existing enricher/llm test. The pre-existing tests pass ONLY because Step 5f widened the five driven fakes to accept `host`/`user`; without 5f, ~12 existing enricher tests would fail with an unexpected-keyword `TypeError` (audit C2). The `extract` defaults make the *production* path back-compatible; the *test fakes* needed the explicit widening.
 
 - [ ] **Step 7: Run the full CI gate** (5 gates.)
 Expected: green. mypy must stay clean (the protocol + enricher are in domain/application scope). Pytest 576 → 580 (+4).
@@ -530,11 +540,10 @@ Even if the LLM ignores the grounding, drop an incoming host whose name matches 
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `tests/unit/test_working_memory_repo.py` (the file already constructs `WorkingMemoryRepo`; add any missing imports: `from redrobin.domain.memory import WorkingMemory, Host, Credential, Session, WorkingMemoryDeltas`):
+Append to `tests/unit/test_working_memory_repo.py` (verified by the audit: it ALREADY imports `WorkingMemory, Host, Credential, Session, WorkingMemoryDeltas` and constructs `WorkingMemoryRepo(tmp_path / ...)` with the `tmp_path` fixture — no new imports needed):
 
 ```python
 def _seed_wm(repo, *, sessions=(), credentials=()):
-    from redrobin.domain.memory import WorkingMemory
     wm = WorkingMemory(engagement_id="eng-test")
     wm.sessions = list(sessions)
     wm.credentials = list(credentials)
@@ -765,7 +774,7 @@ git commit -m "docs(dq-a): smoke runbook for the extraction-validation acceptanc
 **2. Placeholder scan:** No TBD/TODO. Every code step has complete before/after code; every test step has full test bodies; every command has expected output.
 
 **3. Type consistency:**
-- `EnricherLLM.extract(*, command, beacon_id, output, host=None, user=None) -> str` — defined in T3 Step 3, matched by `AnthropicEnricherClient.extract` (T3 Step 4), `_extract_chunk`'s call (T3 Step 5e), and `_RecordingLLM.extract` in the test (T3 Step 1). Consistent.
+- `EnricherLLM.extract(*, command, beacon_id, output, host=None, user=None) -> str` — defined in T3 Step 3, matched by `AnthropicEnricherClient.extract` (T3 Step 4), `_extract_chunk`'s call (T3 Step 5e), and `_GroundingRecordingLLM.extract` in the test (T3 Step 1). Consistent.
 - `_build_enricher_user_message(*, command, beacon_id, output, host=None, user=None) -> str` — defined T3 Step 4, used by `extract` (same step) and tested T3 Step 1. Consistent.
 - `_host_user_by_bid: dict[str, tuple[str | None, str | None]]` — defined T3 Step 5a, written by `_remember_session` (5c), read in `_enrich` (5d). Consistent.
 - `_bare_username(name) -> str` + `_known_usernames(wm, deltas) -> set[str]` — defined T4 Step 3, used in the apply_deltas host loop (same step). Consistent.
