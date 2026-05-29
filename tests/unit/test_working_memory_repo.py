@@ -361,6 +361,9 @@ def test_load_tolerates_legacy_accounts_key(tmp_path):
         ),
         encoding="utf-8",
     )
+    # (a populated `accounts` value here is the strong case; an empty
+    # `accounts: []` — the shape real pre-Group-B WM files have — hits the
+    # same ignore path in _from_dict, which never reads the key.)
     loaded = WorkingMemoryRepo(wm_path).load()
     assert loaded.engagement_id == "legacy"
     assert loaded.hosts[0].name == "DC01"

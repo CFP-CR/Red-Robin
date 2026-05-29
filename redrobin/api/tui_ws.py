@@ -50,9 +50,9 @@ async def _build_initial_snapshot(app) -> dict:
     """Build a complete working_memory_snapshot payload from the live repo.
 
     Uses ``working_memory_to_snapshot`` so the connect-time frame carries ALL
-    13 WorkingMemory fields (#139). Tolerates missing repo / missing file by
-    serializing an empty WorkingMemory, which matters because some tests
-    instantiate ``create_app()`` without a working-memory repo.
+    WorkingMemory fields (#139), not just the 5 collections. Tolerates missing
+    repo / missing file by serializing an empty WorkingMemory, which matters
+    because some tests instantiate ``create_app()`` without a working-memory repo.
     """
     repo = getattr(app.state, "working_memory_repo", None)
     engagement_id = getattr(app.state, "engagement_id", None)
