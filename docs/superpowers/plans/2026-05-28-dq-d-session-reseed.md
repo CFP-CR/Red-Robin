@@ -130,7 +130,7 @@ def test_beacon_initial_dedups_on_bid_and_type(daemon) -> None:
     assert r2.status_code == 200 and r2.json().get("duplicate") is True
 ```
 
-with these two tests (note the added `import json` + `import time` — add them to the top-of-file imports block if not already present; the file currently imports `from pathlib import Path` and `from typing import Any`, so add `import json` and `import time` above `from pathlib import Path`):
+with these two tests (note the added `import time` — add it to the top-of-file imports block; the file currently imports `from pathlib import Path` and `from typing import Any`, so add `import time` above `from pathlib import Path`. No `import json` needed — the re-seed test reads the live repo object, not a file):
 
 ```python
 def _beacon_initial_payload(bid: str = "B-3") -> dict[str, Any]:
@@ -166,24 +166,27 @@ def test_beacon_initial_is_not_deduped(daemon) -> None:
     assert "duplicate" not in r2.json()
 
 
-def test_beacon_initial_reseeds_session(daemon, tmp_path: Path) -> None:
+def test_beacon_initial_reseeds_session(daemon) -> None:
     """End-to-end: a POSTed beacon.initial reaches the reducer and seeds the
-    session; a 2nd POST (not deduped) re-seeds it idempotently. Polls the
-    working-memory file because the reducer consumes the bus asynchronously."""
-    _, client = daemon
+    session; a 2nd POST (not deduped) re-seeds it idempotently. Reads the live
+    working-memory repo via ``app.state.working_memory_repo`` — the reducer
+    consumes the bus asynchronously, so poll until the session appears. Reading
+    the repo object (not a hardcoded path) survives any future change to how the
+    WM path resolves; this is the same approach the green e2e journey test uses
+    (``tests/e2e/test_events_to_memory_journey.py`` reads
+    ``app.state.working_memory_repo.load().sessions``)."""
+    app, client = daemon
     headers = {"Authorization": f"Bearer {_token()}"}
-    wm_path = tmp_path / "wm.json"  # REDROBIN_WORKING_MEMORY_PATH set by the daemon fixture
+    repo = app.state.working_memory_repo
 
     def _session_present(bid: str) -> bool:
         deadline = time.monotonic() + 3.0
         while time.monotonic() < deadline:
-            if wm_path.exists():
-                try:
-                    data = json.loads(wm_path.read_text(encoding="utf-8"))
-                except json.JSONDecodeError:
-                    data = {}
-                if any(s.get("beacon_id") == bid for s in data.get("sessions", [])):
+            try:
+                if any(s.beacon_id == bid for s in repo.load().sessions):
                     return True
+            except FileNotFoundError:
+                pass  # reducer hasn't written the WM file yet
             time.sleep(0.05)
         return False
 
@@ -191,15 +194,15 @@ def test_beacon_initial_reseeds_session(daemon, tmp_path: Path) -> None:
     client.post("/v1/events", json=payload, headers=headers)
     assert _session_present("B-7"), "reducer did not seed the session from beacon.initial"
 
-    # 2nd POST is not deduped → reaches the reducer again → session still present
-    # (upsert is idempotent: exactly one session for the bid).
+    # 2nd POST is not deduped → reaches the reducer again → still exactly one
+    # session for the bid (upsert_session replaces by bid — idempotent).
     client.post("/v1/events", json=payload, headers=headers)
     assert _session_present("B-7")
-    data = json.loads(wm_path.read_text(encoding="utf-8"))
-    assert sum(1 for s in data.get("sessions", []) if s.get("beacon_id") == "B-7") == 1
+    sessions = [s for s in repo.load().sessions if s.beacon_id == "B-7"]
+    assert len(sessions) == 1
 ```
 
-Note for the implementer: the daemon fixture sets `REDROBIN_WORKING_MEMORY_PATH = tmp_path / "wm.json"`, so the reducer writes the session there. If the re-seed test fails to find the file, confirm the path `start_working_memory` resolves (run the daemon fixture and inspect `app.state`); the env var should make it `tmp_path/wm.json`.
+Note for the implementer: `repo.load()` returns a `WorkingMemory` whose `.sessions` are `Session` dataclass instances (attribute access `s.beacon_id`, not dict `.get`). `repo.load()` raises `FileNotFoundError` until the reducer's first save — the poll swallows it and retries. `app.state.working_memory_repo` is the attribute the lifespan attaches in `start_working_memory`; confirm the exact name against `tests/e2e/test_events_to_memory_journey.py` if it differs.
 
 - [ ] **Step 3: Run the inverted tests to verify they FAIL**
 
