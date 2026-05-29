@@ -15,6 +15,7 @@ will swap in an async write-behind layer here.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from dataclasses import asdict, replace
@@ -31,6 +32,14 @@ from redrobin.domain.memory import (
     WorkingMemory,
     WorkingMemoryDeltas,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _bare_username(name: str) -> str:
+    """Bare, upper-cased username: strip a ``DOMAIN\\`` prefix and an ``@domain``
+    suffix so ``CORP\\jdoe``, ``jdoe@corp.local`` and ``jdoe`` all compare equal."""
+    return name.split("\\")[-1].split("@")[0].strip().upper()
 
 
 class WorkingMemoryRepo:
@@ -96,7 +105,16 @@ class WorkingMemoryRepo:
         Tool: dedup by (name, used_on).
         """
         wm = self.load()
+        known_users = self._known_usernames(wm, deltas)
         for host in deltas.hosts:
+            # #105 backstop: a host whose name is actually a known username is
+            # junk (the LLM mis-read the logged-in user as a host). Drop it.
+            if host.name and _bare_username(host.name) in known_users:
+                logger.info(
+                    "apply_deltas: dropping junk host %r (matches a known username)",
+                    host.name,
+                )
+                continue
             self._merge_host(wm, host)
         for cred in deltas.credentials:
             self._merge_credential(wm, cred)
@@ -113,6 +131,22 @@ class WorkingMemoryRepo:
             if defense not in wm.defenses_observed:
                 wm.defenses_observed.append(defense)
         self.save(wm)
+
+    @staticmethod
+    def _known_usernames(wm: WorkingMemory, deltas: WorkingMemoryDeltas) -> set[str]:
+        """Bare-upper usernames known in live WM + this incoming batch — used to
+        reject a host whose name is actually a username (#105 backstop)."""
+        users: set[str] = set()
+        for s in wm.sessions:
+            if s.user:
+                users.add(_bare_username(s.user))
+        for c in wm.credentials:
+            if c.username:
+                users.add(_bare_username(c.username))
+        for c in deltas.credentials:
+            if c.username:
+                users.add(_bare_username(c.username))
+        return users
 
     @staticmethod
     def _merge_host(wm: WorkingMemory, host: Host) -> None:
