@@ -189,7 +189,7 @@ class AnthropicEnricherClient:
         "A host is a distinct machine/system identity: a hostname, an FQDN, or an "
         "IP address. A host is NOT a username, a file or directory path, a "
         "drive/volume label, a service name, or a generic word. Cross-OS examples "
-        "of NOT-a-host: 'jcspi' (a username), 'Windows' or 'C:' (a drive/volume "
+        "of NOT-a-host: 'administrator' (a username), 'Windows' or 'C:' (a drive/volume "
         "label, e.g. from 'Volume in drive C is Windows'), 'web-svc' (a service "
         "name), '/etc/passwd' (a path). Only emit a host when the output names an "
         "actual machine. "
