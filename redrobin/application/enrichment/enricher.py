@@ -53,6 +53,11 @@ class WorkingMemoryEnricher:
         # unknown) correlation_id.
         self._cmd_by_corr: OrderedDict[str, str] = OrderedDict()
         self._cmd_by_bid: dict[str, str] = {}
+        # Per-bid own-identity cache from beacon.initial (host, user), used to
+        # ground each extraction so the LLM doesn't re-extract this beacon's own
+        # host/user as a newly-discovered host (#105). One entry per beacon —
+        # naturally bounded, no eviction needed.
+        self._host_user_by_bid: dict[str, tuple[str | None, str | None]] = {}
         self._sem = asyncio.Semaphore(max_concurrency)
         self.on_started: Callable[[], None] | None = None
 
@@ -69,6 +74,9 @@ class WorkingMemoryEnricher:
                 if evt.get("_type") == "_close":
                     return
                 etype = evt.get("type")
+                if etype == "beacon.initial":
+                    self._remember_session(evt.get("payload") or {})
+                    continue
                 if etype == "beacon.command_input":
                     self._remember_command(evt.get("payload") or {})
                     continue
@@ -98,6 +106,9 @@ class WorkingMemoryEnricher:
         )
         bid = payload.get("bid")
         src = str(bid) if bid is not None else None
+        host, user = (
+            self._host_user_by_bid.get(src, (None, None)) if src is not None else (None, None)
+        )
         if not should_enrich(
             command, output, denylist=self._denylist, min_output_chars=self._min_output_chars
         ):
@@ -107,7 +118,7 @@ class WorkingMemoryEnricher:
         chunks = chunk_output(output, max_chars=self._chunk_max_chars)
         try:
             per_chunk = await asyncio.gather(
-                *(self._extract_chunk(command, src, c) for c in chunks)
+                *(self._extract_chunk(command, src, c, host, user) for c in chunks)
             )
         except Exception as exc:  # network/timeout/api — best-effort
             await self._emit_failed(command, src, f"llm_error: {exc}")
@@ -164,6 +175,18 @@ class WorkingMemoryEnricher:
             }
         )
 
+    def _remember_session(self, payload: dict[str, Any]) -> None:
+        """Cache this beacon's own (host, user) from beacon.initial for grounding."""
+        bid = payload.get("bid")
+        if bid is None:
+            return
+        host = payload.get("host")
+        user = payload.get("user")
+        self._host_user_by_bid[str(bid)] = (
+            str(host) if host is not None else None,
+            str(user) if user is not None else None,
+        )
+
     def _remember_command(self, payload: dict[str, Any]) -> None:
         """Cache the command behind a future output. Prefers the full ``raw``
         command line, then the first-token ``command``, then ``""``. Keyed by
@@ -198,7 +221,12 @@ class WorkingMemoryEnricher:
         return ""
 
     async def _extract_chunk(
-        self, command: str, src: str | None, chunk: str
+        self,
+        command: str,
+        src: str | None,
+        chunk: str,
+        host: str | None = None,
+        user: str | None = None,
     ) -> WorkingMemoryDeltas | None:
         """Extract one chunk; ONE retry on malformed JSON, then log + drop (None).
 
@@ -209,7 +237,9 @@ class WorkingMemoryEnricher:
         assert self._llm is not None
         for attempt in (1, 2):
             async with self._sem:
-                raw = await self._llm.extract(command=command, beacon_id=src, output=chunk)
+                raw = await self._llm.extract(
+                    command=command, beacon_id=src, output=chunk, host=host, user=user
+                )
             try:
                 return parse_deltas(raw, source_beacon_id=src)
             except DeltaParseError as exc:

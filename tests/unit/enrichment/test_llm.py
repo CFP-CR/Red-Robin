@@ -6,6 +6,10 @@ from __future__ import annotations
 import pytest
 
 from redrobin.application.enrichment.llm import EnricherLLM, build_enricher_llm
+from redrobin.infrastructure.llm.anthropic_client import (
+    AnthropicEnricherClient,
+    _build_enricher_user_message,
+)
 
 
 class _StubLLM:
@@ -46,3 +50,33 @@ def test_enricher_system_prompt_grounds_host_concept():
     assert "service" in lowered
     # carries at least one cross-OS negative example (Windows drive label + a path)
     assert "/etc/passwd" in prompt
+
+
+def test_enricher_system_prompt_has_no_hardcoded_victim_username() -> None:
+    # #105 layer 1: the static (cached) prompt must NOT embed any specific
+    # operator/victim username. It teaches "usernames are not hosts" with a
+    # generic example; the live beacon's actual user is injected dynamically
+    # per call (see _build_enricher_user_message), never hardcoded here.
+    prompt = AnthropicEnricherClient._SYSTEM_PROMPT.lower()
+    assert "jcspi" not in prompt
+    # The not-a-host teaching is still present.
+    assert "username" in prompt
+    assert "host" in prompt
+
+
+def test_build_user_message_without_grounding() -> None:
+    msg = _build_enricher_user_message(
+        command="whoami", beacon_id="B-1", output="CORP\\jdoe", host=None, user=None
+    )
+    assert "Command: whoami" in msg
+    assert "Output:\nCORP\\jdoe" in msg
+    assert "do NOT emit" not in msg  # no grounding line when host/user unknown
+
+
+def test_build_user_message_with_grounding() -> None:
+    msg = _build_enricher_user_message(
+        command="dir", beacon_id="B-1", output="...", host="WS-FINANCE-03", user="CORP\\jdoe"
+    )
+    assert "WS-FINANCE-03" in msg
+    assert "CORP\\jdoe" in msg
+    assert "do NOT emit" in msg

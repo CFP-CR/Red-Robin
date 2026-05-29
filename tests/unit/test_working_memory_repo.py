@@ -8,6 +8,7 @@ from redrobin.domain.memory import (
     Finding,
     Host,
     Objective,
+    Session,
     ToolUsage,
     WorkingMemory,
     WorkingMemoryDeltas,
@@ -287,3 +288,59 @@ def test_apply_deltas_keeps_distinct_findings(tmp_path):
         )
     )
     assert len(repo.load().findings) == 2
+
+
+def _seed_wm(repo, *, sessions=(), credentials=()):
+    wm = WorkingMemory(engagement_id="eng-test")
+    wm.sessions = list(sessions)
+    wm.credentials = list(credentials)
+    repo.save(wm)
+
+
+def test_apply_deltas_drops_host_matching_a_session_username(tmp_path) -> None:
+    repo = WorkingMemoryRepo(tmp_path / "wm.json")
+    _seed_wm(repo, sessions=[Session(beacon_id="B-1", hostname="JCSP", user="jcspi")])
+    deltas = WorkingMemoryDeltas(hosts=[Host(name="JCSPI"), Host(name="DC01")])
+    repo.apply_deltas(deltas)
+    names = {h.name.upper() for h in repo.load().hosts}
+    assert "JCSPI" not in names  # dropped — it's a known username
+    assert "DC01" in names  # kept — a real host
+
+
+def test_apply_deltas_drops_host_matching_a_credential_username(tmp_path) -> None:
+    repo = WorkingMemoryRepo(tmp_path / "wm.json")
+    _seed_wm(
+        repo,
+        credentials=[
+            Credential(domain="CORP", username="svc_sql", secret="x", secret_type="plaintext")
+        ],
+    )
+    repo.apply_deltas(WorkingMemoryDeltas(hosts=[Host(name="svc_sql")]))
+    assert repo.load().hosts == []
+
+
+def test_apply_deltas_drops_host_matching_domain_qualified_username(tmp_path) -> None:
+    repo = WorkingMemoryRepo(tmp_path / "wm.json")
+    _seed_wm(repo, sessions=[Session(beacon_id="B-1", hostname="WS1", user="CORP\\jdoe")])
+    repo.apply_deltas(WorkingMemoryDeltas(hosts=[Host(name="jdoe")]))
+    assert repo.load().hosts == []
+
+
+def test_apply_deltas_drops_host_matching_a_username_in_same_batch(tmp_path) -> None:
+    repo = WorkingMemoryRepo(tmp_path / "wm.json")
+    _seed_wm(repo)
+    deltas = WorkingMemoryDeltas(
+        hosts=[Host(name="bob")],
+        credentials=[Credential(domain="", username="bob", secret="pw", secret_type="plaintext")],
+    )
+    repo.apply_deltas(deltas)
+    assert repo.load().hosts == []
+    assert len(repo.load().credentials) == 1  # the credential still lands
+
+
+def test_apply_deltas_keeps_real_host_when_no_username_collision(tmp_path) -> None:
+    repo = WorkingMemoryRepo(tmp_path / "wm.json")
+    _seed_wm(repo, sessions=[Session(beacon_id="B-1", hostname="WS1", user="jdoe")])
+    repo.apply_deltas(WorkingMemoryDeltas(hosts=[Host(name="DC01")]))
+    names = {h.name.upper() for h in repo.load().hosts}
+    assert "DC01" in names

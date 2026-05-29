@@ -248,13 +248,20 @@ class WorkingMemoryDeltas:
         for c in payload.get("credentials") or []:
             if not isinstance(c, dict) or not c.get("username"):
                 continue
+            secret = _opt_str(c.get("secret"))
+            ntlm_hash = _opt_str(c.get("ntlm_hash"))
+            # #114: a credential with no secret material is just a username
+            # observation (the enricher sometimes emits the logged-in user). Drop
+            # it — CREDENTIALS is for usable secrets, not bare usernames.
+            if not secret and not ntlm_hash:
+                continue
             credentials.append(
                 Credential(
                     domain=str(c.get("domain", "")),
                     username=str(c["username"]),
-                    ntlm_hash=_opt_str(c.get("ntlm_hash")),
+                    ntlm_hash=ntlm_hash,
                     secret_type=str(c.get("secret_type") or "ntlm"),
-                    secret=_opt_str(c.get("secret")),
+                    secret=secret,
                     source_beacon_id=source_beacon_id,
                 )
             )
