@@ -67,6 +67,8 @@ Specific decisions we mirror (cited in §9):
 | `beacon.initial` | `(beacon_id, event_type)` | no `correlation_id` — exactly 1 per beacon by definition |
 | Any other type without `correlation_id` | (pass-through, no dedup) | audit-only, low volume |
 
+> **SUPERSEDED (2026-05-28, data-quality Group D / #107):** `beacon.initial` is now **pass-through (no dedup)** — see `docs/superpowers/specs/2026-05-28-data-quality-design.md` §5. It is idempotent at the reducer (`upsert_session` replaces by `bid`), so deduping it gained nothing and dropped the `.cna` backfill's re-emit that re-seeds sessions after a working-memory clean. The `beacon.initial` row above and the §4.1 / §7 mentions of it being deduped are historical. Command-event dedup is unchanged.
+
 **Composite-key rationale:** `correlation_id` is 16-hex-chars = 64 bits of entropy from Aggressor's `$5`. `beacon_id` adds a per-beacon namespace. `event_type` separates input from output for the same command. Collision probability ≈ 0 at our scale (thousands of events per engagement, not billions). For local single-tenant; if v2 goes multi-tenant SaaS, upgrade to true UUID.
 
 **Storage:**
