@@ -250,6 +250,144 @@ git commit -m "feat(engagement): parse rules_of_engagement + objectives from eng
 
 ---
 
+## Task 1.5: `_as_str_list` scope-list hardening (added post-audit, operator-approved)
+
+**Context:** the code-quality audit of T1 found a pre-existing footgun on the *legal-boundary* scope path. `load()` does `list(data.get("in_scope") or [])`; if an operator writes `in_scope: host01` (a scalar — forgot the `- ` list syntax) instead of a list, `list("host01")` **char-explodes** to `['h','o','s','t','0','1']`, and `is_in_scope('host01')` silently returns False — a host meant to be in-scope is treated out-of-scope, with no warning. T1's ROE parsing inherited the same pattern. This task closes the whole class with one guarded helper + a warning so the malformation is visible, not silent. Graceful (no crash — preserves the loader's "a malformed file still produces a usable Engagement" contract) but now surfaced.
+
+**Files:**
+- Modify: `redrobin/application/engagement_loader.py`
+- Test: `tests/unit/application/test_engagement_loader.py`
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `tests/unit/application/test_engagement_loader.py`:
+
+```python
+def test_load_scalar_in_scope_degrades_to_empty_not_char_explosion(tmp_path: Path, caplog) -> None:
+    # An operator who forgets the list `- ` writes a scalar. The OLD behavior
+    # char-exploded `list("host01")` -> ['h','o',...] and silently broke scope
+    # matching. Now it degrades to [] WITH a warning (visible, not silent).
+    _write(tmp_path, "eng-s", "slug: eng-s\nname: S\nin_scope: host01\n")
+    with caplog.at_level("WARNING"):
+        eng = EngagementLoader(tmp_path).load("eng-s")
+    assert eng.in_scope == []
+    assert any("in_scope" in rec.message for rec in caplog.records)
+
+
+def test_load_scalar_rules_of_engagement_degrades_to_empty(tmp_path: Path) -> None:
+    _write(tmp_path, "eng-r", "slug: eng-r\nname: R\nrules_of_engagement: No DoS\n")
+    eng = EngagementLoader(tmp_path).load("eng-r")
+    assert eng.rules_of_engagement == []  # NOT ['N','o',' ','D','o','S']
+
+
+def test_load_list_fields_still_parse_normally(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "eng-l",
+        "slug: eng-l\nname: L\nin_scope:\n  - h1\n  - 10.0.0.0/24\nout_of_scope:\n  - h2\n",
+    )
+    eng = EngagementLoader(tmp_path).load("eng-l")
+    assert eng.in_scope == ["h1", "10.0.0.0/24"]
+    assert eng.out_of_scope == ["h2"]
+
+
+def test_load_scalar_objectives_degrades_to_empty(tmp_path: Path) -> None:
+    _write(tmp_path, "eng-o", "slug: eng-o\nname: O\nobjectives: not-a-list\n")
+    eng = EngagementLoader(tmp_path).load("eng-o")
+    assert eng.objectives == []
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `uv run --no-sync pytest tests/unit/application/test_engagement_loader.py -k "scalar or list_fields_still" -v`
+Expected: `test_load_scalar_in_scope_degrades_to_empty_not_char_explosion` + `..._rules_of_engagement_degrades_to_empty` FAIL (current code char-explodes the scalar / no warning); `..._list_fields_still_parse_normally` + `..._scalar_objectives` may already pass (objectives' char-iteration skips non-dicts → []), but assert all after the fix.
+
+- [ ] **Step 3: Add the helper + route the list fields through it**
+
+In `redrobin/application/engagement_loader.py`:
+
+(a) Add a module logger (with the imports, then after them):
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+```
+
+(b) Add the helper (module-level, near the top after the logger):
+
+```python
+def _as_str_list(value: object, *, field: str) -> list[str]:
+    """Coerce a yaml value to ``list[str]``. A non-list scalar (e.g. the operator
+    wrote ``in_scope: host01`` without the ``- `` list syntax) degrades to ``[]``
+    WITH a warning — never char-explodes (``list("host01")`` -> ['h','o',...]),
+    which would silently corrupt scope matching. ``None`` (absent key) is a quiet
+    empty list."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        logger.warning(
+            "engagement.yaml: %r must be a yaml list, got %s (%r); ignoring it",
+            field,
+            type(value).__name__,
+            value,
+        )
+        return []
+    return [str(x) for x in value]
+```
+
+(c) In `load()`, route `in_scope`, `out_of_scope`, `rules_of_engagement` through it, and guard the objectives iteration source. Replace the three list parses + the objectives loop source:
+
+- `in_scope=list(data.get("in_scope") or [])` → `in_scope=_as_str_list(data.get("in_scope"), field="in_scope")`
+- `out_of_scope=list(data.get("out_of_scope") or [])` → `out_of_scope=_as_str_list(data.get("out_of_scope"), field="out_of_scope")`
+- `rules_of_engagement=[str(r) for r in (data.get("rules_of_engagement") or [])]` → `rules_of_engagement=_as_str_list(data.get("rules_of_engagement"), field="rules_of_engagement")`
+- The objectives loop: replace `for o in data.get("objectives") or []:` with a guarded source:
+
+```python
+        objectives_raw = data.get("objectives")
+        if objectives_raw is not None and not isinstance(objectives_raw, list):
+            logger.warning(
+                "engagement.yaml: 'objectives' must be a yaml list, got %s; ignoring it",
+                type(objectives_raw).__name__,
+            )
+        objectives: list[Objective] = []
+        for o in objectives_raw if isinstance(objectives_raw, list) else []:
+            if not isinstance(o, dict) or not o.get("id"):
+                continue
+            objectives.append(
+                Objective(
+                    id=str(o["id"]),
+                    goal=str(o.get("goal") or ""),
+                    priority=str(o.get("priority") or "medium"),
+                )
+            )
+```
+
+- [ ] **Step 4: Run the tests to verify they pass**
+
+Run: `uv run --no-sync pytest tests/unit/application/test_engagement_loader.py -v`
+Expected: all pass (the 4 new + the 3 from T1).
+
+- [ ] **Step 5: Run the full CI gate**
+
+```bash
+uv run --no-sync ruff check .
+uv run --no-sync ruff format --check .
+uv run --no-sync mypy redrobin/domain redrobin/application
+uv run --no-sync lint-imports --config importlinter.cfg
+REDROBIN_ALLOW_DEGRADED=1 uv run --no-sync pytest tests/ -q
+```
+Expected: green. CRITICAL — the change to `in_scope`/`out_of_scope` parsing must not regress any existing engagement/scope test: a valid yaml LIST routes through `_as_str_list([...])` = `[str(x) for x in [...]]`, which is a no-op for string elements (scope patterns are strings), so behavior for the valid case is unchanged. If any pre-existing test breaks, STOP and report (do not paper over). Pytest 588 → 592 (+4).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add redrobin/application/engagement_loader.py tests/unit/application/test_engagement_loader.py
+git commit -m "fix(engagement): list-field parsing degrades scalars to [] with a warning, not char-explosion"
+```
+
+---
+
 ## Task 2: Seed ROE + objectives in `apply_engagement_scope` (merge-preserve)
 
 **Files:**
