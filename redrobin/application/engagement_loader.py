@@ -12,6 +12,11 @@ Schema (v0):
   in_scope: list[str]       # hostnames, suffix patterns, CIDRs, or "*"
   out_of_scope: list[str]   # same shape; out_of_scope wins on conflict
   summary: <str>            # short engagement summary surfaced to Layer B
+  rules_of_engagement: list[str]   # ROE bullet lines (static; operator-authored)
+  objectives:                       # mission goals (static definition; the
+    - id: <str>                     #   assistant owns dynamic status/progress)
+      goal: <str>
+      priority: low|medium|high
 
 Missing fields fall back to safe defaults so a malformed file still produces a
 usable :class:`Engagement` (the lifespan logs the slug + path on load).
@@ -24,6 +29,8 @@ from pathlib import Path
 
 import yaml  # type: ignore[import-untyped]
 
+from redrobin.domain.memory import Objective
+
 
 @dataclass(frozen=True)
 class Engagement:
@@ -33,6 +40,8 @@ class Engagement:
     out_of_scope: list[str] = field(default_factory=list)
     summary: str = ""
     client: str = ""
+    rules_of_engagement: list[str] = field(default_factory=list)
+    objectives: list[Objective] = field(default_factory=list)
 
 
 class EngagementLoader:
@@ -44,6 +53,17 @@ class EngagementLoader:
         if not eng_file.is_file():
             raise FileNotFoundError(f"engagement file not found: {eng_file}")
         data = yaml.safe_load(eng_file.read_text()) or {}
+        objectives: list[Objective] = []
+        for o in data.get("objectives") or []:
+            if not isinstance(o, dict) or not o.get("id"):
+                continue  # an objective needs an id; skip malformed entries
+            objectives.append(
+                Objective(
+                    id=str(o["id"]),
+                    goal=str(o.get("goal") or ""),
+                    priority=str(o.get("priority") or "medium"),
+                )
+            )
         return Engagement(
             slug=str(data.get("slug", slug)),
             name=str(data.get("name", slug)),
@@ -51,4 +71,6 @@ class EngagementLoader:
             out_of_scope=list(data.get("out_of_scope") or []),
             summary=str(data.get("summary") or "").strip(),
             client=str(data.get("client") or ""),
+            rules_of_engagement=[str(r) for r in (data.get("rules_of_engagement") or [])],
+            objectives=objectives,
         )
