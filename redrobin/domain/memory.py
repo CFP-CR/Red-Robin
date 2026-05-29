@@ -2,7 +2,7 @@
 
 5 memory layers:
   L1 Long-term:    PromotedLesson (durable, cross-engagement, structured)
-  L2 Working:      WorkingMemory (hosts, accounts, defenses, tools, kill_chain) — per-engagement JSON
+  L2 Working:      WorkingMemory (hosts, defenses, tools, kill_chain) — per-engagement JSON
   L3 Episodic:     Episode (raw verdict log, per-engagement) — SQLite
   L4 Tradecraft:   technique → bypass → detection graph — SQLite (deferred to v0.2 in v0.1)
   L5 Context:      sliding-window ContextSummary — in-memory + summary.txt
@@ -34,14 +34,6 @@ class Host:
 
 
 @dataclass
-class Account:
-    name: str  # e.g., "acme\\jdoe"
-    kind: str  # "ntlm" | "kerberos" | "plaintext"
-    source_host: str | None = None
-    captured_at: str | None = None  # ISO timestamp
-
-
-@dataclass
 class ToolUsage:
     name: str  # e.g., "nanodump.bof"
     used_on: str  # host
@@ -53,10 +45,8 @@ class ToolUsage:
 class Credential:
     """Credential observed on the wire (parsed from beacon output).
 
-    Distinct from ``Account``: ``Account`` is operator-curated and may include
-    plaintext/ticket material captured by hand; ``Credential`` is reducer-derived
-    from event parsing and always carries a ``source_beacon_id`` so the operator
-    can trace provenance.
+    Reducer-derived from event parsing; always carries a ``source_beacon_id`` so
+    the operator can trace provenance.
 
     ``secret_type`` is an OPEN vocabulary (not an Enum) so non-AD material
     (aws_key, azure_token, ...) needs no schema change. ``ntlm_hash`` is retained
@@ -132,7 +122,6 @@ class WorkingMemory:
     kill_chain_status: dict[str, str] = field(default_factory=dict)
     rules_of_engagement: list[str] = field(default_factory=list)
     hosts: list[Host] = field(default_factory=list)
-    accounts: list[Account] = field(default_factory=list)
     defenses_observed: list[str] = field(default_factory=list)
     tools_used: list[ToolUsage] = field(default_factory=list)
     # Slice 4: reducer-managed projections.
