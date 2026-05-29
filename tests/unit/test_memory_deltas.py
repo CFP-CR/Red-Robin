@@ -71,7 +71,9 @@ def test_from_payload_tools_used_and_secret_type_fallback():
     deltas = WorkingMemoryDeltas.from_payload(
         {
             "tools_used": [{"name": "nanodump", "used_on": "WS01"}],
-            "credentials": [{"username": "u", "secret_type": ""}],
+            # carries secret material so the #114 drop rule keeps it; secret_type
+            # stays "" to exercise the empty-string -> "ntlm" fallback.
+            "credentials": [{"username": "u", "secret_type": "", "secret": "deadbeef"}],
         },
         source_beacon_id=None,
     )
@@ -79,3 +81,44 @@ def test_from_payload_tools_used_and_secret_type_fallback():
     assert deltas.tools_used[0].used_on == "WS01"
     assert deltas.tools_used[0].used_at  # auto-stamped ISO timestamp, non-empty
     assert deltas.credentials[0].secret_type == "ntlm"  # empty string -> default
+
+
+def test_from_payload_drops_credential_with_no_secret() -> None:
+    # #114: a username with no secret material is a username observation, not a
+    # credential. The enricher sometimes emits the logged-in user this way.
+    deltas = WorkingMemoryDeltas.from_payload(
+        {"credentials": [{"domain": "CORP", "username": "jdoe"}]},
+        source_beacon_id="B-1",
+    )
+    assert deltas.credentials == []
+
+
+def test_from_payload_keeps_credential_with_plaintext_secret() -> None:
+    deltas = WorkingMemoryDeltas.from_payload(
+        {
+            "credentials": [
+                {"username": "svc_sql", "secret": "Summer2026!", "secret_type": "plaintext"}
+            ]
+        },
+        source_beacon_id="B-1",
+    )
+    assert len(deltas.credentials) == 1
+    assert deltas.credentials[0].username == "svc_sql"
+    assert deltas.credentials[0].secret == "Summer2026!"
+
+
+def test_from_payload_keeps_credential_with_ntlm_hash() -> None:
+    deltas = WorkingMemoryDeltas.from_payload(
+        {"credentials": [{"username": "admin", "ntlm_hash": "aad3b435b51404ee:31d6cfe0d16ae931"}]},
+        source_beacon_id="B-1",
+    )
+    assert len(deltas.credentials) == 1
+    assert deltas.credentials[0].ntlm_hash == "aad3b435b51404ee:31d6cfe0d16ae931"
+
+
+def test_from_payload_drops_credential_with_empty_secret_strings() -> None:
+    deltas = WorkingMemoryDeltas.from_payload(
+        {"credentials": [{"username": "jdoe", "secret": "", "ntlm_hash": ""}]},
+        source_beacon_id="B-1",
+    )
+    assert deltas.credentials == []
