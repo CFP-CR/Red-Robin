@@ -164,9 +164,13 @@ def _account_lines(s: dict[str, Any]) -> list[str]:
         lines = _account_lines(snapshot)
 ```
 
-- [ ] **Step 6: Fix the prose comment in layer_b_engine.py**
+- Fix the now-dangling `_named_lines` docstring (audit M1): it reads `"""Identity = ``name``, then every other populated field (host/account/tool)."""` (`inspector.py:106`). With `_account_lines` gone, drop the `account` mention — change `(host/account/tool)` to `(host/tool)`.
 
-In `redrobin/application/layer_b_engine.py:178`, change the comment `# text representation of working memory (hosts/accounts/defenses/etc.)` to `# text representation of working memory (hosts/defenses/etc.)` (drop `accounts/`).
+- [ ] **Step 6: Fix the stale prose references (audit D1)**
+
+Two comments name `accounts`/`14 fields` and go stale once the field is deleted (the plan's NO-DEAD-CODE constraint):
+- `redrobin/application/layer_b_engine.py:178` — change `# text representation of working memory (hosts/accounts/defenses/etc.)` to `# text representation of working memory (hosts/defenses/etc.)` (drop `accounts/`).
+- `redrobin/api/tui_ws.py:53` — the docstring says the snapshot carries `14 WorkingMemory fields (#139)`; after deleting `accounts` there are **13**. Change `14 WorkingMemory fields` to `13 WorkingMemory fields`.
 
 - [ ] **Step 7: Update the affected tests**
 
@@ -205,7 +209,7 @@ Expected: every gate green. mypy must be clean (the deleted `Account` is no long
 - [ ] **Step 10: Commit**
 
 ```bash
-git add redrobin/domain/memory.py redrobin/infrastructure/persistence/working_memory_repo.py redrobin/tui/textual_ui/inspector.py redrobin/application/layer_b_engine.py tests/unit/test_working_memory_repo.py tests/unit/tui_textual/test_inspector.py tests/integration/test_tui_ws_broadcast.py
+git add redrobin/domain/memory.py redrobin/infrastructure/persistence/working_memory_repo.py redrobin/tui/textual_ui/inspector.py redrobin/application/layer_b_engine.py redrobin/api/tui_ws.py tests/unit/test_working_memory_repo.py tests/unit/tui_textual/test_inspector.py tests/integration/test_tui_ws_broadcast.py
 git commit -m "refactor(memory): delete the dead Account model + empty ACCOUNTS section (#106)"
 ```
 
@@ -224,7 +228,7 @@ Run: `grep -rn "accounts" redrobin/ --include="*.py"`
 Expected: ZERO hits (the WM field + every reader removed; the layer_b comment fixed). If a hit remains, it's a leak — remove it (no dead code).
 
 Run: `grep -rn "\bAccount\b\|\baccounts\b" tests/ --include="*.py"`
-Expected: ZERO hits (all test references removed; the legacy-load test uses the string `"accounts"` only as a JSON dict KEY inside `json.dumps`, which is intentional — it's the legacy data being tested, not a code reference; confirm that is the only remaining occurrence and it is inside the legacy-load test).
+Expected: hits ONLY inside `test_load_tolerates_legacy_accounts_key` (audit M2): the test name itself, its `"accounts"` JSON dict KEY in `json.dumps`, and its comment — all INTENTIONAL (that test exercises the legacy data). So expect a small number of hits, ALL within that one test — NOT zero, and NOT anywhere else. Any `Account` (class) hit, or any `accounts` hit OUTSIDE that test, is a leak — remove it.
 
 - [ ] **Step 2: Run every CI gate (confirm)**
 
