@@ -48,10 +48,12 @@ def test_derive_key_opsec_verdict_with_correlation_id() -> None:
     assert derive_key(event) == "B-1|abc123|opsec.verdict"
 
 
-def test_derive_key_beacon_initial_uses_two_part_key() -> None:
+def test_derive_key_beacon_initial_is_passthrough() -> None:
+    # Group D: beacon.initial is NOT deduped — it is idempotent at the reducer
+    # (upsert_session replaces by bid), so deduping it only breaks the .cna
+    # backfill's session re-seed after a working-memory clean. Pass-through.
     event = {"type": "beacon.initial", "bid": "B-1", "host": "DC01"}
-    # No correlation_id; key is (bid, type) with empty middle slot.
-    assert derive_key(event) == "B-1||beacon.initial"
+    assert derive_key(event) is None
 
 
 def test_derive_key_missing_bid_returns_none() -> None:
