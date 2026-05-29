@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -156,19 +157,15 @@ def test_ingest_passes_through_event_without_correlation_id(daemon) -> None:
     assert "duplicate" not in r2.json()
 
 
-def test_beacon_initial_dedups_on_bid_and_type(daemon) -> None:
-    """beacon.initial has no correlation_id; dedup key is (bid, type)."""
-    _, client = daemon
-    token = _token()
-    headers = {"Authorization": f"Bearer {token}"}
-    payload = {
+def _beacon_initial_payload(bid: str = "B-3") -> dict[str, Any]:
+    return {
         "spec_version": "0.1.0",
         "id": _VALID_ID,
         "ts": "2026-05-28T00:00:00Z",
         "source": {"adapter": "cs-aggressor", "version": "1.0.0", "engagement_id": "eng-b3"},
         "event": {
             "type": "beacon.initial",
-            "bid": "B-3",
+            "bid": bid,
             "host": "DC01",
             "user": "CORP\\admin",
             "integrity_level": "high",
@@ -177,10 +174,56 @@ def test_beacon_initial_dedups_on_bid_and_type(daemon) -> None:
             "ppid": 5678,
         },
     }
+
+
+def test_beacon_initial_is_not_deduped(daemon) -> None:
+    """Group D: beacon.initial is pass-through. A 2nd identical POST is NOT
+    dropped by the dedup gate (inverts the B3 behavior) — it must re-reach the
+    reducer so the .cna backfill can re-seed sessions after a clean."""
+    _, client = daemon
+    headers = {"Authorization": f"Bearer {_token()}"}
+    payload = _beacon_initial_payload()
     r1 = client.post("/v1/events", json=payload, headers=headers)
     r2 = client.post("/v1/events", json=payload, headers=headers)
     assert r1.status_code == 200 and r1.json().get("stored") is True
-    assert r2.status_code == 200 and r2.json().get("duplicate") is True
+    assert r2.status_code == 200 and r2.json().get("stored") is True
+    assert "duplicate" not in r2.json()
+
+
+def test_beacon_initial_reseeds_session(daemon) -> None:
+    """End-to-end: a POSTed beacon.initial reaches the reducer and seeds the
+    session; a 2nd POST (not deduped) re-seeds it idempotently. Reads the live
+    working-memory repo via ``app.state.working_memory_repo`` — the reducer
+    consumes the bus asynchronously, so poll until the session appears. Reading
+    the repo object (not a hardcoded path) survives any future change to how the
+    WM path resolves; this is the same approach the green e2e journey test uses
+    (``tests/e2e/test_events_to_memory_journey.py`` reads
+    ``app.state.working_memory_repo.load().sessions``)."""
+    app, client = daemon
+    headers = {"Authorization": f"Bearer {_token()}"}
+    repo = app.state.working_memory_repo
+
+    def _session_present(bid: str) -> bool:
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            try:
+                if any(s.beacon_id == bid for s in repo.load().sessions):
+                    return True
+            except FileNotFoundError:
+                pass  # reducer hasn't written the WM file yet
+            time.sleep(0.05)
+        return False
+
+    payload = _beacon_initial_payload(bid="B-7")
+    client.post("/v1/events", json=payload, headers=headers)
+    assert _session_present("B-7"), "reducer did not seed the session from beacon.initial"
+
+    # 2nd POST is not deduped → reaches the reducer again → still exactly one
+    # session for the bid (upsert_session replaces by bid — idempotent).
+    client.post("/v1/events", json=payload, headers=headers)
+    assert _session_present("B-7")
+    sessions = [s for s in repo.load().sessions if s.beacon_id == "B-7"]
+    assert len(sessions) == 1
 
 
 def test_state_survives_test_client_restart(tmp_path: Path, monkeypatch) -> None:

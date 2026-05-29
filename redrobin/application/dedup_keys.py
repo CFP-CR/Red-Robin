@@ -6,9 +6,11 @@ delegates persistence to ``DedupKeysRepo``, and exposes a single async
 effects (append-to-jsonl, bus publish).
 
 ``derive_key(event)`` is a pure function that maps a wire event payload to
-a stable dedup key string, or returns ``None`` for events that should
-pass-through unfiltered (events without ``correlation_id`` other than
-``beacon.initial``).
+a stable dedup key string, or returns ``None`` for events we don't dedup:
+events without a ``correlation_id``, AND ``beacon.initial`` — which is
+idempotent at the reducer (``upsert_session`` replaces by ``bid``), so
+deduping it would only break session re-seeding after a working-memory
+clear (Group D).
 
 Pattern: Idempotent Receiver (Hohpe & Woolf). Producer-attached key
 (``correlation_id`` from the `.cna`'s Aggressor ``$5``), composite with
@@ -34,9 +36,10 @@ def derive_key(event: dict[str, Any]) -> str | None:
     """Return the dedup key for a wire event payload, or ``None`` for
     pass-through (event types we choose not to dedup).
 
-    Key shape: ``"<bid>|<correlation_id>|<event_type>"`` for command events,
-    ``"<bid>||<event_type>"`` for ``beacon.initial`` (no correlation_id; exactly
-    one initial per beacon by definition).
+    Key shape: ``"<bid>|<correlation_id>|<event_type>"`` for command events
+    (``beacon.command_input``/``beacon.command_output``/``opsec.verdict``).
+    ``beacon.initial`` is pass-through (``None``) — idempotent at the reducer,
+    so deduping it would break the ``.cna`` backfill's session re-seed.
     """
     event_type = event.get("type")
     if not isinstance(event_type, str):
@@ -48,8 +51,10 @@ def derive_key(event: dict[str, Any]) -> str | None:
         return None
     bid = str(bid_raw)
 
-    if event_type == "beacon.initial":
-        return f"{bid}||{event_type}"
+    # beacon.initial is intentionally NOT deduped (Group D): it is idempotent at
+    # the reducer (upsert_session replaces by bid), so deduping it gains nothing
+    # and would drop the .cna backfill's re-emit that re-seeds sessions after a
+    # working-memory clean. It falls through to None below = pass-through.
 
     if event_type in _CORRELATED_TYPES:
         corr_raw = event.get("correlation_id")
