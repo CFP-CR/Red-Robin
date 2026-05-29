@@ -6,7 +6,10 @@ from __future__ import annotations
 import pytest
 
 from redrobin.application.enrichment.llm import EnricherLLM, build_enricher_llm
-from redrobin.infrastructure.llm.anthropic_client import AnthropicEnricherClient
+from redrobin.infrastructure.llm.anthropic_client import (
+    AnthropicEnricherClient,
+    _build_enricher_user_message,
+)
 
 
 class _StubLLM:
@@ -59,3 +62,21 @@ def test_enricher_system_prompt_has_no_hardcoded_victim_username() -> None:
     # The not-a-host teaching is still present.
     assert "username" in prompt
     assert "host" in prompt
+
+
+def test_build_user_message_without_grounding() -> None:
+    msg = _build_enricher_user_message(
+        command="whoami", beacon_id="B-1", output="CORP\\jdoe", host=None, user=None
+    )
+    assert "Command: whoami" in msg
+    assert "Output:\nCORP\\jdoe" in msg
+    assert "do NOT emit" not in msg  # no grounding line when host/user unknown
+
+
+def test_build_user_message_with_grounding() -> None:
+    msg = _build_enricher_user_message(
+        command="dir", beacon_id="B-1", output="...", host="WS-FINANCE-03", user="CORP\\jdoe"
+    )
+    assert "WS-FINANCE-03" in msg
+    assert "CORP\\jdoe" in msg
+    assert "do NOT emit" in msg

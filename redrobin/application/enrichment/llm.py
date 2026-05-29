@@ -17,7 +17,15 @@ logger = logging.getLogger(__name__)
 class EnricherLLM(Protocol):
     """Single-call extraction: command output -> JSON deltas (as a string)."""
 
-    async def extract(self, *, command: str, beacon_id: str | None, output: str) -> str: ...
+    async def extract(
+        self,
+        *,
+        command: str,
+        beacon_id: str | None,
+        output: str,
+        host: str | None = None,
+        user: str | None = None,
+    ) -> str: ...
 
 
 def build_enricher_llm(*, model: str = "claude-haiku-4-5") -> EnricherLLM | None:

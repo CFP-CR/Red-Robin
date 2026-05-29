@@ -16,7 +16,7 @@ class _StubLLM:
         self._response = response
         self.calls = 0
 
-    async def extract(self, *, command, beacon_id, output) -> str:
+    async def extract(self, *, command, beacon_id, output, host=None, user=None) -> str:
         self.calls += 1
         return self._response
 
@@ -256,7 +256,7 @@ async def test_enricher_recovers_command_via_correlation_id(tmp_path):
         def __init__(self) -> None:
             self.seen_commands: list[str] = []
 
-        async def extract(self, *, command, beacon_id, output) -> str:
+        async def extract(self, *, command, beacon_id, output, host=None, user=None) -> str:
             self.seen_commands.append(command)
             return "{}"
 
@@ -345,7 +345,7 @@ async def test_rapid_fire_each_output_uses_its_own_command(tmp_path):
             # output -> command, so we can assert the pairing regardless of order
             self.pairs: dict[str, str] = {}
 
-        async def extract(self, *, command, beacon_id, output) -> str:
+        async def extract(self, *, command, beacon_id, output, host=None, user=None) -> str:
             self.pairs[output.strip()] = command
             return "{}"
 
@@ -452,7 +452,7 @@ async def test_self_annotation_stripped_but_real_output_still_enriched(tmp_path)
         def __init__(self) -> None:
             self.seen_outputs: list[str] = []
 
-        async def extract(self, *, command, beacon_id, output) -> str:
+        async def extract(self, *, command, beacon_id, output, host=None, user=None) -> str:
             self.seen_outputs.append(output)
             return "{}"
 
@@ -497,7 +497,7 @@ async def test_semaphore_bounds_concurrent_llm_calls(tmp_path):
         def release(self) -> None:
             self._release.set()
 
-        async def extract(self, *, command, beacon_id, output) -> str:
+        async def extract(self, *, command, beacon_id, output, host=None, user=None) -> str:
             self.in_flight += 1
             self.peak = max(self.peak, self.in_flight)
             try:
@@ -539,3 +539,73 @@ async def test_semaphore_bounds_concurrent_llm_calls(tmp_path):
         await asyncio.sleep(0.1)
     finally:
         await _drain(bus, task)
+
+
+class _GroundingRecordingLLM:
+    """EnricherLLM stub that records every extract() call and returns empty deltas."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def extract(
+        self,
+        *,
+        command: str,
+        beacon_id: str | None,
+        output: str,
+        host: str | None = None,
+        user: str | None = None,
+    ) -> str:
+        self.calls.append(
+            {
+                "command": command,
+                "beacon_id": beacon_id,
+                "output": output,
+                "host": host,
+                "user": user,
+            }
+        )
+        return "{}"
+
+
+class _NoopBus:
+    async def publish(self, event: dict) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_enricher_grounds_extract_with_beacon_host_user() -> None:
+    llm = _GroundingRecordingLLM()
+    enricher = WorkingMemoryEnricher(
+        bus=_NoopBus(),  # type: ignore[arg-type]
+        llm=llm,  # type: ignore[arg-type]
+        denylist=[],
+        min_output_chars=0,
+        chunk_max_chars=10000,
+    )
+    enricher._remember_session({"bid": "B-1", "host": "WS-FINANCE-03", "user": "CORP\\jdoe"})
+    await enricher._enrich(
+        {"bid": "B-1", "correlation_id": "c1", "output": "some command output here"}
+    )
+
+    assert llm.calls, "extract was never called"
+    assert llm.calls[0]["host"] == "WS-FINANCE-03"
+    assert llm.calls[0]["user"] == "CORP\\jdoe"
+
+
+@pytest.mark.asyncio
+async def test_enricher_grounding_is_none_for_unknown_beacon() -> None:
+    llm = _GroundingRecordingLLM()
+    enricher = WorkingMemoryEnricher(
+        bus=_NoopBus(),  # type: ignore[arg-type]
+        llm=llm,  # type: ignore[arg-type]
+        denylist=[],
+        min_output_chars=0,
+        chunk_max_chars=10000,
+    )
+    await enricher._enrich(
+        {"bid": "B-9", "correlation_id": "c2", "output": "some command output here"}
+    )
+    assert llm.calls
+    assert llm.calls[0]["host"] is None
+    assert llm.calls[0]["user"] is None

@@ -41,6 +41,34 @@ from redrobin.domain.llm import LLMProvider, LLMResponse
 from redrobin.infrastructure.llm.api_keys import get_anthropic_key
 
 
+def _build_enricher_user_message(
+    *,
+    command: str,
+    beacon_id: str | None,
+    output: str,
+    host: str | None = None,
+    user: str | None = None,
+) -> str:
+    """Build the enricher's per-call user message. Injects a small dynamic
+    grounding line naming THIS beacon's own host/user (derived at runtime from
+    its session — never hardcoded) so the LLM does not re-extract the operator's
+    own identity as a newly-discovered host (#105). The grounding line is omitted
+    when neither is known."""
+    lines = [f"Command: {command}", f"Beacon: {beacon_id}"]
+    own: list[str] = []
+    if host:
+        own.append(f"host={host}")
+    if user:
+        own.append(f"user={user}")
+    if own:
+        lines.append(
+            "This beacon's own identity (" + ", ".join(own) + "); do NOT emit its "
+            "own host or user as a newly-discovered host."
+        )
+    lines.append(f"Output:\n{output}")
+    return "\n".join(lines)
+
+
 class AnthropicClient(LLMProvider):
     def __init__(
         self,
@@ -207,7 +235,15 @@ class AnthropicEnricherClient:
             max_retries=max_retries,
         )
 
-    async def extract(self, *, command: str, beacon_id: str | None, output: str) -> str:
+    async def extract(
+        self,
+        *,
+        command: str,
+        beacon_id: str | None,
+        output: str,
+        host: str | None = None,
+        user: str | None = None,
+    ) -> str:
         response = await self._client.messages.create(
             model=self._model,
             max_tokens=self._max_tokens,
@@ -221,7 +257,13 @@ class AnthropicEnricherClient:
             messages=[
                 {
                     "role": "user",
-                    "content": f"Command: {command}\nBeacon: {beacon_id}\nOutput:\n{output}",
+                    "content": _build_enricher_user_message(
+                        command=command,
+                        beacon_id=beacon_id,
+                        output=output,
+                        host=host,
+                        user=user,
+                    ),
                 }
             ],
         )
