@@ -74,9 +74,12 @@ class EngagementService:
         )
         # #135: write the schema the daemon's EngagementLoader consumes
         # (top-level slug/name/in_scope/out_of_scope/summary). The old template
-        # emitted `id` + a nested `scope:` block + dead keys
-        # (objectives/current_phase/...) that nothing reads from engagement.yaml,
-        # so the loader silently loaded empty scope -> deny-all.
+        # emitted `id` + a nested `scope:` block, so the loader silently loaded
+        # empty scope -> deny-all.
+        # #103: ship empty rules_of_engagement + objectives placeholders so the
+        # operator discovers where to author them (the loader parses both; they
+        # seed working memory). `current_phase` is NOT seeded — phase is the
+        # assistant's interpretation, never authored in yaml.
         template = {
             "slug": eng.slug,
             "name": eng.name,
@@ -84,6 +87,8 @@ class EngagementService:
             "in_scope": eng.in_scope,
             "out_of_scope": eng.out_of_scope,
             "summary": eng.summary,
+            "rules_of_engagement": [],
+            "objectives": [],
         }
         (path / ENGAGEMENT_YAML).write_text(yaml.safe_dump(template, sort_keys=False))
 

@@ -58,3 +58,24 @@ def test_init_template_stays_loader_consumable(tmp_path):
     eng = EngagementLoader(engagements_root=tmp_path / "engagements").load("op-default")
     assert eng.slug == "op-default"
     assert eng.in_scope  # template ships a non-empty example scope
+
+
+def test_new_writes_roe_and_objectives_placeholders(tmp_path) -> None:
+    """`new` seeds empty rules_of_engagement + objectives keys in the template so
+    operators discover where to author them; they round-trip through the loader
+    as empty lists (#103)."""
+    import yaml  # type: ignore[import-untyped]
+
+    from redrobin.application.engagement_loader import EngagementLoader
+    from redrobin.application.engagement_service import EngagementService
+
+    svc = EngagementService(root=tmp_path)
+    svc.new("eng-c", name="C", client="acme", in_scope=["h1"])
+
+    data = yaml.safe_load((tmp_path / "engagements" / "eng-c" / "engagement.yaml").read_text())
+    assert "rules_of_engagement" in data
+    assert "objectives" in data
+
+    eng = EngagementLoader(tmp_path / "engagements").load("eng-c")
+    assert eng.rules_of_engagement == []
+    assert eng.objectives == []
