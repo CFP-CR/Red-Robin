@@ -53,3 +53,37 @@ def test_load_skips_objective_without_id(tmp_path: Path) -> None:
     eng = EngagementLoader(tmp_path).load("eng-z")
     assert len(eng.objectives) == 1
     assert eng.objectives[0].id == "o2"
+
+
+def test_load_scalar_in_scope_degrades_to_empty_not_char_explosion(tmp_path: Path, caplog) -> None:
+    # An operator who forgets the list `- ` writes a scalar. The OLD behavior
+    # char-exploded `list("host01")` -> ['h','o',...] and silently broke scope
+    # matching. Now it degrades to [] WITH a warning (visible, not silent).
+    _write(tmp_path, "eng-s", "slug: eng-s\nname: S\nin_scope: host01\n")
+    with caplog.at_level("WARNING"):
+        eng = EngagementLoader(tmp_path).load("eng-s")
+    assert eng.in_scope == []
+    assert any("in_scope" in rec.message for rec in caplog.records)
+
+
+def test_load_scalar_rules_of_engagement_degrades_to_empty(tmp_path: Path) -> None:
+    _write(tmp_path, "eng-r", "slug: eng-r\nname: R\nrules_of_engagement: No DoS\n")
+    eng = EngagementLoader(tmp_path).load("eng-r")
+    assert eng.rules_of_engagement == []  # NOT ['N','o',' ','D','o','S']
+
+
+def test_load_list_fields_still_parse_normally(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "eng-l",
+        "slug: eng-l\nname: L\nin_scope:\n  - h1\n  - 10.0.0.0/24\nout_of_scope:\n  - h2\n",
+    )
+    eng = EngagementLoader(tmp_path).load("eng-l")
+    assert eng.in_scope == ["h1", "10.0.0.0/24"]
+    assert eng.out_of_scope == ["h2"]
+
+
+def test_load_scalar_objectives_degrades_to_empty(tmp_path: Path) -> None:
+    _write(tmp_path, "eng-o", "slug: eng-o\nname: O\nobjectives: not-a-list\n")
+    eng = EngagementLoader(tmp_path).load("eng-o")
+    assert eng.objectives == []

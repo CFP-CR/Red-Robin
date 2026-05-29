@@ -24,12 +24,34 @@ usable :class:`Engagement` (the lifespan logs the slug + path on load).
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml  # type: ignore[import-untyped]
 
 from redrobin.domain.memory import Objective
+
+logger = logging.getLogger(__name__)
+
+
+def _as_str_list(value: object, *, field: str) -> list[str]:
+    """Coerce a yaml value to ``list[str]``. A non-list scalar (e.g. the operator
+    wrote ``in_scope: host01`` without the ``- `` list syntax) degrades to ``[]``
+    WITH a warning — never char-explodes (``list("host01")`` -> ['h','o',...]),
+    which would silently corrupt scope matching. ``None`` (absent key) is a quiet
+    empty list."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        logger.warning(
+            "engagement.yaml: %r must be a yaml list, got %s (%r); ignoring it",
+            field,
+            type(value).__name__,
+            value,
+        )
+        return []
+    return [str(x) for x in value]
 
 
 @dataclass(frozen=True)
@@ -53,8 +75,14 @@ class EngagementLoader:
         if not eng_file.is_file():
             raise FileNotFoundError(f"engagement file not found: {eng_file}")
         data = yaml.safe_load(eng_file.read_text()) or {}
+        objectives_raw = data.get("objectives")
+        if objectives_raw is not None and not isinstance(objectives_raw, list):
+            logger.warning(
+                "engagement.yaml: 'objectives' must be a yaml list, got %s; ignoring it",
+                type(objectives_raw).__name__,
+            )
         objectives: list[Objective] = []
-        for o in data.get("objectives") or []:
+        for o in objectives_raw if isinstance(objectives_raw, list) else []:
             if not isinstance(o, dict) or not o.get("id"):
                 continue  # an objective needs an id; skip malformed entries
             objectives.append(
@@ -67,10 +95,12 @@ class EngagementLoader:
         return Engagement(
             slug=str(data.get("slug", slug)),
             name=str(data.get("name", slug)),
-            in_scope=list(data.get("in_scope") or []),
-            out_of_scope=list(data.get("out_of_scope") or []),
+            in_scope=_as_str_list(data.get("in_scope"), field="in_scope"),
+            out_of_scope=_as_str_list(data.get("out_of_scope"), field="out_of_scope"),
             summary=str(data.get("summary") or "").strip(),
             client=str(data.get("client") or ""),
-            rules_of_engagement=[str(r) for r in (data.get("rules_of_engagement") or [])],
+            rules_of_engagement=_as_str_list(
+                data.get("rules_of_engagement"), field="rules_of_engagement"
+            ),
             objectives=objectives,
         )
