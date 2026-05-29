@@ -3,7 +3,6 @@
 import pytest
 
 from redrobin.domain.memory import (
-    Account,
     Credential,
     Finding,
     Host,
@@ -27,7 +26,6 @@ def test_save_and_load_round_trip(tmp_path):
         ],
         current_phase="credential_access",
         hosts=[Host(name="DC01", os="Win2022", edr_detected="CrowdStrike", access_level="SYSTEM")],
-        accounts=[Account(name="acme\\svc_sql", kind="plaintext", source_host="DC01")],
         defenses_observed=["CrowdStrike Falcon"],
     )
     repo = WorkingMemoryRepo(tmp_path / "wm.json")
@@ -36,7 +34,6 @@ def test_save_and_load_round_trip(tmp_path):
     assert loaded.engagement_id == "acme-q2-2026"
     assert loaded.objectives[0].progress_pct == 60
     assert loaded.hosts[0].edr_detected == "CrowdStrike"
-    assert loaded.accounts[0].kind == "plaintext"
 
 
 def test_load_missing_file_raises(tmp_path):
@@ -344,3 +341,30 @@ def test_apply_deltas_keeps_real_host_when_no_username_collision(tmp_path) -> No
     repo.apply_deltas(WorkingMemoryDeltas(hosts=[Host(name="DC01")]))
     names = {h.name.upper() for h in repo.load().hosts}
     assert "DC01" in names
+
+
+def test_load_tolerates_legacy_accounts_key(tmp_path):
+    # An existing working_memory.json (pre-Group-B) has an `accounts` key. After
+    # deleting the Account model it must still load — the key is silently ignored,
+    # no KeyError — and the loaded WorkingMemory has no `accounts` attribute.
+    import json
+
+    wm_path = tmp_path / "wm.json"
+    wm_path.write_text(
+        json.dumps(
+            {
+                "engagement_id": "legacy",
+                "client": "Acme",
+                "accounts": [{"name": "CORP\\\\alice", "kind": "ntlm"}],
+                "hosts": [{"name": "DC01"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    # (a populated `accounts` value here is the strong case; an empty
+    # `accounts: []` — the shape real pre-Group-B WM files have — hits the
+    # same ignore path in _from_dict, which never reads the key.)
+    loaded = WorkingMemoryRepo(wm_path).load()
+    assert loaded.engagement_id == "legacy"
+    assert loaded.hosts[0].name == "DC01"
+    assert not hasattr(loaded, "accounts")

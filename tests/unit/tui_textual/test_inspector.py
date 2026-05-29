@@ -33,9 +33,6 @@ SNAP = {
             "access_level": "SYSTEM",
         }
     ],
-    "accounts": [
-        {"name": "CORP\\\\alice", "kind": "ntlm", "source_host": "EC2AMAZ", "captured_at": "t0"}
-    ],
     "tools_used": [
         {"name": "mimikatz", "used_on": "EC2AMAZ", "used_at": "t1", "detection_observed": "blocked"}
     ],

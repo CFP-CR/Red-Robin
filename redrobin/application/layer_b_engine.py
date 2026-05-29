@@ -175,7 +175,7 @@ only when detection is near-certain or ROE is at risk.
 class EngagementContext:
     """Dynamic engagement state passed to Layer B per call (uncached)."""
 
-    summary: str  # text representation of working memory (hosts/accounts/defenses/etc.)
+    summary: str  # text representation of working memory (hosts/defenses/etc.)
 
 
 class LayerBEngine:

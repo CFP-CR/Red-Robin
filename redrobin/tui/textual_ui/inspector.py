@@ -26,7 +26,6 @@ SECTIONS: list[tuple[str, str]] = [
     ("objectives", "OBJECTIVES"),
     ("kill_chain", "KILL CHAIN"),
     ("hosts", "HOSTS"),
-    ("accounts", "ACCOUNTS"),
     ("defenses", "DEFENSES"),
     ("tools", "TOOLS"),
     ("credentials", "CREDENTIALS"),
@@ -44,7 +43,6 @@ def section_counts(snapshot: dict[str, Any]) -> dict[str, int | None]:
         "objectives": len(snapshot.get("objectives") or []),
         "kill_chain": len(snapshot.get("kill_chain_status") or {}),
         "hosts": len(snapshot.get("hosts") or []),
-        "accounts": len(snapshot.get("accounts") or []),
         "defenses": len(snapshot.get("defenses_observed") or []),
         "tools": len(snapshot.get("tools_used") or []),
         "credentials": len(snapshot.get("credentials") or []),
@@ -103,7 +101,7 @@ def _kv_body(item: dict[str, Any], *, skip: set[str]) -> str:
 
 
 def _named_lines(records: list[dict[str, Any]]) -> list[str]:
-    """Identity = ``name``, then every other populated field (host/account/tool)."""
+    """Identity = ``name``, then every other populated field (host/tool)."""
     out: list[str] = []
     for r in records:
         ident = r.get("name") or "?"
@@ -114,10 +112,6 @@ def _named_lines(records: list[dict[str, Any]]) -> list[str]:
 
 def _host_lines(s: dict[str, Any]) -> list[str]:
     return _named_lines(s.get("hosts") or [])
-
-
-def _account_lines(s: dict[str, Any]) -> list[str]:
-    return _named_lines(s.get("accounts") or [])
 
 
 def _tool_lines(s: dict[str, Any]) -> list[str]:
@@ -168,8 +162,6 @@ def render_section(
         lines = _kill_chain_lines(snapshot)
     elif section == "hosts":
         lines = _host_lines(snapshot)
-    elif section == "accounts":
-        lines = _account_lines(snapshot)
     elif section == "defenses":
         lines = _str_lines(snapshot, "defenses_observed")
     elif section == "tools":

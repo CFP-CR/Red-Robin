@@ -22,7 +22,6 @@ from dataclasses import asdict, replace
 from pathlib import Path
 
 from redrobin.domain.memory import (
-    Account,
     Credential,
     Finding,
     Host,
@@ -200,7 +199,6 @@ class WorkingMemoryRepo:
             kill_chain_status=data.get("kill_chain_status", {}),
             rules_of_engagement=data.get("rules_of_engagement", []),
             hosts=[Host(**h) for h in data.get("hosts", [])],
-            accounts=[Account(**a) for a in data.get("accounts", [])],
             defenses_observed=data.get("defenses_observed", []),
             tools_used=[ToolUsage(**t) for t in data.get("tools_used", [])],
             credentials=[Credential(**c) for c in data.get("credentials", [])],

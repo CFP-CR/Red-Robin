@@ -62,7 +62,7 @@ def test_two_ws_clients_both_receive(app_client):
 
 def test_ws_initial_snapshot_carries_all_fields(app_client):
     """#139: the connect-time snapshot must include the fields that used to be
-    dropped (scope/objectives/kill_chain/accounts/etc.), not just the 5
+    dropped (scope/objectives/kill_chain/etc.), not just the 5
     collections."""
     app, client = app_client
     token = get_or_create_token()
@@ -77,7 +77,6 @@ def test_ws_initial_snapshot_carries_all_fields(app_client):
             "current_phase",
             "kill_chain_status",
             "rules_of_engagement",
-            "accounts",
             "defenses_observed",
             "tools_used",
             "hosts",
