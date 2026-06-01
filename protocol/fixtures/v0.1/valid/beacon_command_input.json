@@ -1,0 +1,8 @@
+{
+  "type": "beacon.command_input",
+  "bid": "bid_4291",
+  "operator": "alice",
+  "command": "shell",
+  "raw": "shell whoami /priv",
+  "task_id": "tsk_01HZXAB9MK2P6Q9TFGHJKLMNPQ"
+}

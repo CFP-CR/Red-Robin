@@ -1,0 +1,10 @@
+{
+  "type": "beacon.initial",
+  "bid": "bid_4291",
+  "host": "WIN-DC01",
+  "user": "ACME\\jdoe",
+  "integrity_level": "high",
+  "arch": "mips",
+  "pid": 4628,
+  "ppid": 612
+}

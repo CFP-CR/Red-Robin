@@ -1,0 +1,75 @@
+# Tier 1B: wrappers. The DAEMON inspects the raw command line for arg
+# patterns like 'nxc ldap', 'Rubeus.exe kerberoast', 'Invoke-Mimikatz' etc.
+# Each alias passes the reconstructed raw to the gate and dispatches the
+# args on PASS/WARN/ESCALATE. Uses redrobin_alias_parse() helper defined
+# in tier1a_gate.sleep (loaded first per redrobin.cna include order).
+
+alias shell {
+    local('%p');
+    %p = redrobin_alias_parse("shell", @_);
+    if (redrobin_alias_require_args($1, "shell", %p['args'])) {
+        if (redrobin_gate($1, "shell", %p['raw'])) {
+            &bshell($1, %p['args']);
+        }
+    }
+}
+
+alias powershell {
+    local('%p');
+    %p = redrobin_alias_parse("powershell", @_);
+    if (redrobin_alias_require_args($1, "powershell", %p['args'])) {
+        if (redrobin_gate($1, "powershell", %p['raw'])) {
+            &bpowershell($1, %p['args']);
+        }
+    }
+}
+
+alias powerpick {
+    local('%p');
+    %p = redrobin_alias_parse("powerpick", @_);
+    if (redrobin_alias_require_args($1, "powerpick", %p['args'])) {
+        if (redrobin_gate($1, "powerpick", %p['raw'])) {
+            &bpowerpick($1, %p['args']);
+        }
+    }
+}
+
+alias execute-assembly {
+    local('%p');
+    %p = redrobin_alias_parse("execute-assembly", @_);
+    if (redrobin_alias_require_args($1, "execute-assembly", %p['args'])) {
+        if (redrobin_gate($1, "execute-assembly", %p['raw'])) {
+            &bexecute_assembly($1, %p['args']);
+        }
+    }
+}
+
+alias inline-execute {
+    local('%p');
+    %p = redrobin_alias_parse("inline-execute", @_);
+    if (redrobin_alias_require_args($1, "inline-execute", %p['args'])) {
+        if (redrobin_gate($1, "inline-execute", %p['raw'])) {
+            &binline_execute($1, %p['args']);
+        }
+    }
+}
+
+alias run {
+    local('%p');
+    %p = redrobin_alias_parse("run", @_);
+    if (redrobin_alias_require_args($1, "run", %p['args'])) {
+        if (redrobin_gate($1, "run", %p['raw'])) {
+            &brun($1, %p['args']);
+        }
+    }
+}
+
+alias execute {
+    local('%p');
+    %p = redrobin_alias_parse("execute", @_);
+    if (redrobin_alias_require_args($1, "execute", %p['args'])) {
+        if (redrobin_gate($1, "execute", %p['raw'])) {
+            &bexecute($1, %p['args']);
+        }
+    }
+}

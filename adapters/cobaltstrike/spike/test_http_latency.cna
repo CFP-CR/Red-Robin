@@ -1,0 +1,58 @@
+# Task 9 Phase 1 Spike — Sleep HTTP latency budget.
+#
+# Validates that the alias body's HTTP round-trip to localhost:7777 stays under
+# 150ms p95 for the two-tier verdict protocol (spec §1.2.1).
+#
+# Requires the stub daemon at adapters/cobaltstrike/spike/stub_daemon.py running.
+# Start it before loading this .cna:
+#   uv run python adapters/cobaltstrike/spike/stub_daemon.py
+#
+# To use:
+#   1. CS Client → Scripts → Load → adapters/cobaltstrike/spike/test_http_latency.cna
+#   2. In any Beacon console: rrlatency
+#   3. Copy the [Red Robin Spike] output into docs/aggressor-alias-args.md
+
+import java.net.*;
+import java.io.*;
+
+sub measure_http {
+    local('$url $conn $start $end $elapsed');
+    $url = [new URL: "http://localhost:7777/v1/ping"];
+    $start = ticks();
+    $conn = [$url openConnection];
+    [$conn setRequestMethod: "GET"];
+    [$conn setConnectTimeout: 200];
+    [$conn setReadTimeout: 200];
+    [$conn getResponseCode];
+    [$conn disconnect];
+    $end = ticks();
+    $elapsed = $end - $start;
+    return $elapsed;
+}
+
+alias rrlatency {
+    local('@samples $i $sample $sum $count $avg $max');
+    @samples = @();
+    for ($i = 0; $i < 50; $i++) {
+        push(@samples, measure_http());
+    }
+    # Compute aggregates manually (Sleep doesn't have sum/max in core stdlib uniformly)
+    $sum = 0;
+    $max = 0;
+    foreach $sample (@samples) {
+        $sum += $sample;
+        if ($sample > $max) { $max = $sample; }
+    }
+    $count = size(@samples);
+    $avg = $sum / $count;
+    blog($1, "===== Red Robin Spike: HTTP latency =====");
+    blog($1, "Samples: " . $count);
+    blog($1, "Avg: " . $avg . "ms");
+    blog($1, "Max: " . $max . "ms");
+    blog($1, "Budget: 150ms");
+    if ($max < 150) {
+        blog($1, "Result: PASS — 150ms hard-timeout is viable for Layer A sync verdict.");
+    } else {
+        blog($1, "Result: FAIL — bump budget to 250ms OR move all verdict logic to async.");
+    }
+}

@@ -1,0 +1,121 @@
+/* Centralized semantic tokens — referenced by function, not appearance.
+   16-color-safe: widgets pair color with text + weight, so meaning survives
+   non-truecolor terminals and color-blindness. Accent is reserved for focus. */
+$verdict-block: #f85149;
+$verdict-warn: #e3b341;
+$verdict-pass: #3fb950;
+$verdict-escalate: #58a6ff;
+$sev-high: #f0883e;
+$scope-out: #f85149;
+$status-ok: #3fb950;
+$status-warn: #e3b341;
+$status-err: #f85149;
+$accent: #58a6ff;
+$text-muted: #8b949e;
+
+Screen {
+    layout: vertical;
+}
+
+#topbar {
+    dock: top;
+    height: 1;
+    background: $panel;
+    color: $text;
+}
+
+#main {
+    height: 1fr;
+}
+
+#main > Container {
+    border: round $panel-lighten-2;
+    width: 1fr;
+}
+
+#sessions { width: 2fr; }
+#events { width: 3fr; }
+#memory { width: 2fr; }
+
+/* Verdict log: scroll vertically only when it overflows (no always-on scrollbar
+   gutter when there are few verdicts — RichLog defaults to overflow-y: scroll).
+   Never scroll horizontally — long reasons wrap to the pane (wrap=True + min_width=0). */
+#events-log {
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+/* Reserved seam for the future AI Advisor (Phase S6). Present but hidden. */
+#advisor-dock {
+    display: none;
+    dock: bottom;
+    height: auto;
+    border-top: heavy $accent;
+}
+
+/* Below the 80x24 minimum: a centered hint replaces the dashboard (toggled in code). */
+#resize-hint {
+    display: none;
+    width: 100%;
+    height: 100%;
+    content-align: center middle;
+    color: $status-warn;
+    text-style: bold;
+}
+
+/* Focus affordance: the focused pane gets the accent border (accent = interaction only). */
+#main > Container:focus-within {
+    border: round $accent;
+}
+
+/* Inspector modal (Phase 4): a centered dialog over a dimmed screen. */
+InspectorScreen {
+    align: center middle;
+}
+#inspector {
+    width: 90%;
+    height: 90%;
+    background: $panel;
+    border: round $accent;
+}
+#inspector-title {
+    dock: top;
+    height: 1;
+    color: $text;
+    text-style: bold;
+}
+#inspector-hint {
+    dock: bottom;
+    height: 1;
+    color: $text-muted;
+}
+#inspector-nav {
+    width: 28;
+    border-right: solid $panel-lighten-2;
+}
+#inspector-body {
+    width: 1fr;
+}
+#inspector-filter {
+    height: 3;
+}
+
+/* Help modal (Phase 5): a small centered keymap overlay. */
+HelpScreen {
+    align: center middle;
+}
+#help {
+    width: 60;
+    height: auto;
+    max-height: 90%;
+    background: $panel;
+    border: round $accent;
+    padding: 1 2;
+}
+#help-title {
+    text-style: bold;
+    color: $text;
+}
+#help-hint {
+    color: $text-muted;
+}

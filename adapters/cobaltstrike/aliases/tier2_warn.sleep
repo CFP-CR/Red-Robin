@@ -1,0 +1,36 @@
+# Tier 2: daemon returns WARN at most; UI annotation but never blocks.
+# Uses redrobin_alias_parse() helper defined in tier1a_gate.sleep.
+
+alias screenshot {
+    if (redrobin_gate($1, "screenshot", "screenshot")) {
+        &bscreenshot($1);
+    }
+}
+
+alias keylogger {
+    if (redrobin_gate($1, "keylogger", "keylogger")) {
+        &bkeylogger($1);
+    }
+}
+
+alias screenwatch {
+    if (redrobin_gate($1, "screenwatch", "screenwatch")) {
+        &bscreenwatch($1);
+    }
+}
+
+alias browserpivot {
+    local('%p');
+    %p = redrobin_alias_parse("browserpivot", @_);
+    if (redrobin_gate($1, "browserpivot", %p['raw'])) {
+        &bbrowserpivot($1, %p['args']);
+    }
+}
+
+alias socks {
+    local('%p');
+    %p = redrobin_alias_parse("socks", @_);
+    if (redrobin_gate($1, "socks", %p['raw'])) {
+        &bsocks($1, %p['args']);
+    }
+}

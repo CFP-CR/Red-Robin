@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Test/lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Alembic dev-time DB (not for production state)
+.redrobin-dev.db
+
+# Local secrets / env files
+.env
+.env.local
+
+# Adapter YAMLs hold CS team-server creds; only commit example templates.
+adapters/cobaltstrike/*.yaml
+!adapters/cobaltstrike/*.example.yaml
+
+# Stray commit message scratch file
+.commitmsg.tmp
+
+# Brainstorming visual-companion artifacts (mockups, session state)
+.superpowers/

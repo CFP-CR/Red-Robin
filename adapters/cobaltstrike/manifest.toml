@@ -1,0 +1,31 @@
+manifest_version = "0.1.0"
+spec_versions_supported = ">=0.1.0,<0.2.0"
+name = "cs-aggressor"
+version = "1.0.0"
+description = "Cobalt Strike adapter via Aggressor companion script + REST API client"
+vendor = "CFP-CR"
+license = "MIT"
+homepage = "https://github.com/CFP-CR/Red-Robin"
+
+[capabilities]
+preflight_block_console = true
+preflight_block_tui = true
+tui_dispatch = true
+output_observe = true
+console_annotation = true
+emergency_kill_switch = true
+gate_scope = "per_operator"
+command_modification = false
+
+events_emitted = [
+    "beacon.command_input",
+    "beacon.command_output",
+    "host.observation",
+    "credential.observed",
+    "adapter.heartbeat",
+]
+events_consumed = ["opsec.verdict"]
+
+[requirements]
+cobalt_strike = ">=4.12"
+platform = ["linux", "windows", "darwin"]

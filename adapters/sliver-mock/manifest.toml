@@ -1,0 +1,32 @@
+manifest_version = "0.1.0"
+spec_versions_supported = ">=0.1.0,<0.2.0"
+name = "sliver-mock"
+version = "1.0.0"
+description = "Synthetic Sliver event replayer for demos and protocol validation"
+vendor = "CFP-CR"
+license = "MIT"
+
+[capabilities]
+preflight_block_console = false
+preflight_block_tui = true
+tui_dispatch = false
+output_observe = true
+console_annotation = false
+emergency_kill_switch = false
+gate_scope = "per_operator"
+command_modification = false
+
+events_emitted = [
+    "adapter.connected",
+    "beacon.initial",
+    "beacon.command_input",
+    "beacon.command_output",
+    "host.observation",
+    "credential.observed",
+    "adapter.heartbeat",
+]
+events_consumed = []  # mock doesn't consume verdicts (one-way replay)
+
+[requirements]
+sliver = "mock"
+platform = ["linux", "windows", "darwin"]

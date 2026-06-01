@@ -1,0 +1,13 @@
+{
+  "spec_version": "0.1.0",
+  "id": "evt_01HZX9KXXR8QF3T2ABCDEFGHJK",
+  "ts": "2026-05-10T14:32:00.000Z",
+  "source": {
+    "adapter": "cs-aggressor",
+    "version": "1.0.0",
+    "engagement_id": "eng_acme_q2"
+  },
+  "event": {
+    "type": "adapter.heartbeat"
+  }
+}

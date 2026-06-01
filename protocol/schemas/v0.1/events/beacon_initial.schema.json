@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://red-robin.io/protocol/v0.1/events/beacon_initial.schema.json",
+  "title": "beacon.initial event payload",
+  "type": "object",
+  "required": ["type", "bid", "host", "user", "integrity_level", "arch", "pid", "ppid"],
+  "properties": {
+    "type": {"const": "beacon.initial"},
+    "bid": {"type": "string"},
+    "host": {"type": "string"},
+    "user": {"type": "string"},
+    "integrity_level": {"type": "string"},
+    "arch": {"type": "string", "enum": ["x86", "x64", "arm64"]},
+    "pid": {"type": "integer", "minimum": 0},
+    "ppid": {"type": "integer", "minimum": 0}
+  },
+  "additionalProperties": false
+}

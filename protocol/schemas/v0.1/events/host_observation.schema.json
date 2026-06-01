@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://red-robin.io/protocol/v0.1/events/host_observation.schema.json",
+  "title": "host.observation event payload",
+  "type": "object",
+  "required": ["type", "bid", "host_attr"],
+  "properties": {
+    "type": {"const": "host.observation"},
+    "bid": {"type": "string"},
+    "host_attr": {"type": "object", "description": "Free-form host attributes (os, edr_detected, antivirus, integrity, etc.)"}
+  },
+  "additionalProperties": false
+}

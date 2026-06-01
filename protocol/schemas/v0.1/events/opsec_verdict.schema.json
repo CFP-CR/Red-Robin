@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://red-robin.io/protocol/v0.1/events/opsec_verdict.schema.json",
+  "title": "opsec.verdict event payload",
+  "type": "object",
+  "required": ["type", "source_event_id", "severity", "reason"],
+  "properties": {
+    "type": {"const": "opsec.verdict"},
+    "source_event_id": {"type": "string"},
+    "beacon_id": {
+      "type": "string",
+      "description": "ID of the beacon for which the verdict applies. Required for Layer A; included in Layer B as of v0.1.x."
+    },
+    "severity": {"type": "string", "enum": ["INFO", "WARN", "DANGER", "ESCALATE"]},
+    "reason": {"type": "string"},
+    "rule_id": {"type": ["string", "null"]},
+    "suggestions": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

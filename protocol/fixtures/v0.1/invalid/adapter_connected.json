@@ -1,0 +1,8 @@
+{
+  "type": "adapter.connected",
+  "manifest": {
+    "manifest_version": "0.1.0",
+    "name": "cs-aggressor",
+    "version": "1.0.0"
+  }
+}

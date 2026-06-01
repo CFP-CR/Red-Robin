@@ -1,0 +1,29 @@
+# Task 8 Phase 1 Spike — Aggressor alias arg semantics.
+#
+# Empirically verify $0/$1/$2/$3/$4 semantics in alias bodies against CS 4.12.
+# Operator runs the listed test cases and records observed values in
+# docs/aggressor-alias-args.md.
+#
+# To use:
+#   1. CS Client → Scripts → Load → adapters/cobaltstrike/spike/test_args.cna
+#   2. Open any Beacon's console (real or simulated)
+#   3. Run each test case below
+#   4. Copy the [Red Robin Spike] output lines into docs/aggressor-alias-args.md
+
+alias rrspike {
+    blog($1, "===== Red Robin Spike =====");
+    blog($1, "\$0 = '" . $0 . "'");
+    blog($1, "\$1 = '" . $1 . "' (beacon ID)");
+    blog($1, "\$2 = '" . $2 . "'");
+    blog($1, "\$3 = '" . $3 . "'");
+    blog($1, "\$4 = '" . $4 . "'");
+    blog($1, "\$5 = '" . $5 . "'");
+    blog($1, "size of args: " . size(@_));
+}
+
+# Documented test cases (run each, paste output into docs):
+#   rrspike single
+#   rrspike one two three
+#   rrspike "quoted string with spaces"
+#   rrspike mixed "quoted arg" plain
+#   rrspike --flag value --other val2

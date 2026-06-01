@@ -1,0 +1,11 @@
+{
+  "type": "host.observation",
+  "bid": "bid_4291",
+  "host_attr": {
+    "os": "Windows Server 2022",
+    "edr_detected": "CrowdStrike Falcon",
+    "antivirus": "Defender",
+    "integrity": "high",
+    "domain_joined": true
+  }
+}

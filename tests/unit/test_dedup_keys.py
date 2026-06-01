@@ -1,0 +1,175 @@
+"""Unit tests for DedupKeys + derive_key (application layer)."""
+
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+import pytest
+
+from redrobin.application.dedup_keys import DedupKeys, derive_key
+from redrobin.infrastructure.persistence.dedup_keys_repo import DedupKeysRepo
+
+
+# ---- derive_key ----
+
+
+def test_derive_key_command_output_with_correlation_id() -> None:
+    event = {
+        "type": "beacon.command_output",
+        "bid": "B-1",
+        "correlation_id": "abc123",
+        "output": "x",
+    }
+    assert derive_key(event) == "B-1|abc123|beacon.command_output"
+
+
+def test_derive_key_command_input_with_correlation_id() -> None:
+    event = {
+        "type": "beacon.command_input",
+        "bid": "B-1",
+        "operator": "op",
+        "command": "shell ls",
+        "raw": "shell ls",
+        "correlation_id": "abc123",
+    }
+    assert derive_key(event) == "B-1|abc123|beacon.command_input"
+
+
+def test_derive_key_opsec_verdict_with_correlation_id() -> None:
+    event = {
+        "type": "opsec.verdict",
+        "beacon_id": "B-1",
+        "correlation_id": "abc123",
+        "verdict": "BLOCK",
+    }
+    # opsec.verdict uses `beacon_id` (not `bid`) per its schema; derive_key
+    # accepts either as the producer-attached identity.
+    assert derive_key(event) == "B-1|abc123|opsec.verdict"
+
+
+def test_derive_key_beacon_initial_is_passthrough() -> None:
+    # Group D: beacon.initial is NOT deduped — it is idempotent at the reducer
+    # (upsert_session replaces by bid), so deduping it only breaks the .cna
+    # backfill's session re-seed after a working-memory clean. Pass-through.
+    event = {"type": "beacon.initial", "bid": "B-1", "host": "DC01"}
+    assert derive_key(event) is None
+
+
+def test_derive_key_missing_bid_returns_none() -> None:
+    event = {"type": "beacon.command_output", "correlation_id": "abc", "output": "x"}
+    assert derive_key(event) is None
+
+
+def test_derive_key_missing_correlation_id_returns_none() -> None:
+    """Command events without correlation_id are pass-through (no dedup)."""
+    event = {"type": "beacon.command_output", "bid": "B-1", "output": "x"}
+    assert derive_key(event) is None
+
+
+def test_derive_key_unknown_event_type_returns_none() -> None:
+    event = {"type": "something.else", "bid": "B-1"}
+    assert derive_key(event) is None
+
+
+def test_derive_key_missing_type_returns_none() -> None:
+    assert derive_key({"bid": "B-1"}) is None
+
+
+# ---- DedupKeys ----
+
+
+def _build(tmp_path: Path, *, preload: set[str] | None = None) -> DedupKeys:
+    repo = DedupKeysRepo(tmp_path / "dedup_keys.json")
+    if preload is not None:
+        repo.save(preload)
+    return DedupKeys.load(repo)
+
+
+@pytest.mark.asyncio
+async def test_check_and_insert_returns_true_on_new_key(tmp_path: Path) -> None:
+    keys = _build(tmp_path)
+    assert await keys.check_and_insert("B-1|abc|beacon.command_output") is True
+
+
+@pytest.mark.asyncio
+async def test_check_and_insert_returns_false_on_duplicate(tmp_path: Path) -> None:
+    keys = _build(tmp_path)
+    await keys.check_and_insert("k1")
+    assert await keys.check_and_insert("k1") is False
+
+
+@pytest.mark.asyncio
+async def test_check_and_insert_persists_to_disk(tmp_path: Path) -> None:
+    keys = _build(tmp_path)
+    await keys.check_and_insert("k1")
+    # Reload from disk via a fresh DedupKeys — state must survive.
+    repo = DedupKeysRepo(tmp_path / "dedup_keys.json")
+    reloaded = DedupKeys.load(repo)
+    assert await reloaded.check_and_insert("k1") is False
+
+
+@pytest.mark.asyncio
+async def test_check_and_insert_loads_preloaded_keys(tmp_path: Path) -> None:
+    keys = _build(tmp_path, preload={"k1"})
+    assert await keys.check_and_insert("k1") is False
+    assert await keys.check_and_insert("k2") is True
+
+
+@pytest.mark.asyncio
+async def test_concurrent_check_and_insert_admits_exactly_one(tmp_path: Path) -> None:
+    """Two coroutines racing on the same key — exactly one returns True."""
+    keys = _build(tmp_path)
+    results = await asyncio.gather(
+        keys.check_and_insert("same-key"),
+        keys.check_and_insert("same-key"),
+    )
+    assert sorted(results) == [False, True]
+
+
+@pytest.mark.asyncio
+async def test_clear_drops_all_keys(tmp_path: Path) -> None:
+    keys = _build(tmp_path, preload={"k1", "k2"})
+    keys.clear()
+    assert await keys.check_and_insert("k1") is True
+    assert await keys.check_and_insert("k2") is True
+
+
+@pytest.mark.asyncio
+async def test_lock_blocks_concurrent_inserts_while_held(tmp_path: Path) -> None:
+    """Prove the asyncio.Lock actually serializes — not just the synchronous
+    critical section accidentally doing so. With the lock manually held,
+    a concurrent check_and_insert must NOT complete; on release it must."""
+    keys = _build(tmp_path)
+    await keys._lock.acquire()
+    try:
+        task = asyncio.create_task(keys.check_and_insert("k1"))
+        # Give the loop a chance to schedule the task.
+        await asyncio.sleep(0.01)
+        assert not task.done(), "lock failed to block a concurrent insert"
+    finally:
+        keys._lock.release()
+    # After release, the task completes.
+    assert await task is True
+
+
+@pytest.mark.asyncio
+async def test_check_and_insert_rejects_non_str_key(tmp_path: Path) -> None:
+    """Defensive: a None key would silently poison the in-memory set, then
+    raise TypeError on the next save. Reject at the boundary instead."""
+    keys = _build(tmp_path)
+    with pytest.raises(TypeError):
+        await keys.check_and_insert(None)  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_len_reflects_in_memory_set(tmp_path: Path) -> None:
+    """``len(dedup_keys)`` reads from the already-loaded in-memory set —
+    no second disk read. Boot-log + observability rely on this being O(1)."""
+    keys = _build(tmp_path, preload={"a", "b", "c"})
+    assert len(keys) == 3
+    await keys.check_and_insert("d")
+    assert len(keys) == 4
+    # Duplicate insert does NOT grow the set.
+    await keys.check_and_insert("d")
+    assert len(keys) == 4

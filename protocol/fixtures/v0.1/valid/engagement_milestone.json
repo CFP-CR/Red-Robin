@@ -1,0 +1,7 @@
+{
+  "type": "engagement.milestone",
+  "phase": "lateral_movement",
+  "milestone_id": "ms_dc_compromised",
+  "status": "achieved",
+  "progress_pct": 75
+}

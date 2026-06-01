@@ -1,0 +1,10 @@
+# Copy to cs-main.yaml and fill in real values.
+# IMPORTANT: chmod 600 cs-main.yaml after creation (POSIX).
+# Windows: ensure NTFS ACLs restrict to your account; the loader's
+# loose-perms warn is POSIX-only (audit pass 1 #16).
+name: cs-main
+kind: cobaltstrike
+teamserver_url: https://ts.example.com:50050
+operator_user: operator
+operator_password: REPLACE_ME
+verify_ssl: false

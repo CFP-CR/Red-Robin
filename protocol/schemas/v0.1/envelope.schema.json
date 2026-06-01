@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://red-robin.io/protocol/v0.1/envelope.schema.json",
+  "title": "Red Robin Wire Protocol Envelope v0.1",
+  "type": "object",
+  "required": ["spec_version", "id", "ts", "source", "event"],
+  "properties": {
+    "spec_version": {
+      "type": "string",
+      "description": "Wire protocol version. Must match major.minor of supported range; only v0.1.x in v0.1 ship.",
+      "pattern": "^0\\.1\\.\\d+$"
+    },
+    "id": {
+      "type": "string",
+      "description": "Event ID — ULID prefixed with evt_. Crockford base32 (no I/L/O/U).",
+      "pattern": "^evt_[0-9ABCDEFGHJKMNPQRSTVWXYZ]{26}$"
+    },
+    "ts": {
+      "type": "string",
+      "description": "RFC3339 UTC timestamp (e.g., 2026-05-10T14:32:00.000Z)",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$"
+    },
+    "source": {
+      "type": "object",
+      "description": "Provenance of the event (adapter that emitted it, engagement context).",
+      "required": ["adapter", "version", "engagement_id"],
+      "properties": {
+        "adapter": {"type": "string"},
+        "version": {"type": "string"},
+        "engagement_id": {"type": "string"},
+        "adapter_session_id": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "event": {
+      "type": "object",
+      "description": "Type-tagged event payload. See protocol/schemas/v0.1/events/.",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "adapter.connected",
+            "beacon.initial",
+            "beacon.command_input",
+            "beacon.command_output",
+            "host.observation",
+            "credential.observed",
+            "opsec.verdict",
+            "operator.question",
+            "operator.answer",
+            "engagement.milestone",
+            "adapter.heartbeat"
+          ]
+        }
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "description": "Forward-compatible namespaced extensions. Vendor-specific keys go here."
+    }
+  },
+  "additionalProperties": false
+}

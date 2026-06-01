@@ -1,0 +1,35 @@
+# redrobin_hook_debug.cna — Spike (diagnostic, kept artifact). CONSOLE-ONLY (no file I/O).
+#
+# Verifies EMPIRICALLY what each beacon_* hook actually passes — settled the
+# command-recovery design (2026-05-27): the official Aggressor events doc omits
+# the per-command correlation id, but `$5` is shared across beacon_input/tasked/
+# output (and `beacon_output.$4` = job id). See the B1.5 spec, §3 "Empirical
+# grounding". Prints "RRHOOK|<event>|argc=N|1=..|2=..|3=..|4=..|5=.." to the
+# Script Console. Nulls show as empty; argc is the TRUE arg count.
+#
+# USE:
+#   1. Make sure the daemon is UP (redrobin daemon start ...) so redrobin.cna
+#      doesn't block commands — OR unload redrobin.cna and run only this spike.
+#   2. CS Client -> Scripts -> Load -> THIS file. You must IMMEDIATELY see
+#      "RRHOOK loaded" in the Script Console (Cobalt Strike -> Script Console).
+#   3. In ONE beacon console, run in order (wait for each):
+#        shell whoami
+#        shell ls
+#        cd C:\
+#        shell systeminfo
+#        sleep 3
+#      then TWO fast back-to-back (no waiting):
+#        shell hostname
+#        shell ipconfig
+#   4. Copy ALL the "RRHOOK|" lines from the Script Console and paste to Claude.
+#   5. Scripts -> Unload when done.
+
+on beacon_input      { println("RRHOOK|beacon_input|argc="      . size(@_) . "|1=" . $1 . "|2=" . $2 . "|3=" . $3 . "|4=" . $4 . "|5=" . $5); }
+on beacon_tasked     { println("RRHOOK|beacon_tasked|argc="     . size(@_) . "|1=" . $1 . "|2=" . $2 . "|3=" . $3 . "|4=" . $4 . "|5=" . $5); }
+on beacon_output     { println("RRHOOK|beacon_output|argc="     . size(@_) . "|1=" . $1 . "|2=" . $2 . "|3=" . $3 . "|4=" . $4 . "|5=" . $5); }
+on beacon_output_alt { println("RRHOOK|beacon_output_alt|argc=" . size(@_) . "|1=" . $1 . "|2=" . $2 . "|3=" . $3 . "|4=" . $4 . "|5=" . $5); }
+on beacon_checkin    { println("RRHOOK|beacon_checkin|argc="    . size(@_) . "|1=" . $1 . "|2=" . $2 . "|3=" . $3); }
+on beacon_error      { println("RRHOOK|beacon_error|argc="      . size(@_) . "|1=" . $1 . "|2=" . $2 . "|3=" . $3); }
+on beacon_indicator  { println("RRHOOK|beacon_indicator|argc="  . size(@_) . "|1=" . $1 . "|2=" . $2 . "|3=" . $3 . "|4=" . $4); }
+
+println("RRHOOK loaded");
