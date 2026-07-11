@@ -24,11 +24,9 @@ product. Core is C2-agnostic; **adapters are the sole C2 boundary**.
 
 ## Workflow
 
-Superpowers methodology for any non-trivial change:
-brainstorming → writing-plans → auditing-plans → subagent-driven-development → **operator smoke**.
-
-- **`.cna` changes are validated by a live-beacon operator smoke, NOT by CI** — CI never runs the `.cna`.
-- TDD, atomic commits, conventional messages, **no AI co-author trailer** (see CONTRIBUTING).
+- Non-trivial changes follow the AI-DLC — full order + phases in `.claude/rules/development-workflow.md`.
+- **IMPORTANT: `.cna` changes are validated by a live-beacon operator smoke, NOT by CI** — CI never runs the `.cna`.
+- TDD; atomic, conventional commits; **no AI co-author trailer** (see CONTRIBUTING).
 
 ## Layout & pointers
 
@@ -38,10 +36,5 @@ brainstorming → writing-plans → auditing-plans → subagent-driven-developme
 - **Two unrelated "rules" dirs:** top-level `rules/` = Sigma/OPSEC Layer-A rules (product data);
   `.claude/rules/` = Claude Code path-scoped instructions (tooling).
 
-## Branching (actual flow)
+<!-- Branching/PR flow lives in the imported CONTRIBUTING.md (single source of truth). Keep this file tight (<120 lines): move multi-step detail into .claude/rules/ or a skill, not here. -->
 
-- `main` is protected (v0.1 shipped 2026-06-01). Do not push directly.
-- `dev-juan` / `dev-jose` are operator integration branches.
-- Topic branches off `dev-juan` (`feat-*`, `fix-*`, `docs-*`), merge back to `dev-juan`; `main` via PR at release.
-
-<!-- Keep this file under ~120 lines. Move detail into .claude/rules/ (path-scoped) or a skill, not here. -->
