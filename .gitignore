@@ -49,3 +49,8 @@ adapters/cobaltstrike/*.yaml
 
 # Brainstorming visual-companion artifacts (mockups, session state)
 .superpowers/
+
+# Claude Code — personal/local overrides (do not commit; shared .claude/ config IS committed)
+.claude/settings.local.json
+.claude/*.local.json
+CLAUDE.local.md
