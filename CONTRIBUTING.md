@@ -41,16 +41,18 @@ uv run pre-commit install
 
 ## Pull request flow
 
-1. Create a topic branch from `dev-juan` (`feat-X`, `fix-Y`, `docs-Z`).
-2. Open a PR back into `dev-juan` (the integration branch). `main` is updated from `dev-juan` via PR at release.
+1. Create a topic branch from the integration branch `dev` (`feat-X`, `fix-Y`, `docs-Z`).
+2. Open a PR back into `dev`. `main` is updated from `dev` via PR at release.
 3. CI must pass: ruff + mypy + import-linter + pytest.
 4. Code review by another operator before merge.
 5. Squash-merge for small PRs; preserve atomic commits for larger ones.
 
 ## Branch protection
 
-- `main` is protected. PRs only.
-- `dev-jose` / `dev-juan` are operator working branches (do not push directly).
+- `main` is protected (production) — PRs only, no direct pushes.
+- `dev` is the shared integration branch — PRs only, no direct pushes.
+- _Transition:_ the integration branch is currently `dev-juan`; we are migrating to a single `dev`
+  (git flow). `dev-jose` is the peer operator branch, being folded into `dev`.
 
 ## Tests
 
