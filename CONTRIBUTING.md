@@ -41,8 +41,8 @@ uv run pre-commit install
 
 ## Pull request flow
 
-1. Create a topic branch from `main` (`feat-X`, `fix-Y`, `docs-Z`).
-2. Open a PR against `main`.
+1. Create a topic branch from `dev-juan` (`feat-X`, `fix-Y`, `docs-Z`).
+2. Open a PR back into `dev-juan` (the integration branch). `main` is updated from `dev-juan` via PR at release.
 3. CI must pass: ruff + mypy + import-linter + pytest.
 4. Code review by another operator before merge.
 5. Squash-merge for small PRs; preserve atomic commits for larger ones.
@@ -78,3 +78,8 @@ uv run pre-commit install
 Be respectful. We're building offensive security tooling — that comes with
 ethical responsibility. Don't ship features that primarily enable
 non-authorized targets.
+
+## Claude Code
+
+This repo ships committed Claude Code config under `.claude/` (path-scoped `rules/`, `skills/`) plus a
+root `CLAUDE.md`. Run `/memory` inside a session to see which instructions and rules are loaded.
