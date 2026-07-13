@@ -1,0 +1,93 @@
+# AI Assistant — Design (WIP, brainstorming in progress)
+
+- **Status:** 🚧 WIP — brainstorming (started 2026-07-11, branch `feat-ai-assistant` off `dev`). This is a **living decisions log**, NOT yet an approved spec. Open decisions listed at the end; the final spec + implementation plan come after the brainstorming closes.
+- **North star:** augment-not-replace, operator-better. NOT driven by the DEF CON demo/timeline.
+
+## 1. What the assistant IS
+
+The **operation-aware AI copilot** — one brain, several capabilities:
+
+- **Reactive + state-aware:** reacts to the operator's operation output, grounded in the engagement state it reads from the memory layers.
+- **Recommends next steps WITH the WHY + OPSEC-awareness.** Not "do X" — the tradecraft rationale + the detection risk (grounded in `defenses_observed`). A recommendation without the why is outsourcing, not augmenting.
+- **Advisory-only: proposes, never acts.** Operator decides & executes. Read-only by construction (emits recommendations, never dispatches to the beacon).
+- **Selective (signal, not noise):** speaks when it has something worth saying, stays quiet otherwise.
+- **Both advisory AND interpretation-writer** (one brain, two outputs):
+  - *Recommendation (lower-stakes):* `advisor.recommendation` → `#advisor-dock`.
+  - *Interpretation (higher-stakes):* writes `current_phase` / `objectives[].status`+`progress_pct` / `kill_chain_status` (writer-split's 3rd role). Mutates the shared picture the assistant re-reads → compounding-error risk → publish `engagement.milestone` → the reducer writes it (single-writer, never writes WM directly); attributed as "the assistant's read", reversible; **propose-and-confirm** for big changes.
+- **Bidirectional + learns from the operator:** operator pushes back ("that's not a good move") → the assistant captures a **context-scoped lesson** (this operator, this situation, this reason — NOT a blanket "X is bad") that it **reads back** when reasoning. This is Claude Code's **auto-memory** pattern, and it **closes the gap** where L1 lessons are written but never read. Auditable/editable. Uses the TUI Chat pane + `operator.question`/`operator.answer`.
+
+Follows **Claude Code patterns** (not the harness): agent-with-tools; progressive disclosure over the 5 memories; auto-memory-that-learns; skills = tradecraft playbooks; subagents = the "deep on-demand" second speed vs fast Haiku commentary; human-in-the-loop.
+
+## 2. Architecture decision: NATIVE, not the Agent SDK (decided)
+
+- **Today (verified):** raw `anthropic` SDK, single-shot `messages.create` at 3 sites (Layer B sonnet-4-6; enricher + summarizer haiku-4-5), prompt caching, behind `LLMProvider` ABC + narrow Protocols. **Zero Agent SDK, zero tool loops.**
+- **Decision:** the assistant is the FIRST agentic/tool-calling component. Build NATIVE — a narrow `AgentLLM` **Protocol** + a tool-calling loop via Anthropic's **Tool Runner** (`client.beta.messages.tool_runner`, wrapped behind the Protocol so the beta API is insulated) on the SAME `anthropic` client + caching + bus + repos. **NOT** the Agent SDK harness (own client/sessions/`~/.claude`/MCP → duplicates + fights the clean-arch).
+- **3-layer framing:** leverage Anthropic at layer 1 (SDK) + layer 2 (Tool Runner loop); build layer 3 (the DOMAIN — tools over memory, prompts, advisory/interpretation split, feedback-learning) ourselves. Effort → 100% domain.
+- **Follows the rules by construction:** one-ABC (AgentLLM=Protocol, not a 2nd ABC), 4 import-linter contracts, facade pattern, bus-first, single-writer, never-crash, degraded-None. The Agent SDK would strain these; native keeps them.
+
+## 3. The existing LLM components — their fate
+
+| Component | Role | With the assistant |
+|---|---|---|
+| **Enricher** (Haiku) | extracts facts from `beacon.command_output` → **observation** (`working_memory.deltas` → reducer) | **Unchanged.** Observation-writer sibling; the reference pattern the assistant copies. |
+| **Summarizer** (Haiku) | compresses episodes → L5 `ContextSummary` | **Unchanged.** Feeds context the assistant reads. |
+| **Lesson promoter** (NOT LLM) | aggregates verdicts → L1 `PromotedLesson` | **Unchanged**, but the assistant becomes its **first reader** (closes the L1-read gap). |
+| **Layer B** (Sonnet) | per-command ESCALATE judge; produces `suggestions[]` (currently dropped before the bus) | 🔑 **OPEN** — absorb / coexist / feed the assistant. |
+
+The writer-split keeps them non-overlapping: enricher = observation, operator/yaml = definition, assistant = interpretation. No refactor of the existing components.
+
+## 4. File / folder structure (mirrors `application/enrichment/`)
+
+```
+redrobin/
+├── domain/assistant.py                 # pure types: Recommendation, Lesson
+├── application/
+│   ├── assistant/
+│   │   ├── assistant.py                 # bus-subscriber consumer + cycle orchestration
+│   │   ├── agent.py                     # the agentic loop (Tool Runner underneath)
+│   │   ├── tools.py                     # retrieval tools over L1–L5 / WM / KB
+│   │   ├── triggers.py                  # "do I have signal worth speaking?" gate
+│   │   ├── lessons.py                   # feedback → context-scoped lesson → store
+│   │   └── llm.py                       # AgentLLM Protocol (like enrichment/llm.py)
+│   └── assistant_lifecycle.py           # facade (like longterm_lifecycle)
+├── infrastructure/llm/anthropic_client.py   # + AnthropicAgentClient (AgentLLM, Tool Runner)
+├── api/lifespan_helpers.py              # + start_assistant(app, settings)
+└── tui/textual_ui/advisor.py           # advisor.recommendation handler → #advisor-dock
+```
+
+## 5. Pre-wired seams (from the 2026-07-11 code discovery)
+
+- **Output — recommendations:** `#advisor-dock` exists (hidden); one `@REGISTRY.register("advisor.recommendation")` + flip display. `tui_ws` forwards all bus events → zero changes.
+- **Output — interpretation:** `engagement.milestone` event + schema + reducer merge-preservation EXIST; nothing publishes it (add producer + a reducer dispatch case).
+- **Input:** the `EventBus` (fan-out; subscribe + filter). Observable: `beacon.*`, `working_memory.deltas`/`snapshot`, `opsec.verdict`, `enrichment.completed`/`failed`.
+- **Live-state-into-reasoning:** Layer B has a reserved `dynamic_state=""` — unused.
+- **Advisory content almost exists:** Layer B's `suggestions[]` are dropped before the bus.
+- **Memory:** L2/L3/L5 fully built; **L1 written-but-never-read** (feedback-learning closes it); **L4 tradecraft graph NOT built** (grounding-in-tradecraft is via the KB/RAG: `KBService.retrieve`, one flat numpy Voyage index — scale ceiling, v0.2 pgvector).
+
+## 6. OPEN decisions (still to decide in the brainstorming)
+
+**A. The brain (🔑 = shapes everything):**
+- 🔑 **Trigger model** — reactive-per-event / on-signal / on-demand / periodic / hybrid; the cheap "have-signal?" gate before expensive reasoning.
+- 🔑 **Relationship to Layer B** — absorb / coexist / feed.
+- The two speeds + models (Haiku reactive vs Sonnet/Opus deep); context per cycle (working-set + retrieval).
+
+**B. Tools:**
+- 🔑 The retrieval tool set (over which layers/KB); **whether to build the Operational Journal** (6th layer: raw `(command,output)` + RAG).
+
+**C. Outputs:**
+- Recommendation shape (why / OPSEC risk / suggested action / confidence / references) + `#advisor-dock` UX (single / stream / attached by `correlation_id`; dismiss / follow-up / accept).
+- Interpretation-writing mechanics (auto-write vs propose-and-confirm per field; attribution/reversal in the UI).
+
+**D. Learning loop:**
+- Feedback mechanics (Chat + `operator.question/answer`); lesson extraction (context-scoped); storage (extend L1? new type? per-engagement vs cross-engagement scope); read-back (tool / cached block).
+
+**E. Safety / quality:**
+- Grounding + scope-safety + anti-hallucination + redaction at the LLM boundary.
+- Failure/degraded/cost/observability (`assistant.*` events).
+
+**F. Scope:**
+- 🔑 The first buildable slice (thesis-first, not "MVP for demo") + build order.
+
+---
+
+Related memory: `ai-assistant-thesis-first`, `ai-assistant-design-decisions`, `redrobin-project-journal-location` (in the spiedra-vault Claude auto-memory). Code discovery: 2026-07-11 (memory system, LLM+retrieval, bus+TUI+verdict, engagement+wiring maps).
