@@ -36,24 +36,32 @@ Follows **Claude Code patterns** (not the harness): agent-with-tools; progressiv
 
 The writer-split keeps them non-overlapping: enricher = observation, operator/yaml = definition, assistant = interpretation. No refactor of the existing components.
 
-## 4. File / folder structure (mirrors `application/enrichment/`)
+## 4. File / folder structure — `application/agents/` (cohesion within the layer)
+
+All autonomous AI agents grouped under **`application/agents/`** for clarity, WITHOUT breaking the layered import-linter contracts (it stays `redrobin.application.*`, so the 4 contracts hold unchanged). Pure types stay in `domain/`; Anthropic clients stay in `infrastructure/llm/`. **Layer B stays in the verdict pipeline** (it's a synchronous gate engine, not an autonomous agent).
 
 ```
 redrobin/
-├── domain/assistant.py                 # pure types: Recommendation, Lesson
+├── domain/assistant.py                     # pure types: Recommendation, Lesson
 ├── application/
-│   ├── assistant/
-│   │   ├── assistant.py                 # bus-subscriber consumer + cycle orchestration
-│   │   ├── agent.py                     # the agentic loop (Tool Runner underneath)
-│   │   ├── tools.py                     # retrieval tools over L1–L5 / WM / KB
-│   │   ├── triggers.py                  # "do I have signal worth speaking?" gate
-│   │   ├── lessons.py                   # feedback → context-scoped lesson → store
-│   │   └── llm.py                       # AgentLLM Protocol (like enrichment/llm.py)
-│   └── assistant_lifecycle.py           # facade (like longterm_lifecycle)
-├── infrastructure/llm/anthropic_client.py   # + AnthropicAgentClient (AgentLLM, Tool Runner)
-├── api/lifespan_helpers.py              # + start_assistant(app, settings)
-└── tui/textual_ui/advisor.py           # advisor.recommendation handler → #advisor-dock
+│   ├── agents/                             # ← ALL autonomous AI agents, together (clarity)
+│   │   ├── enricher/                       #   (moved from application/enrichment/)
+│   │   ├── summarizer.py                   #   (moved from application/summarizer.py)
+│   │   └── assistant/                      #   ← new
+│   │       ├── assistant.py                #     bus-subscriber consumer + cycle orchestration
+│   │       ├── agent.py                    #     the agentic loop (Tool Runner underneath)
+│   │       ├── tools.py                    #     retrieval tools over L1–L5 / WM / KB
+│   │       ├── triggers.py                 #     "do I have signal worth speaking?" gate
+│   │       ├── lessons.py                  #     feedback → context-scoped lesson → store
+│   │       └── llm.py                      #     AgentLLM Protocol (like the enricher's llm.py)
+│   ├── assistant_lifecycle.py              # facade (like longterm_lifecycle)
+│   └── event_bus.py, verdict_pipeline.py, layer_b_engine.py, ...   # unchanged (Layer B stays here)
+├── infrastructure/llm/anthropic_client.py  # + AnthropicAgentClient (AgentLLM, Tool Runner)
+├── api/lifespan_helpers.py                 # + start_assistant(app, settings)
+└── tui/textual_ui/advisor.py               # advisor.recommendation handler → #advisor-dock
 ```
+
+**Sequencing (decided):** the move of the existing agents into `application/agents/` is a SMALL, INDEPENDENT refactor of working/tested code (needs none of the assistant's open decisions). Do it as its OWN atomic change — a `refactor:` commit, acceptance = the 5 CI gates (deterministic logic → no beacon smoke) — BEFORE the assistant lands in the ready home. It is NOT "step 1" of the assistant feature (keep the reorg and the new-feature build as separate, independently-reviewable changes).
 
 ## 5. Pre-wired seams (from the 2026-07-11 code discovery)
 
