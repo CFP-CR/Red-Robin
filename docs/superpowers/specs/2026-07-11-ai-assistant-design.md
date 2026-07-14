@@ -76,7 +76,11 @@ redrobin/
 ## 6. OPEN decisions (still to decide in the brainstorming)
 
 **A. The brain:**
-- ✅ **Trigger model — DECIDED: three modes, all in** (production-grade, not phased): **reactive** (fast, per-event, selective) + **on-demand** (deep, operator-pull) + **proactive/periodic** (self-initiated "you might be missing X" — the watch-your-back value neither reactive nor on-demand catches), all behind a hard **"signal-not-noise"** gate.
+- ✅ **Trigger model — DECIDED: three modes, all in** (production-grade, not phased), framed by *who initiates*:
+  - **Reactive** — the assistant speaks, triggered by an **event** (your command / output).
+  - **Proactive** — the assistant speaks, **self-triggered** on its own cadence (watch-your-back — the value neither of the others catches).
+  - **Conversational** (renamed from "on-demand") — **you** initiate a dialogue: you **ask** ("what's my path to DA?") OR **correct** ("that's too loud") — and correcting is **where it learns** (unifies the pull-query + the feedback/learning loop in one mode).
+  Reactive + proactive = the assistant pushes (differ only in the trigger); conversational = the operator pulls/dialogues. **Speed** (fast Haiku vs deep Sonnet) is a **separate axis** from the trigger. All push behind a hard **"signal-not-noise"** gate.
 - ✅ **Relationship to Layer B — DECIDED: absorbed** (its per-command reasoning → the assistant's fast speed, advisory). Synchronous gate eliminated (§1).
 - The two speeds + models (Haiku reactive vs Sonnet/Opus deep); context per cycle (working-set + retrieval). *(still to detail)*
 
