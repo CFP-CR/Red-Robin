@@ -9,7 +9,7 @@ The **operation-aware AI copilot** — one brain, several capabilities:
 
 - **Reactive + state-aware:** reacts to the operator's operation output, grounded in the engagement state it reads from the memory layers.
 - **Recommends next steps WITH the WHY + OPSEC-awareness.** Not "do X" — the tradecraft rationale + the detection risk (grounded in `defenses_observed`). A recommendation without the why is outsourcing, not augmenting.
-- **Advisory-only: proposes, never acts.** Operator decides & executes. Read-only by construction (emits recommendations, never dispatches to the beacon).
+- **Advisory-only: proposes, never acts. The synchronous pre-flight GATE is ELIMINATED** (the pre-send ALLOW/BLOCK/ESCALATE hold — agreed in the 2026-05-27 pivot). Nothing is blocked/held before it sends. What stays = the `.cna` **capture/interception** (the data moat feeding the assistant, the only Sliver-portable part). ALL reasoning is advisory (ESCALATE = "flagged for attention", not a hold). Operator decides & executes. Read-only by construction (emits recommendations, never dispatches).
 - **Selective (signal, not noise):** speaks when it has something worth saying, stays quiet otherwise.
 - **Both advisory AND interpretation-writer** (one brain, two outputs):
   - *Recommendation (lower-stakes):* `advisor.recommendation` → `#advisor-dock`.
@@ -32,9 +32,9 @@ Follows **Claude Code patterns** (not the harness): agent-with-tools; progressiv
 | **Enricher** (Haiku) | extracts facts from `beacon.command_output` → **observation** (`working_memory.deltas` → reducer) | **Unchanged.** Observation-writer sibling; the reference pattern the assistant copies. |
 | **Summarizer** (Haiku) | compresses episodes → L5 `ContextSummary` | **Unchanged.** Feeds context the assistant reads. |
 | **Lesson promoter** (NOT LLM) | aggregates verdicts → L1 `PromotedLesson` | **Unchanged**, but the assistant becomes its **first reader** (closes the L1-read gap). |
-| **Layer B** (Sonnet) | per-command ESCALATE judge; produces `suggestions[]` (currently dropped before the bus) | 🔑 **OPEN** — absorb / coexist / feed the assistant. |
+| **Layer B** (Sonnet) | per-command ESCALATE judge; produces `suggestions[]` (currently dropped before the bus) | **DECIDED: absorbed** → its per-command reasoning becomes the assistant's fast reactive speed (advisory). |
 
-The writer-split keeps them non-overlapping: enricher = observation, operator/yaml = definition, assistant = interpretation. No refactor of the existing components.
+**The synchronous pre-flight gate is eliminated (see §1).** So: **Layer B** is absorbed into the assistant (advisory, not a gate verdict). **Layer A** (fast deterministic Sigma rules) loses its only real value (the sync BLOCK) → it is either removed or demoted to a cheap advisory signal the assistant can use as an input — NOT a gate. The `.cna` **capture** stays. The writer-split keeps the writers non-overlapping: enricher = observation, operator/yaml = definition, assistant = interpretation. No refactor of enricher/summarizer/promoter.
 
 ## 4. File / folder structure — `application/agents/` (cohesion within the layer)
 
