@@ -2,6 +2,7 @@
 
 - **Status:** 🚧 WIP — brainstorming (started 2026-07-11, branch `feat-ai-assistant` off `dev`). This is a **living decisions log**, NOT yet an approved spec. Open decisions listed at the end; the final spec + implementation plan come after the brainstorming closes.
 - **North star:** augment-not-replace, operator-better. NOT driven by the DEF CON demo/timeline.
+- **Scope bar (operator-confirmed 2026-07-11):** **production-grade and COMPLETE — NOT MVP / v1→v2 phasing.** The design targets the full production-quality assistant (all modes, all quality: never-crash, degraded, cost-controlled, observable, tested, OPSEC-safe). It is *built* incrementally (AI-DLC slices, each production-quality), never shipped as a stripped-down first version.
 
 ## 1. What the assistant IS
 
@@ -74,10 +75,10 @@ redrobin/
 
 ## 6. OPEN decisions (still to decide in the brainstorming)
 
-**A. The brain (🔑 = shapes everything):**
-- 🔑 **Trigger model** — reactive-per-event / on-signal / on-demand / periodic / hybrid; the cheap "have-signal?" gate before expensive reasoning.
-- 🔑 **Relationship to Layer B** — absorb / coexist / feed.
-- The two speeds + models (Haiku reactive vs Sonnet/Opus deep); context per cycle (working-set + retrieval).
+**A. The brain:**
+- ✅ **Trigger model — DECIDED: three modes, all in** (production-grade, not phased): **reactive** (fast, per-event, selective) + **on-demand** (deep, operator-pull) + **proactive/periodic** (self-initiated "you might be missing X" — the watch-your-back value neither reactive nor on-demand catches), all behind a hard **"signal-not-noise"** gate.
+- ✅ **Relationship to Layer B — DECIDED: absorbed** (its per-command reasoning → the assistant's fast speed, advisory). Synchronous gate eliminated (§1).
+- The two speeds + models (Haiku reactive vs Sonnet/Opus deep); context per cycle (working-set + retrieval). *(still to detail)*
 
 **B. Tools:**
 - 🔑 The retrieval tool set (over which layers/KB); **whether to build the Operational Journal** (6th layer: raw `(command,output)` + RAG).
