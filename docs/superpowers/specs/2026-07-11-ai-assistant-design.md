@@ -106,8 +106,15 @@ redrobin/
   - Sources: `anthropic.com/engineering/{effective-context-engineering-for-ai-agents, writing-tools-for-agents}`; `platform.claude.com/docs` prompt-caching + tool-runner.
 
 **C. Outputs:**
-- Recommendation shape (why / OPSEC risk / suggested action / confidence / references) + `#advisor-dock` UX (single / stream / attached by `correlation_id`; dismiss / follow-up / accept).
-- Interpretation-writing mechanics (auto-write vs propose-and-confirm per field; attribution/reversal in the UI).
+- ✅ **Recommendation shape — DECIDED: 5 mandatory parts** (each embodies the thesis — advice, not command). New rich type `Recommendation` in `domain/assistant.py` (the existing `suggestions: list[str]` on `Verdict`/`OpsecVerdictEvent` is too thin), emitted as a new `advisor.recommendation` bus event (does not exist yet):
+  1. `suggested_action` — the concrete next step (the WHAT).
+  2. `rationale` — the tradecraft WHY given engagement state (coaching core; without it it's outsourcing).
+  3. `opsec_risk` — detection risk: reuse `Severity` (INFO/WARN/DANGER) + a short reason **grounded in `defenses_observed`**.
+  4. `confidence` — how sure + explicitly what it is NOT sure about (operator calibrates, never blind-trusts).
+  5. `references` — the grounding it drew on (WM facts / KB chunks / Journal moments / L3 episodes); mirrors `operator.answer.citations[]` → verifiable + auditable (anti-hallucination).
+  Plus `correlation_id?` — attaches to the triggering command (reactive) or `None` (proactive). Worked example lives in the brainstorm (Kerberoast `svc_sql`: confirmed-vs-bet honesty, CrowdStrike flagged, sources cited).
+- ⏸️ **`#advisor-dock` UX — DEFERRED (it's UI, premature).** Cards / stream / buttons / colors are decided at build-time of that slice, NOT in the thesis brainstorming (operator flagged the scope drift).
+- 🔑 **Interpretation-writing mechanics** (next) — auto-write vs propose-and-confirm per field (the design, not the UI).
 
 **D. Learning loop:**
 - Feedback mechanics (Chat + `operator.question/answer`); lesson extraction (context-scoped); storage (extend L1? new type? per-engagement vs cross-engagement scope); read-back (tool / cached block).
