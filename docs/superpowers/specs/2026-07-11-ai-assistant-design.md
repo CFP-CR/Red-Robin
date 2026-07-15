@@ -124,8 +124,8 @@ redrobin/
 - **Storage (impl detail, deferred):** likely extend L1 as a new lesson-source (operator-correction) alongside the existing verdict-aggregation `PromotedLesson`.
 
 **E. Safety / quality:**
-- Grounding + scope-safety + anti-hallucination + redaction at the LLM boundary.
-- Failure/degraded/cost/observability (`assistant.*` events).
+- ✅ **Settled (cross-cutting, decided elsewhere):** anti-hallucination via the mandatory `references` field + reasoning over retrieval (not memory) + `confidence` (confirmed vs bet); **scope-safety** = advisory-only, never dispatches to the beacon (read-only by construction); **never-crash + degraded-None** (no API key → assistant silent, daemon boots); **cost** = Haiku for cheap + selective signal-not-noise trigger + token-capped tools; **observability** = `assistant.*` bus events.
+- ⏸️ **DEFERRED to an implementation-time decision (operator, 2026-07-14): exactly what the assistant sends to the LLM (redaction at the boundary).** Not a thesis-level blocker — recorded here as a decision to make when building the LLM-boundary slice. Leading candidate (NOT locked): send secret **metadata** (account / kind / location) but never the secret **value** (hash/password/key), redacted/tokenized at the boundary → OPSEC (client secrets don't leave to a third party) with no loss of reasoning power. Existing infra to build on: `value_redacted_flag` on `credential.observed`.
 
 **F. Scope:**
 - 🔑 The first buildable slice (thesis-first, not "MVP for demo") + build order.
