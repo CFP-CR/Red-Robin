@@ -90,12 +90,20 @@ redrobin/
   - **Conversational** (renamed from "on-demand") — **you** initiate a dialogue: you **ask** ("what's my path to DA?") OR **correct** ("that's too loud") — and correcting is **where it learns** (unifies the pull-query + the feedback/learning loop in one mode).
   Reactive + proactive = the assistant pushes (differ only in the trigger); conversational = the operator pulls/dialogues. **Speed** (fast Haiku vs deep Sonnet) is a **separate axis** from the trigger. All push behind a hard **"signal-not-noise"** gate.
 - ✅ **Relationship to Layer B — DECIDED: absorbed** (its per-command reasoning → the assistant's fast speed, advisory). Synchronous gate eliminated (§1).
-- The two speeds + models (Haiku reactive vs Sonnet/Opus deep); context per cycle (working-set + retrieval). *(still to detail)*
+- The two speeds + models (Haiku reactive vs Sonnet/Opus deep); context per cycle (working-set + retrieval). *(still to detail)* — **constraint from the research:** the two speeds must NOT be a model-swap inside one Tool Runner loop (prompt caches are model-scoped → a mid-loop swap invalidates the whole prefix). The cheap/fast speed runs as a **sub-agent** returning a distilled ~1–2k-token summary (also Anthropic's sub-agent pattern). Also: the runner does not auto-resume `pause_turn` — only relevant if a pull tool is backed by a *server-side* tool (ours are local retrieval, so N/A today).
 
 **B. Tools:**
 - ✅ **Operational Journal — DECIDED: build it** (6th layer, *engagement* axis). Raw `(command,output)` transcript + semantic retrieval; the other layers are distilled/lossy, the Journal is the verbatim record so the assistant can re-read the exact text of any past moment. Material **already exists in `events.jsonl`** → the layer = **index it (Voyage) + a retrieval tool**, not new capture.
 - ✅ **KB — DECIDED: recognized as the already-built knowledge layer** (verified, §5); the assistant treats `KBService.retrieve` as a first-class tool backend (inherited from Layer B's absorption).
-- 🔑 *(still to detail)* the exact retrieval tool set over the layers — L1 lessons, L2 working memory, L3 episodic, L5 summary, KB, Journal: which are tools vs. always-in-context working-set; signatures; top_k/budget.
+- ✅ **Push/pull split — DECIDED, validated against Anthropic's official context-engineering guidance** (research 2026-07-14). It IS Anthropic's endorsed **hybrid** strategy: a small resident working-set + just-in-time retrieval over lightweight identifiers.
+  - **PUSH** (resident working-set, small + token-bounded): **L2 working-memory snapshot** (current state) + **L5 compressed summary** ("story so far"). = Anthropic's "working memory" + compaction pattern.
+  - **PULL** (on-demand retrieval tools): `search_journal` (raw transcript), `kb_retrieve` (tradecraft — backend exists), `search_episodes` (L3), `get_lessons` (L1). Textbook just-in-time; 4 tools = within "few thoughtful tools".
+  - **Refinements to apply at build (from the research):**
+    1. **Caching — do NOT co-locate the mutating snapshot with the cached prefix.** Cache only the FROZEN prefix (system + tool defs + static tradecraft), `cache_control` breakpoint at its end (order tools→system→messages, static-before-dynamic, prefix-match). Put the volatile snapshot/summary AFTER the breakpoint (append as `role:"system"` on Opus 4.8). It's a cache *write* when it changes — not "kept warm" (my earlier framing was wrong).
+    2. **Context-rot guard:** cap the resident set tight — recall degrades as resident tokens grow.
+    3. **Tools:** descriptions must be prescriptive about *when to call* (Opus 4.7/4.8 under-reach for tools); consider consolidating `search_journal`+`search_episodes` (look overlapping); return high-signal excerpts not dumps; cap output (~25k tok); `response_format` concise/detailed enum; actionable errors.
+    4. **Tool Runner hook:** add `cache_control` to large retrieval results via `generate_tool_call_response()`; gate destructive/interpretation-writes via the same hook (no hand-rolled loop).
+  - Sources: `anthropic.com/engineering/{effective-context-engineering-for-ai-agents, writing-tools-for-agents}`; `platform.claude.com/docs` prompt-caching + tool-runner.
 
 **C. Outputs:**
 - Recommendation shape (why / OPSEC risk / suggested action / confidence / references) + `#advisor-dock` UX (single / stream / attached by `correlation_id`; dismiss / follow-up / accept).
