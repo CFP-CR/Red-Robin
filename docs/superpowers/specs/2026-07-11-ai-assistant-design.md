@@ -37,6 +37,13 @@ Follows **Claude Code patterns** (not the harness): agent-with-tools; progressiv
 
 **The synchronous pre-flight gate is eliminated (see §1).** So: **Layer B** is absorbed into the assistant (advisory, not a gate verdict). **Layer A** (fast deterministic Sigma rules) loses its only real value (the sync BLOCK) → it is either removed or demoted to a cheap advisory signal the assistant can use as an input — NOT a gate. The `.cna` **capture** stays. The writer-split keeps the writers non-overlapping: enricher = observation, operator/yaml = definition, assistant = interpretation. No refactor of enricher/summarizer/promoter.
 
+**Why enricher/summarizer are NOT merged into the assistant (decided 2026-07-14, verified in code).** They are *not* "agents" in the assistant's sense — they are **single-shot LLM transforms** (`EnricherLLM.extract` is one call, no tool loop; `enrichment/llm.py`), on a **high-frequency, critical, always-on** path. The assistant is a **selective, expensive, agentic (tool-loop)** reasoner. Keep them separate because:
+1. **Frequency × cost** — the enricher fires on **every** `beacon.command_output` (`enricher.py:83-86`) on cheap Haiku. Doing that inside the assistant = a full Opus/Sonnet tool-loop per command → cost/latency blow-up.
+2. **Writer-split integrity** — the enricher is the *independent observer* that gives the assistant objective facts to reason over. One brain doing extraction **and** interpretation = the assistant reasoning over facts it wrote with its own spin → compounding error.
+3. **Never-crash / degraded** — the enricher catches every exception (`enricher.py:87-88`) and runs degraded without an API key (`llm.py:36-38`); WM population must survive the assistant being down/rate-limited.
+4. **Latency** — WM must be fresh fast (one Haiku call), not gated behind a slow tool-loop.
+They already **share** client/bus/repos/patterns (why they co-locate in `application/agents/`) — cohesion without collapse. **The assistant CONSUMES what they produce; it does not replace them.** (Note: only the assistant is a true agent; enricher/summarizer are LLM transforms — the `agents/` folder name is loose.)
+
 ## 4. File / folder structure — `application/agents/` (cohesion within the layer)
 
 All autonomous AI agents grouped under **`application/agents/`** for clarity, WITHOUT breaking the layered import-linter contracts (it stays `redrobin.application.*`, so the 4 contracts hold unchanged). Pure types stay in `domain/`; Anthropic clients stay in `infrastructure/llm/`. **Layer B stays in the verdict pipeline** (it's a synchronous gate engine, not an autonomous agent).
@@ -72,6 +79,7 @@ redrobin/
 - **Live-state-into-reasoning:** Layer B has a reserved `dynamic_state=""` — unused.
 - **Advisory content almost exists:** Layer B's `suggestions[]` are dropped before the bus.
 - **Memory:** L2/L3/L5 fully built; **L1 written-but-never-read** (feedback-learning closes it); **L4 tradecraft graph NOT built** (grounding-in-tradecraft is via the KB/RAG: `KBService.retrieve`, one flat numpy Voyage index — scale ceiling, v0.2 pgvector).
+- **KB is the built knowledge/tradecraft layer (verified in code 2026-07-14).** `KBService.retrieve` (Voyage embeddings + `VectorStore` numpy cosine, persisted `.npz` at `~/.redrobin/shared/kb-index/`) over **curated markdown** (`kb add`/`kb ingest`; ID e.g. `vault/Techniques/mimikatz.md#chunk_0`) — the *cross-op, authored* knowledge axis, distinct from the *auto-captured engagement* stores (L2/L3/L5/Journal). It is what L4-the-graph was meant to do, done as RAG → **L4 is redundant: retire / mark superseded by the KB** (decision separate from the assistant). Today `KBService` is *"called by Layer B for RAG context"* → since Layer B is absorbed, **the assistant inherits the KB as a first-class retrieval backend that already works.**
 
 ## 6. OPEN decisions (still to decide in the brainstorming)
 
@@ -85,7 +93,9 @@ redrobin/
 - The two speeds + models (Haiku reactive vs Sonnet/Opus deep); context per cycle (working-set + retrieval). *(still to detail)*
 
 **B. Tools:**
-- 🔑 The retrieval tool set (over which layers/KB); **whether to build the Operational Journal** (6th layer: raw `(command,output)` + RAG).
+- ✅ **Operational Journal — DECIDED: build it** (6th layer, *engagement* axis). Raw `(command,output)` transcript + semantic retrieval; the other layers are distilled/lossy, the Journal is the verbatim record so the assistant can re-read the exact text of any past moment. Material **already exists in `events.jsonl`** → the layer = **index it (Voyage) + a retrieval tool**, not new capture.
+- ✅ **KB — DECIDED: recognized as the already-built knowledge layer** (verified, §5); the assistant treats `KBService.retrieve` as a first-class tool backend (inherited from Layer B's absorption).
+- 🔑 *(still to detail)* the exact retrieval tool set over the layers — L1 lessons, L2 working memory, L3 episodic, L5 summary, KB, Journal: which are tools vs. always-in-context working-set; signatures; top_k/budget.
 
 **C. Outputs:**
 - Recommendation shape (why / OPSEC risk / suggested action / confidence / references) + `#advisor-dock` UX (single / stream / attached by `correlation_id`; dismiss / follow-up / accept).
