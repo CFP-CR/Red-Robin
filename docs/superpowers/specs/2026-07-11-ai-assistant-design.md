@@ -1,6 +1,6 @@
 # AI Assistant — Design (brainstorming CLOSED 2026-07-16 · ready for writing-plans)
 
-- **Status:** ✅ **Brainstorming COMPLETE** (closed 2026-07-16, branch `feat-ai-assistant` off `dev`). All §6 design decisions are closed — this is the approved design. A few items are explicitly deferred to implementation-time (`#advisor-dock` UX, LLM-boundary redaction, lesson-storage impl) — noted in place, not blockers. **Next per AI-DLC: `writing-plans`** (executable plan in `docs/superpowers/plans/`) → `auditing-plans` → `subagent-driven-development`.
+- **Status:** ✅ **Brainstorming COMPLETE** (closed 2026-07-16, branch `feat-ai-assistant` off `dev`). All §6 design decisions are closed — this is the approved design. A few items are explicitly deferred to implementation-time (`#advisor-dock` UX polish, lesson-storage impl, D1 anthropic-floor) — noted in place, not blockers. **Next per AI-DLC: `writing-plans`** (executable plan in `docs/superpowers/plans/`) → `auditing-plans` → `subagent-driven-development`.
 - **North star:** augment-not-replace, operator-better. NOT driven by the DEF CON demo/timeline.
 - **Scope bar (operator-confirmed 2026-07-11):** **production-grade and COMPLETE — NOT MVP / v1→v2 phasing.** The design targets the full production-quality assistant (all modes, all quality: never-crash, degraded, cost-controlled, observable, tested, OPSEC-safe). It is *built* incrementally (AI-DLC slices, each production-quality), never shipped as a stripped-down first version.
 - **Pillars — the bar every decision is judged against:** **① Scalability** — new capabilities plug into the skeleton's seams (tool registry / `AgentLLM` Protocol / typed events), no re-architecture (§2, §4, §6.F). **② Maintainability** — clean layered arch, one ABC, facades, native-not-Agent-SDK, never-crash / degraded-None (CONTRIBUTING + `.claude/rules/architecture.md`). **③ Clarity** — code a human dev reads and understands, *and* the assistant itself **explains the why** (the thesis, §1). Any decision that trades these three away for speed is off-spec.
@@ -101,11 +101,12 @@ The exhaustive per-file change list is the `writing-plans` deliverable.
 **A. The brain:**
 - ✅ **Trigger model — DECIDED: three modes, all in** (production-grade, not phased), framed by *who initiates*:
   - **Reactive** — the assistant speaks, triggered by an **event** (your command / output).
-  - **Proactive** — the assistant speaks, **self-triggered** on its own cadence (watch-your-back — the value neither of the others catches).
+  - **Proactive** — the assistant speaks, **self-triggered** on its own cadence (watch-your-back — the value neither of the others catches). ✅ **Cadence DECIDED: a simple debounced background check** — fires on a **lull** (no new beacon output for ~`X` min) OR a **material state-change** (a high-value finding / a phase boundary), passes the **same** signal-not-noise gate, **rate-limited** to ≤ 1 proactive utterance / `N` min. *Watch-your-back* signal = accumulated OPSEC risk not yet addressed / a stalled objective / an untaken opportunity. `X`, `N` are tunable settings (not hardcoded). **No fixed timer, no scheduler.**
   - **Conversational** (renamed from "on-demand") — **you** initiate a dialogue: you **ask** ("what's my path to DA?") OR **correct** ("that's too loud") — and correcting is **where it learns** (unifies the pull-query + the feedback/learning loop in one mode).
   Reactive + proactive = the assistant pushes (differ only in the trigger); conversational = the operator pulls/dialogues. **Speed** (fast Haiku vs deep Sonnet) is a **separate axis** from the trigger. All push behind a hard **"signal-not-noise"** gate.
+- ✅ **Signal-not-noise gate (`triggers.py`) — DECIDED: a simple cheap→expensive cascade.** (a) Deterministic cheap filters first — **dedup** (don't repeat a recommendation already shown for the same finding / correlation), **cooldown** (a min interval), **novelty** (speak only if state changed since the last utterance); then (b) a **model-assessed materiality threshold** (stays silent unless it has something material). That's it — testable per §8.
 - ✅ **Relationship to Layer B — DECIDED: absorbed** (its per-command reasoning → the assistant's fast speed, advisory). Synchronous gate eliminated (§1).
-- The two speeds + models (Haiku reactive vs Sonnet/Opus deep); context per cycle (working-set + retrieval). *(still to detail)* — **constraint from the research:** the two speeds must NOT be a model-swap inside one Tool Runner loop (prompt caches are model-scoped → a mid-loop swap invalidates the whole prefix). The cheap/fast speed runs as a **sub-agent** returning a distilled ~1–2k-token summary (also Anthropic's sub-agent pattern). Also: the runner does not auto-resume `pause_turn` — only relevant if a pull tool is backed by a *server-side* tool (ours are local retrieval, so N/A today).
+- ✅ **The two speeds + models — DECIDED mapping** (two clearly-separated paths): **Haiku = the fast path** — reactive + proactive per-output commentary (the absorbed Layer B speed). **Sonnet/Opus = deep reasoning, invoked as a SUB-AGENT** (not a mid-loop model-swap) for conversational-deep questions ("what's my path to DA?"), high-stakes interpretation-writes, or when the fast path explicitly flags "this needs deeper analysis." **Escalation trigger** = the fast path requests it OR the operator asks. Context per cycle = working-set + retrieval. **Constraint from the research:** the two speeds must NOT be a model-swap inside one Tool Runner loop (prompt caches are model-scoped → a mid-loop swap invalidates the whole prefix). The cheap/fast speed runs as a **sub-agent** returning a distilled ~1–2k-token summary (also Anthropic's sub-agent pattern). Also: the runner does not auto-resume `pause_turn` — only relevant if a pull tool is backed by a *server-side* tool (ours are local retrieval, so N/A today).
 
 **B. Tools:**
 - ✅ **Operational Journal — DECIDED: build it** (6th layer, *engagement* axis). Raw `(command,output)` transcript + semantic retrieval; the other layers are distilled/lossy, the Journal is the verbatim record so the assistant can re-read the exact text of any past moment. Material **already exists in `events.jsonl`** — but as **two separate events** (`beacon.command_input.command/raw` + `beacon.command_output.output`) correlated by `correlation_id`, NOT a combined tuple, so the Journal must **join them by `correlation_id`** (the pattern the enricher's `_cmd_by_corr` cache already uses) → the layer = **index it (Voyage) + a retrieval tool**, not new capture.
@@ -140,7 +141,7 @@ The exhaustive per-file change list is the `writing-plans` deliverable.
 
 **E. Safety / quality:**
 - ✅ **Settled (cross-cutting, decided elsewhere):** anti-hallucination via the mandatory `references` field + reasoning over retrieval (not memory) + `confidence` (confirmed vs bet); **scope-safety** = advisory-only, never dispatches to the beacon (read-only by construction); **never-crash + degraded-None** (no API key → assistant silent, daemon boots); **cost** = Haiku for cheap + selective signal-not-noise trigger + token-capped tools; **observability** = `assistant.*` bus events.
-- ⏸️ **DEFERRED to an implementation-time decision (operator, 2026-07-14): exactly what the assistant sends to the LLM (redaction at the boundary).** Not a thesis-level blocker — recorded here as a decision to make when building the LLM-boundary slice. Leading candidate (NOT locked): send secret **metadata** (account / kind / location) but never the secret **value** (hash/password/key), redacted/tokenized at the boundary → OPSEC (client secrets don't leave to a third party) with no loss of reasoning power. Existing infra to build on: `value_redacted_flag` on `credential.observed`.
+- ✅ **LLM-boundary redaction — DECIDED (operator, 2026-07-14): secret metadata YES, secret value NEVER.** At the LLM boundary each secret **value** (hash / password / key) is replaced with a **stable handle** — the assistant reasons about "the `svc_reports` credential" by handle, never seeing the value; account / kind / location still pass. Standard **tokenization-at-the-trust-boundary**, built on the existing `value_redacted_flag` on `credential.observed`. **No vault, no crypto ceremony.**
 
 **F. Scope — DECIDED: first slice = skeleton-complete + minimal-live-capability.**
 - **Principle (production-grade + scalable):** the first slice is **narrow-in-capability but complete-in-architecture** — it lays the FINAL extensible seams (`AgentLLM` Protocol, **tool registry**, push/pull memory contract, typed-event output, degraded lifecycle wiring), each production-quality, **PROVEN end-to-end by one real capability**. NOT empty scaffolding-then-features (the unvalidated horizontal anti-pattern), NOT a throwaway spike, NOT a heavy framework. The capability validates the skeleton; later slices **plug in** (register a tool / add a trigger / add an output handler) without re-architecting.
@@ -161,7 +162,7 @@ The exhaustive per-file change list is the `writing-plans` deliverable.
 **Global DoD** — the whole assistant is "done" when:
 - All slices shipped; all **3 trigger modes** (reactive / proactive / conversational) working (§6.A).
 - **Thesis satisfied** — advisory-only (never dispatches), explains the WHY, learns from correction, operator decides (§1).
-- **OPSEC-safe** — the LLM-boundary redaction decision resolved (§6.E, §10).
+- **OPSEC-safe** — the LLM-boundary redaction decision resolved (§6.E).
 - The **3 pillars** upheld — scalability / maintainability / clarity (Pillars).
 
 ## 8. Test strategy
@@ -198,14 +199,10 @@ Grounded in `development-workflow.md`'s two acceptance forms.
 
 Each is a DOCUMENTED decision to make later — NOT an open design question; **none blocks slice 1.**
 
-- ⏸️ **LLM-boundary redaction** — candidate: secret *metadata* yes, secret *value* never; build on infra `value_redacted_flag` on `credential.observed` (§6.E).
 - ⏸️ **`#advisor-dock` visual polish + later-capability affordances** — dismiss / ask / ack → the conversational slice; the confirm affordance → the interpretation-write slice (§6.C).
 - ⏸️ **Lesson storage impl** — extend L1 as a new lesson-source (operator-correction) vs a new type (§6.D).
 - ⏸️ **D1 — raise the `pyproject.toml` `anthropic` floor** above `>=0.60.0` (`pyproject.toml:10`); the locked `uv.lock` = 0.100.0 has `tool_runner`, but a fresh resolve could land on a 0.6x lacking it (§2 audit D1).
 - ⏸️ **L4 tradecraft-graph retirement** — a separate decision; the KB supersedes it (§5).
-- ⏸️ **Two-speeds mapping** — which trigger → Haiku vs Sonnet; the deep speed = a **sub-agent**, not a mid-loop model-swap (caches are model-scoped) — already decided (§6.A).
-- ⏸️ **Proactive-mode cadence** — the self-trigger interval + the watch-your-back signal (§6.A).
-- ⏸️ **The signal-not-noise heuristic** in `triggers.py` (§4, §6.A).
 - ⏸️ **Whether a recommendation's dismiss/ack feeds the learning loop** — weak signal (§6.D).
 
 ---
