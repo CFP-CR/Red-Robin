@@ -1,4 +1,4 @@
-# AI Assistant — Design (WIP, brainstorming in progress)
+# AI Assistant — Design (brainstorming CLOSED 2026-07-16 · ready for writing-plans)
 
 - **Status:** ✅ **Brainstorming COMPLETE** (closed 2026-07-16, branch `feat-ai-assistant` off `dev`). All §6 design decisions are closed — this is the approved design. A few items are explicitly deferred to implementation-time (`#advisor-dock` UX, LLM-boundary redaction, lesson-storage impl) — noted in place, not blockers. **Next per AI-DLC: `writing-plans`** (executable plan in `docs/superpowers/plans/`) → `auditing-plans` → `subagent-driven-development`.
 - **North star:** augment-not-replace, operator-better. NOT driven by the DEF CON demo/timeline.
@@ -70,6 +70,18 @@ redrobin/
 └── tui/textual_ui/advisor.py               # advisor.recommendation handler → #advisor-dock
 ```
 
+**Also touched — the tree above is the target LAYOUT (new + moved files), NOT the exhaustive change manifest.** Beyond the new/moved files, these existing files are MODIFIED:
+- `application/working_memory_reducer.py` — add a `_dispatch` case for the `engagement.milestone` interpretation channel (the reducer's `_dispatch` is an if/elif on event type, `working_memory_reducer.py:111`).
+- `tui/textual_ui/app.py` — register an `advisor.recommendation` frame handler, mirroring the `working_memory_snapshot` handler at `app.py:173`, + surface the dock.
+- `tui/textual_ui/theme.tcss` — un-hide `#advisor-dock` (currently `display: none` near `theme.tcss:50`).
+- `infrastructure/config.py` — assistant `Settings` (model / trigger cadence / token budget / enable / degraded), mirroring `enrichment_model` + `allow_degraded_layer_b` (`config.py:63,84`).
+- `domain/events.py` (+ possibly a `protocol/schemas/v0.1/events/` entry) — register the `advisor.recommendation` event type (`engagement.milestone` already exists at `events.py:121`; `advisor.recommendation` does NOT) — **confirm in plan**.
+- `pyproject.toml` — raise the `anthropic` floor above `>=0.60.0` (`pyproject.toml:10`; audit D1).
+- **enricher/summarizer MOVE ripples** to every import site — `api/lifespan_helpers.py` uses `start_enricher`/`start_l5_summarizer` (`lifespan_helpers.py:496,446`), plus their tests (`tests/integration/test_enricher.py`, `test_l5_summary.py`, `tests/unit/enrichment/*`).
+- Plus **NEW tests** under `tests/unit/` + `tests/integration/`.
+
+The exhaustive per-file change list is the `writing-plans` deliverable.
+
 **Sequencing (decided):** the move of the existing agents into `application/agents/` is a SMALL, INDEPENDENT refactor of working/tested code (needs none of the assistant's open decisions). Do it as its OWN atomic change — a `refactor:` commit, acceptance = the 5 CI gates (deterministic logic → no beacon smoke) — BEFORE the assistant lands in the ready home. It is NOT "step 1" of the assistant feature (keep the reorg and the new-feature build as separate, independently-reviewable changes).
 
 ## 5. Pre-wired seams (from the 2026-07-11 code discovery)
@@ -134,6 +146,67 @@ redrobin/
 - **Principle (production-grade + scalable):** the first slice is **narrow-in-capability but complete-in-architecture** — it lays the FINAL extensible seams (`AgentLLM` Protocol, **tool registry**, push/pull memory contract, typed-event output, degraded lifecycle wiring), each production-quality, **PROVEN end-to-end by one real capability**. NOT empty scaffolding-then-features (the unvalidated horizontal anti-pattern), NOT a throwaway spike, NOT a heavy framework. The capability validates the skeleton; later slices **plug in** (register a tool / add a trigger / add an output handler) without re-architecting.
 - **The first slice = "Reactive grounded recommendation":** trigger on `enrichment.completed` (already fires) → the Tool Runner agent loop reads the push working-set (L2+L5, built) → calls `kb_retrieve` (KB backend exists) → emits a 5-part `advisor.recommendation` to the bus → the pre-wired `#advisor-dock` renders it. Production-quality: never-crash, degraded-None, tested, grounded.
 - **Deferred to later slices** (each plugs into the skeleton): Operational Journal + its tool; proactive mode; conversational mode + learning loop; interpretation-write + propose-and-confirm; remaining pull tools (episodes / lessons); two-speeds / subagent; the deferred impl decisions (dock UX, LLM-boundary redaction).
+
+## 7. Definition of Done (DoD)
+
+**Per-slice DoD** — every slice must meet ALL:
+- ✅ **The 5 CI gates green** — `uv run ruff check .`, `ruff format --check .`, `mypy redrobin/domain redrobin/application`, `lint-imports --config importlinter.cfg`, `pytest tests/` (per `CLAUDE.md`).
+- ✅ **TDD (red→green)** — the failing test written first, verified red, implemented, verified green, and passing (CONTRIBUTING).
+- ✅ **Never-crash + degraded-None** — no `ANTHROPIC_API_KEY` → the assistant is silent/None, the daemon still boots (mirror the enricher: degraded without a key `llm.py:36-38`, catches every exception `enricher.py:87-88`); an exception in a cycle → logged, daemon survives.
+- ✅ **Observability** — `assistant.*` bus events emitted (§6.E).
+- ✅ **End-to-end** — the slice's capability demonstrated end-to-end (a real capability validating the seams, not scaffolding — §6.F).
+- ✅ **Operator smoke for the live surface** — anything on the **live surface** (the `#advisor-dock` render, the TUI, enricher/reducer over a real beacon) → an **operator smoke** (skill `smoke-test`); CI cannot exercise these (`development-workflow.md` §5).
+- ✅ **Atomic conventional commits, no AI co-author trailer** (CONTRIBUTING).
+
+**Global DoD** — the whole assistant is "done" when:
+- All slices shipped; all **3 trigger modes** (reactive / proactive / conversational) working (§6.A).
+- **Thesis satisfied** — advisory-only (never dispatches), explains the WHY, learns from correction, operator decides (§1).
+- **OPSEC-safe** — the LLM-boundary redaction decision resolved (§6.E, §10).
+- The **3 pillars** upheld — scalability / maintainability / clarity (Pillars).
+
+## 8. Test strategy
+
+Grounded in `development-workflow.md`'s two acceptance forms.
+
+**(a) Deterministic logic → unit + integration; the 5 CI gates ARE the acceptance (no beacon).** Covers the agentic-loop orchestration, each retrieval tool, lesson context-scoping (engagement vs operator), the triggers / signal-not-noise gate, redaction, recommendation assembly → `tests/unit/…` + `tests/integration/…` (layout per CONTRIBUTING).
+
+**(b) Live surface → operator smoke ONLY (CI can't drive these).** The dock rendering a real recommendation, the TUI, the reducer/enricher over real beacon output → skill `smoke-test` (`development-workflow.md` §5).
+
+**Concrete test types:**
+- **LLM boundary mocked** via the `AgentLLM` Protocol — a fake client in tests (like `EnricherLLM`; cf. `tests/unit/enrichment/test_llm.py`).
+- **Per-tool tests** over a seeded repo (KB / Journal / L3 / L1 fixtures).
+- **Lesson-scope tests** — `engagement`-scoped dies with the op; `operator`-scoped persists (§6.D).
+- **Trigger-gate tests** — signal-not-noise: speaks on signal, silent on noise (§6.A).
+- **Degraded-mode test** — missing API key → None, daemon boots.
+- **Never-crash test** — an exception in a cycle → logged, daemon survives.
+
+`mypy --strict` covers the assistant's `domain/` + `application/` code (strict scope per CONTRIBUTING / `architecture.md`). Adapter tests are **separate** (`adapters/<name>/tests/`) and **N/A** here — the assistant is core, not an adapter.
+
+## 9. Non-goals / out of scope
+
+- **NOT autonomous** — advisory-only, never dispatches to the beacon (read-only by construction, §1).
+- **NOT the Claude Agent SDK** — native Tool Runner behind the `AgentLLM` Protocol (§2).
+- **NOT a synchronous pre-flight gate** — eliminated; all reasoning advisory (§1, §3).
+- **NOT multi-user / persistent server sessions** — continuity lives in the memory layers, not a live agent session (§6.C).
+- **NOT a web frontend** — Textual TUI only (§6.C).
+- **Does NOT replace or refactor the enricher/summarizer** — it CONSUMES them (§3).
+- **Does NOT build L4** — the tradecraft graph is retired, superseded by the KB (§5).
+- **NOT polished UX in slice 1** — functional/plain dock, polish later (§6.C, §6.F).
+- **The Journal is NOT new data capture** — it indexes the existing `events.jsonl` (§6.B).
+
+## 10. Deferred decisions & still-to-detail
+
+Each is a DOCUMENTED decision to make later — NOT an open design question; **none blocks slice 1.**
+
+- ⏸️ **LLM-boundary redaction** — candidate: secret *metadata* yes, secret *value* never; build on infra `value_redacted_flag` on `credential.observed` (§6.E).
+- ⏸️ **`#advisor-dock` visual polish + later-capability affordances** — dismiss / ask / ack → the conversational slice; the confirm affordance → the interpretation-write slice (§6.C).
+- ⏸️ **Lesson storage impl** — extend L1 as a new lesson-source (operator-correction) vs a new type (§6.D).
+- ⏸️ **D1 — raise the `pyproject.toml` `anthropic` floor** above `>=0.60.0` (`pyproject.toml:10`); the locked `uv.lock` = 0.100.0 has `tool_runner`, but a fresh resolve could land on a 0.6x lacking it (§2 audit D1).
+- ⏸️ **L4 tradecraft-graph retirement** — a separate decision; the KB supersedes it (§5).
+- ⏸️ **Two-speeds mapping** — which trigger → Haiku vs Sonnet; the deep speed = a **sub-agent**, not a mid-loop model-swap (caches are model-scoped) — already decided (§6.A).
+- ⏸️ **Proactive-mode cadence** — the self-trigger interval + the watch-your-back signal (§6.A).
+- ⏸️ **The signal-not-noise heuristic** in `triggers.py` (§4, §6.A).
+- ⏸️ **Whether a recommendation's dismiss/ack feeds the learning loop** — weak signal (§6.D).
 
 ---
 
