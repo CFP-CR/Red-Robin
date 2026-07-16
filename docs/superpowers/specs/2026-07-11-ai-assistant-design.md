@@ -1,6 +1,6 @@
 # AI Assistant — Design (WIP, brainstorming in progress)
 
-- **Status:** 🚧 WIP — brainstorming (started 2026-07-11, branch `feat-ai-assistant` off `dev`). This is a **living decisions log**, NOT yet an approved spec. Open decisions listed at the end; the final spec + implementation plan come after the brainstorming closes.
+- **Status:** ✅ **Brainstorming COMPLETE** (closed 2026-07-16, branch `feat-ai-assistant` off `dev`). All §6 design decisions are closed — this is the approved design. A few items are explicitly deferred to implementation-time (`#advisor-dock` UX, LLM-boundary redaction, lesson-storage impl) — noted in place, not blockers. **Next per AI-DLC: `writing-plans`** (executable plan in `docs/superpowers/plans/`) → `auditing-plans` → `subagent-driven-development`.
 - **North star:** augment-not-replace, operator-better. NOT driven by the DEF CON demo/timeline.
 - **Scope bar (operator-confirmed 2026-07-11):** **production-grade and COMPLETE — NOT MVP / v1→v2 phasing.** The design targets the full production-quality assistant (all modes, all quality: never-crash, degraded, cost-controlled, observable, tested, OPSEC-safe). It is *built* incrementally (AI-DLC slices, each production-quality), never shipped as a stripped-down first version.
 
@@ -127,8 +127,10 @@ redrobin/
 - ✅ **Settled (cross-cutting, decided elsewhere):** anti-hallucination via the mandatory `references` field + reasoning over retrieval (not memory) + `confidence` (confirmed vs bet); **scope-safety** = advisory-only, never dispatches to the beacon (read-only by construction); **never-crash + degraded-None** (no API key → assistant silent, daemon boots); **cost** = Haiku for cheap + selective signal-not-noise trigger + token-capped tools; **observability** = `assistant.*` bus events.
 - ⏸️ **DEFERRED to an implementation-time decision (operator, 2026-07-14): exactly what the assistant sends to the LLM (redaction at the boundary).** Not a thesis-level blocker — recorded here as a decision to make when building the LLM-boundary slice. Leading candidate (NOT locked): send secret **metadata** (account / kind / location) but never the secret **value** (hash/password/key), redacted/tokenized at the boundary → OPSEC (client secrets don't leave to a third party) with no loss of reasoning power. Existing infra to build on: `value_redacted_flag` on `credential.observed`.
 
-**F. Scope:**
-- 🔑 The first buildable slice (thesis-first, not "MVP for demo") + build order.
+**F. Scope — DECIDED: first slice = skeleton-complete + minimal-live-capability.**
+- **Principle (production-grade + scalable):** the first slice is **narrow-in-capability but complete-in-architecture** — it lays the FINAL extensible seams (`AgentLLM` Protocol, **tool registry**, push/pull memory contract, typed-event output, degraded lifecycle wiring), each production-quality, **PROVEN end-to-end by one real capability**. NOT empty scaffolding-then-features (the unvalidated horizontal anti-pattern), NOT a throwaway spike, NOT a heavy framework. The capability validates the skeleton; later slices **plug in** (register a tool / add a trigger / add an output handler) without re-architecting.
+- **The first slice = "Reactive grounded recommendation":** trigger on `enrichment.completed` (already fires) → the Tool Runner agent loop reads the push working-set (L2+L5, built) → calls `kb_retrieve` (KB backend exists) → emits a 5-part `advisor.recommendation` to the bus → the pre-wired `#advisor-dock` renders it. Production-quality: never-crash, degraded-None, tested, grounded.
+- **Deferred to later slices** (each plugs into the skeleton): Operational Journal + its tool; proactive mode; conversational mode + learning loop; interpretation-write + propose-and-confirm; remaining pull tools (episodes / lessons); two-speeds / subagent; the deferred impl decisions (dock UX, LLM-boundary redaction).
 
 ---
 
