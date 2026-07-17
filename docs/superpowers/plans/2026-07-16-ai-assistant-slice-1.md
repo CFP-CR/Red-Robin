@@ -40,12 +40,14 @@ Files created / modified for THIS unit (target layout — new + moved + touched)
 - Move `redrobin/application/summarizer.py` → `redrobin/application/agents/summarizer.py`.
 - Create `redrobin/application/agents/__init__.py` (empty package marker).
 - Modify import sites: `redrobin/api/lifespan_helpers.py` (3 imports), `redrobin/application/longterm_lifecycle.py:19`, and the enricher self-imports in `redrobin/application/agents/enricher/enricher.py` (5).
+- Fix the stale docstring path in `redrobin/application/working_memory_reducer.py` (`application/enrichment/enricher.py` → `application/agents/enricher/enricher.py`).
 - Move tests `tests/unit/enrichment/` → `tests/unit/agents/enricher/` (6 files) + fix imports; fix imports in `tests/integration/test_enricher.py`, `tests/integration/test_l5_summary.py`.
-- Modify `pyproject.toml` (`anthropic>=0.60.0` → `>=0.100.0`).
+- Create `tests/unit/agents/__init__.py` (empty — the new parent test dir must be a package, like every other test dir).
+- Modify `pyproject.toml` (`anthropic>=0.60.0` → `>=0.100.0`) + re-lock (`uv lock`), committing `uv.lock` alongside.
 
 **Slice 1 — the feature (each file has ONE responsibility):**
 - Create `redrobin/domain/assistant.py` — pure types: `Recommendation` (5 mandatory parts + `to_payload`), `AgentTool`.
-- Create `redrobin/infrastructure/llm/anthropic_client.py` **additions** — `AnthropicAgentClient` (Tool Runner impl of `AgentLLM`) + `_to_runner_tool` + `_first_text`.
+- Modify `redrobin/infrastructure/llm/anthropic_client.py` — hoist 3 new imports into the top block, then append `AnthropicAgentClient` (Tool Runner impl of `AgentLLM`) + `_to_runner_tool` + `_first_text` (no mid-file imports — ruff E402).
 - Create `redrobin/application/agents/assistant/__init__.py`.
 - Create `redrobin/application/agents/assistant/llm.py` — `AgentLLM` Protocol + `build_agent_llm` degraded factory.
 - Create `redrobin/application/agents/assistant/tools.py` — `build_kb_service` + `build_tool_registry` (the `kb_retrieve` tool).
@@ -75,11 +77,13 @@ A small, independent refactor of working/tested code + the D1 dependency bump. N
 - Move: `redrobin/application/summarizer.py` → `redrobin/application/agents/summarizer.py`
 - Create: `redrobin/application/agents/__init__.py`
 - Modify: `redrobin/application/agents/enricher/enricher.py:18-22` (self-imports)
+- Modify: `redrobin/application/working_memory_reducer.py:15` (stale docstring path — M5)
 - Modify: `redrobin/api/lifespan_helpers.py:31-32,45`
 - Modify: `redrobin/application/longterm_lifecycle.py:19`
 - Move: `tests/unit/enrichment/` → `tests/unit/agents/enricher/` (+ fix imports in all 6 files)
+- Create: `tests/unit/agents/__init__.py` (empty — new parent test-dir package marker)
 - Modify: `tests/integration/test_enricher.py:10`, `tests/integration/test_l5_summary.py:36`
-- Modify: `pyproject.toml:10`
+- Modify: `pyproject.toml:10` (+ `uv lock` → commit `uv.lock`)
 
 **Interfaces:**
 - Consumes: nothing new.
@@ -126,12 +130,28 @@ In `redrobin/application/longterm_lifecycle.py` change line 19:
 from redrobin.application.agents.summarizer import L5LLM
 ```
 
+Also fix the stale module path in the `redrobin/application/working_memory_reducer.py` docstring (line 15) — it names the pre-refactor path in prose only, so this is a truthfulness fix with zero code/behaviour change. Replace:
+
+```python
+(``redrobin/application/enrichment/enricher.py``), a separate bus consumer that
+```
+
+with:
+
+```python
+(``redrobin/application/agents/enricher/enricher.py``), a separate bus consumer that
+```
+
 - [ ] **Step 4: Move the enricher tests and fix all test imports**
 
 ```bash
 mkdir -p tests/unit/agents
+printf '' > tests/unit/agents/__init__.py   # new parent test dir must be a package (D2)
+git add tests/unit/agents/__init__.py
 git mv tests/unit/enrichment tests/unit/agents/enricher
 ```
+
+(The `git mv` of the directory carries `tests/unit/enrichment/__init__.py` along as `tests/unit/agents/enricher/__init__.py`, so only the new parent `tests/unit/agents/__init__.py` needs creating.)
 
 Then update the import in each moved file — replace every `redrobin.application.enrichment.` with `redrobin.application.agents.enricher.`:
 - `tests/unit/agents/enricher/test_sanitize.py`, `test_trigger.py`, `test_llm.py`, `test_parser.py`, `test_command_recovery.py`, `test_chunker.py`
@@ -163,7 +183,7 @@ Expected: all PASS. If `mypy`/`import-linter`/`pytest` report an unresolved `red
 - [ ] **Step 6: Commit the refactor**
 
 ```bash
-git add redrobin/application/agents redrobin/api/lifespan_helpers.py redrobin/application/longterm_lifecycle.py tests/unit/agents tests/integration/test_enricher.py tests/integration/test_l5_summary.py
+git add redrobin/application/agents redrobin/application/working_memory_reducer.py redrobin/api/lifespan_helpers.py redrobin/application/longterm_lifecycle.py tests/unit/agents tests/integration/test_enricher.py tests/integration/test_l5_summary.py
 git commit -m "refactor(agents): move enrichment + summarizer under application/agents/"
 ```
 
@@ -173,6 +193,12 @@ In `pyproject.toml` change the dependency line (currently line 10) from `"anthro
 
 ```toml
     "anthropic>=0.100.0",
+```
+
+Then re-lock so `uv.lock` records the new floor and the commit stays atomic (the lock already pins 0.100.0, so this re-resolves nothing — it only keeps `pyproject.toml` + `uv.lock` consistent):
+
+```bash
+uv lock
 ```
 
 - [ ] **Step 8: Verify the locked version satisfies the floor and ships the Tool Runner helpers**
@@ -187,7 +213,7 @@ Expected: prints `0.100.0` then `tool_runner helpers OK`. (The lock already pins
 - [ ] **Step 9: Commit the floor bump**
 
 ```bash
-git add pyproject.toml
+git add pyproject.toml uv.lock
 git commit -m "build(deps): raise anthropic floor to >=0.100.0 for tool_runner (D1)"
 ```
 
@@ -202,7 +228,7 @@ git commit -m "build(deps): raise anthropic floor to >=0.100.0 for tool_runner (
 **Interfaces:**
 - Consumes: `Severity` from `redrobin.domain.events`.
 - Produces:
-  - `Recommendation(suggested_action: str, rationale: str, opsec_risk: Severity, confidence: str, references: list[str] = [], correlation_id: str | None = None)` with `to_payload() -> dict[str, Any]` (serializes `opsec_risk` to its `.value` string).
+  - `Recommendation(suggested_action: str, rationale: str, opsec_risk: Severity, confidence: str, references: list[str] = field(default_factory=list), correlation_id: str | None = None)` with `to_payload() -> dict[str, Any]` (serializes `opsec_risk` to its `.value` string).
   - `AgentTool(name: str, description: str, input_schema: dict[str, Any], handler: Callable[[dict[str, Any]], Awaitable[str]])`.
 
 - [ ] **Step 1: Write the failing test**
@@ -349,9 +375,9 @@ git commit -m "feat(assistant): add Recommendation + AgentTool domain types"
 The infrastructure adapter. Appends to the existing `anthropic_client.py` (co-located with `AnthropicClient` / `AnthropicEnricherClient`). The network `run()` is not unit-tested (like `AnthropicEnricherClient.extract` isn't) — the deterministic surfaces (`_to_runner_tool`, `_first_text`) are. Infra is gradual-typed (`disallow_untyped_defs = false`), so loose `Any` typing is fine.
 
 **Files:**
-- Modify: `redrobin/infrastructure/llm/anthropic_client.py` (append)
+- Modify: `redrobin/infrastructure/llm/anthropic_client.py` — HOIST the 3 new imports into the existing top import block (~lines 36-41); APPEND only the functions + `AnthropicAgentClient` class (a mid-file import after the class defs trips ruff `E402`).
+- Create: `tests/unit/agents/assistant/__init__.py` (empty — the assistant test package marker, per the repo's uniform every-test-dir-is-a-package convention).
 - Test: `tests/unit/agents/assistant/test_anthropic_agent_client.py`
-- Create: `tests/unit/agents/assistant/__init__.py` is NOT needed (pytest needs no package init); create the directory implicitly via the test file.
 
 **Interfaces:**
 - Consumes: `AgentTool` from `redrobin.domain.assistant`; `get_anthropic_key` from `redrobin.infrastructure.llm.api_keys`; `anthropic.lib.tools.beta_async_tool` + `anthropic.AsyncAnthropic`.
@@ -362,7 +388,7 @@ The infrastructure adapter. Appends to the existing `anthropic_client.py` (co-lo
 
 - [ ] **Step 1: Write the failing test**
 
-Create `tests/unit/agents/assistant/test_anthropic_agent_client.py`:
+Create the assistant test-package marker `tests/unit/agents/assistant/__init__.py` (empty), then `tests/unit/agents/assistant/test_anthropic_agent_client.py`:
 
 ```python
 import pytest
@@ -436,17 +462,27 @@ Expected: FAIL with `ImportError: cannot import name '_to_runner_tool'`.
 
 - [ ] **Step 3: Write minimal implementation**
 
-Append to `redrobin/infrastructure/llm/anthropic_client.py` (the `import anthropic` and `get_anthropic_key` import are already at the top of the file; add the two new imports and the class):
+Two edits to `redrobin/infrastructure/llm/anthropic_client.py`.
+
+**(a) HOIST the 3 new imports into the file's existing top import block** (~lines 36-41 — `from __future__ import annotations`, `import anthropic`, and the two `redrobin.*` imports are already there). A mid-file import after the class defs trips ruff `E402`, so all three new imports go at the top. The block becomes:
 
 ```python
-# --- appended for the AI assistant (slice 1) -------------------------------
+from __future__ import annotations
+
 from typing import Any
 
+import anthropic
 from anthropic.lib.tools import BetaAsyncFunctionTool, beta_async_tool
 
 from redrobin.domain.assistant import AgentTool
+from redrobin.domain.llm import LLMProvider, LLMResponse
+from redrobin.infrastructure.llm.api_keys import get_anthropic_key
+```
 
+**(b) APPEND only the two functions + the class** at the END of the file (no imports in the appended block):
 
+```python
+# --- appended for the AI assistant (slice 1) -------------------------------
 def _to_runner_tool(tool: AgentTool) -> BetaAsyncFunctionTool[Any]:
     """Adapt a provider-agnostic ``AgentTool`` into a Tool Runner async tool.
 
@@ -530,7 +566,7 @@ Expected: PASS (4 tests). (No network — only the pure adapters are exercised.)
 - [ ] **Step 5: Commit**
 
 ```bash
-git add redrobin/infrastructure/llm/anthropic_client.py tests/unit/agents/assistant/test_anthropic_agent_client.py
+git add redrobin/infrastructure/llm/anthropic_client.py tests/unit/agents/assistant/__init__.py tests/unit/agents/assistant/test_anthropic_agent_client.py
 git commit -m "feat(assistant): AnthropicAgentClient — native Tool Runner behind AgentLLM"
 ```
 
@@ -1160,6 +1196,8 @@ git commit -m "feat(assistant): parse_recommendation (5-part JSON -> Recommendat
 
 The "how to think one cycle" module (spec's `agent.py` — the agentic loop, Tool Runner underneath the `AgentLLM`). Owns the FROZEN system prompt (the persona + the 5-part JSON output contract, cached as the 1h prefix), the VOLATILE push-context assembly (L2 working-memory snapshot + L5 summary + the trigger command, in the user message), the cheap `state_signature` for the trigger's novelty check, and `run_cycle` (assemble → `AgentLLM.run` → `parse_recommendation`).
 
+It also owns `apply_deltas_to_snapshot` — a pure forward-merge that extends the cached L2 snapshot with the just-published `working_memory.deltas`, so the reactive cycle reasons over THIS command's freshly-extracted facts rather than a one-step-stale snapshot. This matters because production event order is `working_memory.deltas` → `enrichment.completed` → `working_memory_snapshot`, and the assistant reacts on the MIDDLE event (the authoritative snapshot for that command has not landed yet). The Assistant consumer (Task 8) calls this on every `working_memory.deltas`.
+
 **Files:**
 - Create: `redrobin/application/agents/assistant/agent.py`
 - Test: `tests/unit/agents/assistant/test_agent.py`
@@ -1170,6 +1208,7 @@ The "how to think one cycle" module (spec's `agent.py` — the agentic loop, Too
   - `build_system_prompt() -> str`
   - `build_push_context(*, wm_snapshot: dict[str, Any], l5_summary: str, trigger_command: str) -> str`
   - `state_signature(wm_snapshot: dict[str, Any]) -> str`
+  - `apply_deltas_to_snapshot(snapshot: dict[str, Any], deltas_payload: dict[str, Any]) -> dict[str, Any]` (pure forward-merge; extends the snapshot's list fields — `hosts`/`credentials`/`findings`/`tools_used`/`defenses_observed` = `WorkingMemoryDeltas.to_payload()` keys — with the deltas'; new dict, no mutation)
   - `async run_cycle(*, llm: AgentLLM, tools: list[AgentTool], wm_snapshot: dict[str, Any], l5_summary: str, trigger_command: str, correlation_id: str | None, max_tokens: int = 2048) -> Recommendation | None`
 
 - [ ] **Step 1: Write the failing test**
@@ -1180,6 +1219,7 @@ Create `tests/unit/agents/assistant/test_agent.py`:
 import pytest
 
 from redrobin.application.agents.assistant.agent import (
+    apply_deltas_to_snapshot,
     build_push_context,
     build_system_prompt,
     run_cycle,
@@ -1210,6 +1250,33 @@ def test_push_context_carries_l2_l5_and_trigger():
 
 def test_state_signature_changes_with_state():
     assert state_signature({"hosts": []}) != state_signature({"hosts": [{"name": "ws01"}]})
+
+
+def test_apply_deltas_extends_snapshot_lists_without_mutating_input():
+    snapshot = {"credentials": [{"username": "svc_web"}], "defenses_observed": ["Defender"]}
+    deltas = {
+        "credentials": [{"username": "svc_reports"}],
+        "defenses_observed": ["CrowdStrike"],
+        "hosts": [{"name": "SQL01"}],
+    }
+    merged = apply_deltas_to_snapshot(snapshot, deltas)
+    # existing snapshot lists are EXTENDED with the deltas (shallow, order-preserving)
+    assert [c["username"] for c in merged["credentials"]] == ["svc_web", "svc_reports"]
+    assert merged["defenses_observed"] == ["Defender", "CrowdStrike"]
+    # a delta key absent from the snapshot is added
+    assert merged["hosts"] == [{"name": "SQL01"}]
+    # the input snapshot is NOT mutated (new dict + new lists)
+    assert snapshot == {"credentials": [{"username": "svc_web"}], "defenses_observed": ["Defender"]}
+
+
+def test_apply_deltas_handles_missing_and_empty_keys():
+    assert apply_deltas_to_snapshot({}, {}) == {}
+    # a delta key with no snapshot counterpart merges cleanly onto an empty base
+    assert apply_deltas_to_snapshot({}, {"hosts": [{"name": "ws01"}]}) == {"hosts": [{"name": "ws01"}]}
+    # empty delta lists are skipped — the snapshot is returned unchanged (by value)
+    assert apply_deltas_to_snapshot({"hosts": [{"name": "ws01"}]}, {"hosts": []}) == {
+        "hosts": [{"name": "ws01"}]
+    }
 
 
 class _FakeAgentLLM:
@@ -1350,6 +1417,37 @@ def state_signature(wm_snapshot: dict[str, Any]) -> str:
     return json.dumps(wm_snapshot, ensure_ascii=False, sort_keys=True)
 
 
+# The list-valued fact types the enricher extracts — exactly the
+# ``WorkingMemoryDeltas.to_payload()`` keys.
+_DELTA_LIST_KEYS = ("hosts", "credentials", "findings", "tools_used", "defenses_observed")
+
+
+def apply_deltas_to_snapshot(
+    snapshot: dict[str, Any], deltas_payload: dict[str, Any]
+) -> dict[str, Any]:
+    """Forward-merge the just-published deltas onto the cached L2 snapshot.
+
+    Production event order is ``working_memory.deltas`` -> ``enrichment.completed``
+    -> ``working_memory_snapshot``. The assistant reacts on ``enrichment.completed`` —
+    one step BEFORE the authoritative snapshot for that command lands — so on its own
+    it would reason over a one-step-stale snapshot missing THIS command's facts.
+    Extending the snapshot's list fields with the deltas the assistant already
+    received closes that gap. Shallow list-extend only: the authoritative
+    ``working_memory_snapshot`` supersedes this within a beat, so we deliberately do
+    NOT replicate the reducer's dedup/merge. Returns a NEW dict (and NEW lists) — the
+    input ``snapshot`` is never mutated.
+    """
+    merged = dict(snapshot)
+    for key in _DELTA_LIST_KEYS:
+        delta_items = deltas_payload.get(key)
+        if not delta_items:
+            continue
+        existing = merged.get(key)
+        base = list(existing) if isinstance(existing, list) else []
+        merged[key] = base + list(delta_items)
+    return merged
+
+
 async def run_cycle(
     *,
     llm: AgentLLM,
@@ -1370,16 +1468,26 @@ async def run_cycle(
         tools=tools,
         max_tokens=max_tokens,
     )
+    # Intentionally NO retry on unparseable output (unlike the enricher's parse-retry):
+    # this is advisory, so silence is the safe default, and the Tool Runner already ran
+    # a multi-turn loop — re-asking adds latency, not safety. parse_recommendation
+    # returns None and the cycle stays silent. Documented decision (no retry machinery).
     return parse_recommendation(raw, correlation_id=correlation_id)
 
 
-__all__ = ["build_system_prompt", "build_push_context", "state_signature", "run_cycle"]
+__all__ = [
+    "apply_deltas_to_snapshot",
+    "build_system_prompt",
+    "build_push_context",
+    "state_signature",
+    "run_cycle",
+]
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest tests/unit/agents/assistant/test_agent.py -v`
-Expected: PASS (5 tests).
+Expected: PASS (7 tests).
 
 - [ ] **Step 5: Verify mypy strict**
 
@@ -1397,16 +1505,18 @@ git commit -m "feat(assistant): agent cycle — push-context assembly + Tool Run
 
 ## Task 8: reactive bus consumer → `advisor.recommendation`
 
-The "when to think" module — the `Assistant` bus consumer (spec's `assistant.py`). Mirrors `WorkingMemoryEnricher.run`: subscribe, handle the close sentinel, dispatch by event type, PUBLISH (never write memory), catch every exception per event (never crash), degrade to silent when `llm is None`. It caches the latest `working_memory_snapshot` (the L2 push context — bus-native, like the enricher caches `beacon.initial`), and on each `enrichment.completed` runs the trigger gate → one cycle → publishes `advisor.recommendation`. The trigger/dedup key is `f"{beacon_id}:{command}"` (the wire `correlation_id` is not on `enrichment.completed` — see note).
+The "when to think" module — the `Assistant` bus consumer (spec's `assistant.py`). Mirrors `WorkingMemoryEnricher.run`: subscribe, handle the close sentinel, dispatch by event type, PUBLISH (never write memory), catch every exception per event (never crash), degrade to silent when `llm is None`. It caches the latest `working_memory_snapshot` (the L2 push context — bus-native, like the enricher caches `beacon.initial`) AND forward-merges each `working_memory.deltas` onto that cache, so the reactive cycle reasons over THIS command's freshly-extracted facts (see the event-order note); on each `enrichment.completed` it runs the trigger gate → one cycle → publishes `advisor.recommendation`. The trigger/dedup key is `f"{beacon_id or 'unknown'}:{command}"` (the wire `correlation_id` is not on `enrichment.completed`, and `beacon_id` may be `None` — see note).
 
-**Note (correlation_id):** `enrichment.completed`'s payload carries `command` + `beacon_id` (not the wire `correlation_id`; see `enricher.py:167-175`). Slice 1 uses `f"{beacon_id}:{command}"` as the reactive attach/dedup handle — an honest handle to the triggering command. Threading the true `correlation_id` through `enrichment.completed` is a one-line enricher change deferred to a later slice.
+**Note (correlation_id):** `enrichment.completed`'s payload carries `command` + `beacon_id` (not the wire `correlation_id`; see `enricher.py:167-175`). Slice 1 uses `f"{beacon_id or 'unknown'}:{command}"` as the reactive attach/dedup handle — an honest handle to the triggering command (`beacon_id` may be `None`, hence the `'unknown'` fallback). Threading the true `correlation_id` through `enrichment.completed` is a one-line enricher change deferred to a later slice.
+
+**Note (event order — fresh working memory):** production order is `working_memory.deltas` → `enrichment.completed` → `working_memory_snapshot` (the enricher publishes the deltas, the reducer applies them and re-emits the authoritative snapshot). The assistant reacts on the MIDDLE event, so the authoritative snapshot for this command has NOT landed yet. It therefore forward-merges the `working_memory.deltas` it just received onto the cached snapshot via `apply_deltas_to_snapshot` (Task 7) — a shallow list-extend — so the cycle sees this command's facts; the authoritative `working_memory_snapshot` then replaces the cache a beat later.
 
 **Files:**
 - Create: `redrobin/application/agents/assistant/assistant.py`
 - Test: `tests/integration/test_assistant.py`
 
 **Interfaces:**
-- Consumes: `EventBus` (`redrobin.application.event_bus`); `run_cycle` + `state_signature` (Task 7); `TriggerGate` (Task 5); `AgentLLM` (Task 3); `AgentTool` (Task 1). Bus events `working_memory_snapshot` (payload = `working_memory_to_snapshot(wm)`), `enrichment.completed` (payload `{command, beacon_id, ...}`).
+- Consumes: `EventBus` (`redrobin.application.event_bus`); `run_cycle` + `state_signature` + `apply_deltas_to_snapshot` (Task 7); `TriggerGate` (Task 5); `AgentLLM` (Task 3); `AgentTool` (Task 1). Bus events `working_memory_snapshot` (payload = `working_memory_to_snapshot(wm)`, authoritative replace), `working_memory.deltas` (payload = `WorkingMemoryDeltas.to_payload()`, forward-merged), `enrichment.completed` (payload `{command, beacon_id, ...}`).
 - Produces:
   - `Assistant(*, bus: EventBus, llm: AgentLLM | None, tools: list[AgentTool], trigger: TriggerGate, summary_reader: Callable[[], str], enabled: bool = True, max_tokens: int = 2048)` with `on_started: Callable[[], None] | None`, `async run() -> None`.
   - Publishes `{"type": "advisor.recommendation", "payload": Recommendation.to_payload()}`.
@@ -1435,9 +1545,11 @@ class _FakeAgentLLM:
     def __init__(self, response: str) -> None:
         self._response = response
         self.calls = 0
+        self.last_user_message = ""
 
     async def run(self, *, system, user_message, tools, max_tokens=2048) -> str:
         self.calls += 1
+        self.last_user_message = user_message
         return self._response
 
 
@@ -1478,12 +1590,16 @@ async def test_assistant_publishes_recommendation_on_enrichment():
     )
     _, task = await _start(bus, llm)
     try:
+        # PRODUCTION ORDER: working_memory.deltas -> enrichment.completed ->
+        # working_memory_snapshot. The assistant reacts on the MIDDLE event, so it must
+        # forward-merge the deltas it just saw; the authoritative snapshot lands only
+        # AFTER the cycle already ran (this order previously masked the staleness bug).
         await bus.publish(
             {
-                "type": "working_memory_snapshot",
+                "type": "working_memory.deltas",
                 "payload": {
-                    "defenses_observed": ["CrowdStrike"],
                     "credentials": [{"username": "svc_reports"}],
+                    "defenses_observed": ["CrowdStrike"],
                 },
             }
         )
@@ -1491,6 +1607,15 @@ async def test_assistant_publishes_recommendation_on_enrichment():
             {
                 "type": "enrichment.completed",
                 "payload": {"command": "type db_backup.config", "beacon_id": "B-7", "n_deltas": 2},
+            }
+        )
+        await bus.publish(
+            {
+                "type": "working_memory_snapshot",
+                "payload": {
+                    "defenses_observed": ["CrowdStrike"],
+                    "credentials": [{"username": "svc_reports"}],
+                },
             }
         )
         rec_evt = None
@@ -1509,6 +1634,11 @@ async def test_assistant_publishes_recommendation_on_enrichment():
         assert p["suggested_action"].startswith("Validate")
         assert p["references"]
         assert p["correlation_id"] == "B-7:type db_backup.config"
+        # the cycle reasoned over FRESH working memory: the deltas published BEFORE
+        # enrichment.completed were forward-merged into the push-context (not lost to
+        # the stale snapshot, which only arrives afterwards).
+        assert "svc_reports" in llm.last_user_message
+        assert "CrowdStrike" in llm.last_user_message
     finally:
         await _drain(bus, task)
 
@@ -1600,7 +1730,11 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from redrobin.application.agents.assistant.agent import run_cycle, state_signature
+from redrobin.application.agents.assistant.agent import (
+    apply_deltas_to_snapshot,
+    run_cycle,
+    state_signature,
+)
 from redrobin.application.agents.assistant.llm import AgentLLM
 from redrobin.application.agents.assistant.triggers import TriggerGate
 from redrobin.application.event_bus import EventBus
@@ -1647,7 +1781,15 @@ class Assistant:
                 if etype == "working_memory_snapshot":
                     payload = evt.get("payload")
                     if isinstance(payload, dict):
-                        self._wm_snapshot = payload
+                        self._wm_snapshot = payload  # authoritative replace
+                    continue
+                if etype == "working_memory.deltas":
+                    payload = evt.get("payload")
+                    if isinstance(payload, dict):
+                        # Forward-merge THIS command's freshly-extracted facts so the
+                        # cycle fired on the following enrichment.completed reasons over
+                        # fresh working memory, not the one-step-stale snapshot.
+                        self._wm_snapshot = apply_deltas_to_snapshot(self._wm_snapshot, payload)
                     continue
                 if etype != "enrichment.completed":
                     continue
@@ -1663,9 +1805,10 @@ class Assistant:
             return
         beacon_id = payload.get("beacon_id")
         trigger_command = str(payload.get("command") or "")
-        # Reactive attach/dedup handle (enrichment.completed has no wire correlation_id).
+        # Reactive attach/dedup handle (enrichment.completed has no wire correlation_id;
+        # beacon_id may be None, so fall back to 'unknown').
         trigger_key: str | None = (
-            f"{beacon_id}:{trigger_command}" if trigger_command else None
+            f"{beacon_id or 'unknown'}:{trigger_command}" if trigger_command else None
         )
         sig = state_signature(self._wm_snapshot)
         if not self._trigger.should_speak(correlation_id=trigger_key, state_signature=sig):
@@ -2070,9 +2213,16 @@ async def start_assistant(app: FastAPI, settings: Settings) -> tuple[Assistant, 
     summary_repo = app.state.summary_repo
     engagement_id = app.state.engagement_id
 
+    # Re-read the active engagement_id off ``app.state`` each call so a future
+    # engagement switch surfaces the right summary without rebuilding the assistant
+    # (mirrors Layer B's ``_engagement_id_provider``). The captured value is only a
+    # fallback if the attribute is ever missing.
+    def _engagement_id_provider() -> str:
+        return getattr(app.state, "engagement_id", engagement_id)
+
     def _read_summary() -> str:
         try:
-            rows = summary_repo.list_recent(engagement_id, limit=1)
+            rows = summary_repo.list_recent(_engagement_id_provider(), limit=1)
         except Exception:
             logger.exception("assistant: failed reading L5 summary")
             return ""
@@ -2267,8 +2417,9 @@ Write-Host "       shell dir  `"$Exports`""
 Write-Host "       shell type `"$Exports\svc_sql_readme.txt`""
 Write-Host ""
 Write-Host "Expect within a few seconds of each step: an advisor card in #advisor-dock" -ForegroundColor Cyan
-Write-Host "with the 5 parts (WHAT / why / opsec / conf / refs), refs citing your 'type'"
-Write-Host "output + a KB chunk. Nothing is dispatched. See the runbook for checkpoints."
+Write-Host "with the 5 parts (WHAT / why / opsec / conf / refs), refs citing the facts the"
+Write-Host "enricher extracted (e.g. the svc_reports cred) + a KB chunk. Nothing is"
+Write-Host "dispatched. See the runbook for checkpoints."
 Write-Host ""
 Write-Host "Cleanup when done:  powershell -ExecutionPolicy Bypass -File .\rr-assistant-smoke-fixture.ps1 -Cleanup" -ForegroundColor DarkGray
 ```
@@ -2290,7 +2441,7 @@ expected yet — do not fail the smoke on these).
 - Daemon built + running with `ANTHROPIC_API_KEY` and `VOYAGE_API_KEY` exported
   (without them the assistant/KB run degraded — see the degraded checkpoint).
 - KB index populated (`redrobin kb add ...` / `kb ingest`) so `kb_retrieve` has
-  content — otherwise references cite only the command output.
+  content — otherwise references cite only the extracted facts (no KB tradecraft).
 - The Textual TUI connected (`redrobin tui`), a live CS beacon on a lab box, and
   the CS adapter connected to the daemon.
 
@@ -2314,8 +2465,13 @@ shell type "C:\Users\Public\RR-Smoke\notes_old.txt"
   (e.g. validate `svc_reports` against SQL01), `why` a tradecraft rationale,
   `opsec` INFO/WARN/DANGER with a reason, `conf` a confidence that names what it
   is NOT sure about, `refs` grounding.
-- **[Slice 1] Checkpoint C — references are real:** `refs` cite your `type`
-  output and/or a KB chunk (e.g. `vault/Techniques/...#chunk_n`) — not invented.
+- **[Slice 1] Checkpoint C — references are grounded (extracted facts, not raw
+  output):** `refs` cite the freshly-extracted facts the enricher pulled from your
+  command (e.g. the `svc_reports` credential extracted from the
+  `type db_backup.config` output) and/or a KB chunk (e.g.
+  `vault/Techniques/...#chunk_n`) — grounded, not invented. Slice 1 has NO
+  Operational Journal (raw transcript) yet, so do NOT expect `refs` to quote the raw
+  output text verbatim.
 - **[Slice 1] Checkpoint D — advisory only:** the card says advisory / nothing
   dispatched; NO command was sent to the beacon (read-only by construction).
 
