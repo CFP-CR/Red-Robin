@@ -3,7 +3,7 @@ command, with a per-bid last-command fallback)."""
 
 from __future__ import annotations
 
-from redrobin.application.enrichment.enricher import WorkingMemoryEnricher
+from redrobin.application.agents.enricher.enricher import WorkingMemoryEnricher
 from redrobin.application.event_bus import EventBus
 
 

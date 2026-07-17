@@ -15,11 +15,11 @@ from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
 
-from redrobin.application.enrichment.chunker import chunk_output
-from redrobin.application.enrichment.llm import EnricherLLM
-from redrobin.application.enrichment.parser import DeltaParseError, parse_deltas
-from redrobin.application.enrichment.sanitize import strip_self_annotations
-from redrobin.application.enrichment.trigger import should_enrich
+from redrobin.application.agents.enricher.chunker import chunk_output
+from redrobin.application.agents.enricher.llm import EnricherLLM
+from redrobin.application.agents.enricher.parser import DeltaParseError, parse_deltas
+from redrobin.application.agents.enricher.sanitize import strip_self_annotations
+from redrobin.application.agents.enricher.trigger import should_enrich
 from redrobin.application.event_bus import EventBus
 from redrobin.domain.memory import WorkingMemoryDeltas
 

@@ -28,8 +28,8 @@ from fastapi import FastAPI
 from redrobin.application.config import Settings
 from redrobin.application.cs_adapter_lifecycle import build_adapter, load_adapter_configs
 from redrobin.application.dedup_keys import DedupKeys, DedupKeysRepo
-from redrobin.application.enrichment.enricher import WorkingMemoryEnricher
-from redrobin.application.enrichment.llm import build_enricher_llm
+from redrobin.application.agents.enricher.enricher import WorkingMemoryEnricher
+from redrobin.application.agents.enricher.llm import build_enricher_llm
 from redrobin.application.engagement_loader import Engagement, EngagementLoader
 from redrobin.application.engagement_service import EngagementService
 from redrobin.application.event_bus import EventBus
@@ -42,7 +42,7 @@ from redrobin.application.longterm_lifecycle import (
 )
 from redrobin.application.rules_lifecycle import RulesLoader
 from redrobin.application.scope_enforcer import ScopeEnforcer
-from redrobin.application.summarizer import L5Summarizer
+from redrobin.application.agents.summarizer import L5Summarizer
 from redrobin.application.verdict_pipeline_factory import (
     build_default_dependencies,
     build_pipeline,

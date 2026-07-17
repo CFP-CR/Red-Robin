@@ -12,7 +12,7 @@ Event dispatch table (canonical wire types from ``redrobin/domain/events.py``):
   ``WorkingMemoryRepo.apply_deltas`` (single writer; provenance system-supplied).
 
 ``beacon.command_output`` is consumed by the LLM enricher
-(``redrobin/application/enrichment/enricher.py``), a separate bus consumer that
+(``redrobin/application/agents/enricher/enricher.py``), a separate bus consumer that
 publishes ``working_memory.deltas`` — the reducer no longer parses it.
 
 All other event types are silently ignored. Repo helpers are synchronous JSON

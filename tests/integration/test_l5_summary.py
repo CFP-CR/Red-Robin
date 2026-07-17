@@ -33,7 +33,7 @@ from pathlib import Path
 import pytest
 
 from redrobin.application.layer_b_engine import LayerBEngine
-from redrobin.application.summarizer import L5Summarizer
+from redrobin.application.agents.summarizer import L5Summarizer
 from redrobin.domain.memory import ContextSummary
 from redrobin.infrastructure.persistence.context_summary_repo import (
     ContextSummaryRepo,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from redrobin.application.enrichment.chunker import chunk_output
+from redrobin.application.agents.enricher.chunker import chunk_output
 
 
 def test_small_output_is_single_chunk():
