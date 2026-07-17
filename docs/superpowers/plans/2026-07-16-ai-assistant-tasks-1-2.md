@@ -1,4 +1,6 @@
-# AI Assistant — Slice 1: Reactive Grounded Recommendation (Implementation Plan)
+# AI Assistant — Tasks 1–2 Implementation Plan
+
+Task 1 (#22) = refactor + D1 · Task 2 (#23) = reactive grounded recommendation (Steps 1–11)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -21,11 +23,11 @@ _Every task's requirements implicitly include this section._
 - **Native Tool Runner, NOT the Agent SDK.** The agent loop is Anthropic's `client.beta.messages.tool_runner` on the SAME `anthropic.AsyncAnthropic` client, wrapped behind an `AgentLLM` **Protocol** so the beta API is insulated. Zero Claude Agent SDK, zero `~/.claude`/MCP harness.
 - **One ABC only = `LLMProvider`** (`redrobin/domain/llm.py`). `AgentLLM` is a structural **Protocol**, NOT a second ABC (mirrors `EnricherLLM` / `L5LLM`). Everything else concrete + duck typing.
 - **4 import-linter contracts (do not violate — `importlinter.cfg`):** (1) layered `api|tui → application → domain`; (2) domain never imports infrastructure/application/api/tui; (3) application never imports api/tui; (4) presentation (api/tui) never imports infrastructure directly (application facade only). The assistant stays `redrobin.application.*`, so all four hold unchanged. Application MAY import infrastructure (lazily, as `build_enricher_llm` does); infrastructure MAY import domain.
-- **Models (from spec §6.A):** `claude-haiku-4-5` = the fast reactive path (this slice), `claude-sonnet-4-6` (or the then-current Sonnet) = deep sub-agent (later slice). **Slice 1 uses `claude-haiku-4-5`.**
+- **Models (from spec §6.A):** `claude-haiku-4-5` = the fast reactive path (Task 2 #23), `claude-sonnet-4-6` (or the then-current Sonnet) = deep sub-agent (later task). **Task 2 (#23) uses `claude-haiku-4-5`.**
 - **Never-crash + degraded-None:** no `ANTHROPIC_API_KEY` → `build_agent_llm` returns `None` → the assistant is silent, the daemon still boots. An exception inside a cycle is logged and the consumer keeps running (mirror `enricher.py:87-88`, `llm.py:36-38`).
 - **TDD:** failing test first → verify red → minimal implementation → verify green → commit. All new code requires tests.
 - **Atomic conventional commits, NO AI co-author trailer** (`feat(scope): …`, `refactor(scope): …`, `build(deps): …`, `test(scope): …`). One logical change per commit; no `git add -A`.
-- **D1 — raise the `anthropic` floor.** `pyproject.toml` currently pins `anthropic>=0.60.0` (too weak — a fresh resolve could land on a 0.6x lacking `beta.messages.tool_runner`). Raise it to **`anthropic>=0.100.0`** — the exact version locked in `uv.lock` (verified here to ship `anthropic.lib.tools.beta_async_tool` + `beta.messages.tool_runner`). This is a conservative, provably-correct floor (the known-good locked version) that cannot regress. Done as its own atomic commit in Task 0.
+- **D1 — raise the `anthropic` floor.** `pyproject.toml` currently pins `anthropic>=0.60.0` (too weak — a fresh resolve could land on a 0.6x lacking `beta.messages.tool_runner`). Raise it to **`anthropic>=0.100.0`** — the exact version locked in `uv.lock` (verified here to ship `anthropic.lib.tools.beta_async_tool` + `beta.messages.tool_runner`). This is a conservative, provably-correct floor (the known-good locked version) that cannot regress. Done as its own atomic commit in Task 1 (#22).
 - **Adapter tests are N/A here.** The assistant is core, not an adapter — no `adapters/<name>/tests/` involvement.
 - **Local gotchas:** `uv run --no-sync …` when the daemon is running (it locks `redrobin.exe`); `REDROBIN_ALLOW_DEGRADED=1` for tests that hit the boot-gate without API keys.
 
@@ -35,7 +37,7 @@ _Every task's requirements implicitly include this section._
 
 Files created / modified for THIS unit (target layout — new + moved + touched).
 
-**Task 0 — refactor + D1 (its own atomic change, precedes the feature):**
+**Task 1 (#22) — refactor + D1 (its own atomic change, precedes the feature):**
 - Move `redrobin/application/enrichment/` → `redrobin/application/agents/enricher/` (package: `__init__.py`, `enricher.py`, `llm.py`, `trigger.py`, `chunker.py`, `parser.py`, `sanitize.py`).
 - Move `redrobin/application/summarizer.py` → `redrobin/application/agents/summarizer.py`.
 - Create `redrobin/application/agents/__init__.py` (empty package marker).
@@ -45,7 +47,7 @@ Files created / modified for THIS unit (target layout — new + moved + touched)
 - Create `tests/unit/agents/__init__.py` (empty — the new parent test dir must be a package, like every other test dir).
 - Modify `pyproject.toml` (`anthropic>=0.60.0` → `>=0.100.0`) + re-lock (`uv lock`), committing `uv.lock` alongside.
 
-**Slice 1 — the feature (each file has ONE responsibility):**
+**Task 2 (#23) — the feature (each file has ONE responsibility):**
 - Create `redrobin/domain/assistant.py` — pure types: `Recommendation` (5 mandatory parts + `to_payload`), `AgentTool`.
 - Modify `redrobin/infrastructure/llm/anthropic_client.py` — hoist 3 new imports into the top block, then append `AnthropicAgentClient` (Tool Runner impl of `AgentLLM`) + `_to_runner_tool` + `_first_text` (no mid-file imports — ruff E402).
 - Create `redrobin/application/agents/assistant/__init__.py`.
@@ -68,7 +70,7 @@ Files created / modified for THIS unit (target layout — new + moved + touched)
 
 ---
 
-## Task 0: Refactor to `application/agents/` + raise the `anthropic` floor (D1)
+## Task 1 (#22): Prep — refactor to `application/agents/` + raise the `anthropic` floor (D1)
 
 A small, independent refactor of working/tested code + the D1 dependency bump. NOT the first step of the feature — it lands first, as its own reviewable change, so the assistant arrives in its ready home. Acceptance = the 5 CI gates (deterministic logic → no beacon smoke). This is a **refactor, not TDD**: the existing suite is the safety net — it must stay green with zero behavior change.
 
@@ -89,7 +91,7 @@ A small, independent refactor of working/tested code + the D1 dependency bump. N
 - Consumes: nothing new.
 - Produces: the public names are UNCHANGED, only their import paths move — `WorkingMemoryEnricher`, `build_enricher_llm`, `EnricherLLM`, `should_enrich`, `chunk_output`, `parse_deltas`, `DeltaParseError`, `strip_self_annotations` now under `redrobin.application.agents.enricher.*`; `L5Summarizer`, `L5LLM` now under `redrobin.application.agents.summarizer`.
 
-- [ ] **Step 1: Create the `agents` package and move the two units (preserving git history)**
+- [ ] **Create the `agents` package and move the two units (preserving git history)**
 
 ```bash
 # create the new parent package, then move the enrichment package + summarizer into it
@@ -99,7 +101,7 @@ git mv redrobin/application/enrichment redrobin/application/agents/enricher
 git mv redrobin/application/summarizer.py redrobin/application/agents/summarizer.py
 ```
 
-- [ ] **Step 2: Fix the enricher's 5 self-imports**
+- [ ] **Fix the enricher's 5 self-imports**
 
 In `redrobin/application/agents/enricher/enricher.py` replace the import block (currently lines 18-22):
 
@@ -111,7 +113,7 @@ from redrobin.application.agents.enricher.sanitize import strip_self_annotations
 from redrobin.application.agents.enricher.trigger import should_enrich
 ```
 
-- [ ] **Step 3: Fix the two production import sites**
+- [ ] **Fix the two production import sites**
 
 In `redrobin/api/lifespan_helpers.py` change lines 31-32 and 45:
 
@@ -142,7 +144,7 @@ with:
 (``redrobin/application/agents/enricher/enricher.py``), a separate bus consumer that
 ```
 
-- [ ] **Step 4: Move the enricher tests and fix all test imports**
+- [ ] **Move the enricher tests and fix all test imports**
 
 ```bash
 mkdir -p tests/unit/agents
@@ -168,7 +170,7 @@ And in `tests/integration/test_l5_summary.py:36`:
 from redrobin.application.agents.summarizer import L5Summarizer
 ```
 
-- [ ] **Step 5: Run the full gate — verify GREEN (no behavior change)**
+- [ ] **Run the full gate — verify GREEN (no behavior change)**
 
 Run:
 ```bash
@@ -180,14 +182,14 @@ uv run pytest tests/ -v --tb=short
 ```
 Expected: all PASS. If `mypy`/`import-linter`/`pytest` report an unresolved `redrobin.application.enrichment.*` or `redrobin.application.summarizer`, a self-import or test import was missed — fix it (grep: `uv run python -c "import subprocess,sys; sys.exit(0)"` is not needed; use `git grep -n 'application\.enrichment\|application\.summarizer'` — expect ZERO hits).
 
-- [ ] **Step 6: Commit the refactor**
+- [ ] **Commit the refactor**
 
 ```bash
 git add redrobin/application/agents redrobin/application/working_memory_reducer.py redrobin/api/lifespan_helpers.py redrobin/application/longterm_lifecycle.py tests/unit/agents tests/integration/test_enricher.py tests/integration/test_l5_summary.py
 git commit -m "refactor(agents): move enrichment + summarizer under application/agents/"
 ```
 
-- [ ] **Step 7: Raise the `anthropic` floor (D1)**
+- [ ] **Raise the `anthropic` floor (D1)**
 
 In `pyproject.toml` change the dependency line (currently line 10) from `"anthropic>=0.60.0",` to:
 
@@ -201,7 +203,7 @@ Then re-lock so `uv.lock` records the new floor and the commit stays atomic (the
 uv lock
 ```
 
-- [ ] **Step 8: Verify the locked version satisfies the floor and ships the Tool Runner helpers**
+- [ ] **Verify the locked version satisfies the floor and ships the Tool Runner helpers**
 
 Run:
 ```bash
@@ -210,7 +212,7 @@ uv run python -c "from anthropic.lib.tools import beta_async_tool; from anthropi
 ```
 Expected: prints `0.100.0` then `tool_runner helpers OK`. (The lock already pins 0.100.0, so raising the floor to 0.100.0 does not re-resolve.)
 
-- [ ] **Step 9: Commit the floor bump**
+- [ ] **Commit the floor bump**
 
 ```bash
 git add pyproject.toml uv.lock
@@ -219,7 +221,9 @@ git commit -m "build(deps): raise anthropic floor to >=0.100.0 for tool_runner (
 
 ---
 
-## Task 1: `Recommendation` + `AgentTool` domain types
+## Task 2 (#23): Reactive grounded recommendation
+
+### Step 1: `Recommendation` + `AgentTool` domain types
 
 **Files:**
 - Create: `redrobin/domain/assistant.py`
@@ -231,7 +235,7 @@ git commit -m "build(deps): raise anthropic floor to >=0.100.0 for tool_runner (
   - `Recommendation(suggested_action: str, rationale: str, opsec_risk: Severity, confidence: str, references: list[str] = field(default_factory=list), correlation_id: str | None = None)` with `to_payload() -> dict[str, Any]` (serializes `opsec_risk` to its `.value` string).
   - `AgentTool(name: str, description: str, input_schema: dict[str, Any], handler: Callable[[dict[str, Any]], Awaitable[str]])`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Write the failing test**
 
 Create `tests/unit/test_domain_assistant.py`:
 
@@ -281,12 +285,12 @@ def test_agent_tool_is_a_pure_spec():
     assert tool.input_schema["type"] == "object"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Run test to verify it fails**
 
 Run: `uv run pytest tests/unit/test_domain_assistant.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'redrobin.domain.assistant'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Write minimal implementation**
 
 Create `redrobin/domain/assistant.py`:
 
@@ -351,17 +355,17 @@ class AgentTool:
 __all__ = ["Recommendation", "AgentTool"]
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Run test to verify it passes**
 
 Run: `uv run pytest tests/unit/test_domain_assistant.py -v`
 Expected: PASS (3 tests).
 
-- [ ] **Step 5: Verify mypy strict (domain is in scope)**
+- [ ] **Verify mypy strict (domain is in scope)**
 
 Run: `uv run mypy redrobin/domain redrobin/application`
 Expected: `Success: no issues found`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Commit**
 
 ```bash
 git add redrobin/domain/assistant.py tests/unit/test_domain_assistant.py
@@ -370,7 +374,7 @@ git commit -m "feat(assistant): add Recommendation + AgentTool domain types"
 
 ---
 
-## Task 2: `AnthropicAgentClient` — native Tool Runner behind `AgentLLM`
+### Step 2: `AnthropicAgentClient` — native Tool Runner behind `AgentLLM`
 
 The infrastructure adapter. Appends to the existing `anthropic_client.py` (co-located with `AnthropicClient` / `AnthropicEnricherClient`). The network `run()` is not unit-tested (like `AnthropicEnricherClient.extract` isn't) — the deterministic surfaces (`_to_runner_tool`, `_first_text`) are. Infra is gradual-typed (`disallow_untyped_defs = false`), so loose `Any` typing is fine.
 
@@ -386,7 +390,7 @@ The infrastructure adapter. Appends to the existing `anthropic_client.py` (co-lo
   - `_to_runner_tool(tool: AgentTool) -> BetaAsyncFunctionTool` (module-level, testable).
   - `_first_text(message: Any) -> str` (module-level, testable).
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Write the failing test**
 
 Create the assistant test-package marker `tests/unit/agents/assistant/__init__.py` (empty), then `tests/unit/agents/assistant/test_anthropic_agent_client.py`:
 
@@ -455,12 +459,12 @@ def test_first_text_empty_when_no_text_block():
     assert _first_text(_Msg()) == ""
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Run test to verify it fails**
 
 Run: `uv run pytest tests/unit/agents/assistant/test_anthropic_agent_client.py -v`
 Expected: FAIL with `ImportError: cannot import name '_to_runner_tool'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Write minimal implementation**
 
 Two edits to `redrobin/infrastructure/llm/anthropic_client.py`.
 
@@ -482,7 +486,7 @@ from redrobin.infrastructure.llm.api_keys import get_anthropic_key
 **(b) APPEND only the two functions + the class** at the END of the file (no imports in the appended block):
 
 ```python
-# --- appended for the AI assistant (slice 1) -------------------------------
+# --- appended for the AI assistant (Task 2) -------------------------------
 def _to_runner_tool(tool: AgentTool) -> BetaAsyncFunctionTool[Any]:
     """Adapt a provider-agnostic ``AgentTool`` into a Tool Runner async tool.
 
@@ -558,12 +562,12 @@ class AnthropicAgentClient:
         return _first_text(message)
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Run test to verify it passes**
 
 Run: `uv run pytest tests/unit/agents/assistant/test_anthropic_agent_client.py -v`
 Expected: PASS (4 tests). (No network — only the pure adapters are exercised.)
 
-- [ ] **Step 5: Commit**
+- [ ] **Commit**
 
 ```bash
 git add redrobin/infrastructure/llm/anthropic_client.py tests/unit/agents/assistant/__init__.py tests/unit/agents/assistant/test_anthropic_agent_client.py
@@ -572,7 +576,7 @@ git commit -m "feat(assistant): AnthropicAgentClient — native Tool Runner behi
 
 ---
 
-## Task 3: `AgentLLM` Protocol + degraded `build_agent_llm` factory
+### Step 3: `AgentLLM` Protocol + degraded `build_agent_llm` factory
 
 Mirrors `enrichment/llm.py` (`EnricherLLM` Protocol + `build_enricher_llm`): a structural Protocol the assistant depends on, and a factory that returns the Anthropic-backed client when `ANTHROPIC_API_KEY` is present, else `None` (degraded — the assistant stays silent, the daemon still boots).
 
@@ -582,12 +586,12 @@ Mirrors `enrichment/llm.py` (`EnricherLLM` Protocol + `build_enricher_llm`): a s
 - Test: `tests/unit/agents/assistant/test_llm.py`
 
 **Interfaces:**
-- Consumes: `AgentTool` from `redrobin.domain.assistant`; `AnthropicAgentClient` (lazy import from Task 2).
+- Consumes: `AgentTool` from `redrobin.domain.assistant`; `AnthropicAgentClient` (lazy import from Step 2).
 - Produces:
   - `AgentLLM` Protocol: `async run(*, system: str, user_message: str, tools: list[AgentTool], max_tokens: int = 2048) -> str`.
   - `build_agent_llm(*, model: str = "claude-haiku-4-5") -> AgentLLM | None`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Write the failing test**
 
 Create `redrobin/application/agents/assistant/__init__.py` (empty), then `tests/unit/agents/assistant/test_llm.py`:
 
@@ -618,12 +622,12 @@ def test_build_agent_llm_degraded_without_key(monkeypatch):
     assert build_agent_llm(model="claude-haiku-4-5") is None
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Run test to verify it fails**
 
 Run: `uv run pytest tests/unit/agents/assistant/test_llm.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'redrobin.application.agents.assistant.llm'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Write minimal implementation**
 
 Create `redrobin/application/agents/assistant/llm.py`:
 
@@ -673,17 +677,17 @@ def build_agent_llm(*, model: str = "claude-haiku-4-5") -> AgentLLM | None:
         return None
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Run test to verify it passes**
 
 Run: `uv run pytest tests/unit/agents/assistant/test_llm.py -v`
 Expected: PASS (3 tests). (`build_agent_llm` reaches `AnthropicAgentClient.__init__` → `get_anthropic_key()` raises `RuntimeError` when the key is missing → caught → `None`.)
 
-- [ ] **Step 5: Verify mypy strict (application is in scope)**
+- [ ] **Verify mypy strict (application is in scope)**
 
 Run: `uv run mypy redrobin/domain redrobin/application`
 Expected: `Success: no issues found`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Commit**
 
 ```bash
 git add redrobin/application/agents/assistant/__init__.py redrobin/application/agents/assistant/llm.py tests/unit/agents/assistant/test_llm.py
@@ -692,9 +696,9 @@ git commit -m "feat(assistant): AgentLLM Protocol + degraded build_agent_llm fac
 
 ---
 
-## Task 4: `kb_retrieve` tool registry + KB backend factory
+### Step 4: `kb_retrieve` tool registry + KB backend factory
 
-The first PULL tool (spec §6.B), over the already-built `KBService.retrieve` (Voyage + numpy `VectorStore`, inherited from Layer B's absorption). `build_kb_service` mirrors `verdict_pipeline_factory.py:104-116`'s KB construction (degraded to `None` without `VOYAGE_API_KEY`). `build_tool_registry` is the extensible seam — later slices append `search_journal` / `get_lessons` without changing its signature.
+The first PULL tool (spec §6.B), over the already-built `KBService.retrieve` (Voyage + numpy `VectorStore`, inherited from Layer B's absorption). `build_kb_service` mirrors `verdict_pipeline_factory.py:104-116`'s KB construction (degraded to `None` without `VOYAGE_API_KEY`). `build_tool_registry` is the extensible seam — later tasks append `search_journal` / `get_lessons` without changing its signature.
 
 **Files:**
 - Create: `redrobin/application/agents/assistant/tools.py`
@@ -704,9 +708,9 @@ The first PULL tool (spec §6.B), over the already-built `KBService.retrieve` (V
 - Consumes: `KBService` from `redrobin.application.kb_service`; `AgentTool` from `redrobin.domain.assistant`; lazily `VoyageClient`, `VectorStore`, `redrobin_root` (infra).
 - Produces:
   - `build_kb_service() -> KBService | None`.
-  - `build_tool_registry(kb: KBService | None) -> list[AgentTool]` (slice 1: exactly one tool, `kb_retrieve`).
+  - `build_tool_registry(kb: KBService | None) -> list[AgentTool]` (Task 2 (#23): exactly one tool, `kb_retrieve`).
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Write the failing test**
 
 Create `tests/unit/agents/assistant/test_tools.py`:
 
@@ -762,21 +766,21 @@ async def test_kb_retrieve_empty_query_is_handled():
     assert "no query" in out.lower()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Run test to verify it fails**
 
 Run: `uv run pytest tests/unit/agents/assistant/test_tools.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'redrobin.application.agents.assistant.tools'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Write minimal implementation**
 
 Create `redrobin/application/agents/assistant/tools.py`:
 
 ```python
 """Retrieval tools the assistant hands to the AgentLLM each cycle.
 
-Slice 1 ships one PULL tool — ``kb_retrieve`` over ``KBService`` (the built,
+Task 2 (#23) ships one PULL tool — ``kb_retrieve`` over ``KBService`` (the built,
 curated tradecraft layer). ``build_tool_registry`` is the extensibility seam:
-later slices append ``search_journal`` / ``get_lessons`` without touching the
+later tasks append ``search_journal`` / ``get_lessons`` without touching the
 signature. ``build_kb_service`` mirrors ``verdict_pipeline_factory``'s KB
 construction (lazy infra import, degraded-None without VOYAGE_API_KEY).
 """
@@ -831,7 +835,7 @@ def build_kb_service() -> KBService | None:
 
 
 def build_tool_registry(kb: KBService | None) -> list[AgentTool]:
-    """The pull-tool set for one cycle. Slice 1: only ``kb_retrieve``."""
+    """The pull-tool set for one cycle. Task 2: only ``kb_retrieve``."""
 
     async def _kb_retrieve(args: dict[str, object]) -> str:
         query = str(args.get("query", "")).strip()
@@ -867,17 +871,17 @@ def build_tool_registry(kb: KBService | None) -> list[AgentTool]:
 __all__ = ["build_kb_service", "build_tool_registry"]
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Run test to verify it passes**
 
 Run: `uv run pytest tests/unit/agents/assistant/test_tools.py -v`
 Expected: PASS (4 tests).
 
-- [ ] **Step 5: Verify mypy strict**
+- [ ] **Verify mypy strict**
 
 Run: `uv run mypy redrobin/domain redrobin/application`
 Expected: `Success: no issues found`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Commit**
 
 ```bash
 git add redrobin/application/agents/assistant/tools.py tests/unit/agents/assistant/test_tools.py
@@ -886,9 +890,9 @@ git commit -m "feat(assistant): kb_retrieve tool registry + KB backend factory"
 
 ---
 
-## Task 5: signal-not-noise `TriggerGate` (dedup / cooldown / novelty)
+### Step 5: signal-not-noise `TriggerGate` (dedup / cooldown / novelty)
 
-The cheap deterministic filters of the signal-not-noise gate (spec §6.A): **dedup** (don't re-speak for a correlation already spoken on), **cooldown** (min interval between utterances), **novelty** (speak only if state changed since the last utterance). The model-assessed materiality is the second stage — handled by the model returning "stay silent" (Task 6/7), so it is deliberately NOT in this gate. Clock-injected so the cooldown is deterministic in tests.
+The cheap deterministic filters of the signal-not-noise gate (spec §6.A): **dedup** (don't re-speak for a correlation already spoken on), **cooldown** (min interval between utterances), **novelty** (speak only if state changed since the last utterance). The model-assessed materiality is the second stage — handled by the model returning "stay silent" (Step 6/7), so it is deliberately NOT in this gate. Clock-injected so the cooldown is deterministic in tests.
 
 **Files:**
 - Create: `redrobin/application/agents/assistant/triggers.py`
@@ -901,7 +905,7 @@ The cheap deterministic filters of the signal-not-noise gate (spec §6.A): **ded
   - `should_speak(*, correlation_id: str | None, state_signature: str) -> bool`.
   - `record_spoken(*, correlation_id: str | None, state_signature: str) -> None`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Write the failing test**
 
 Create `tests/unit/agents/assistant/test_triggers.py`:
 
@@ -954,12 +958,12 @@ def test_silent_cycle_does_not_burn_cooldown_or_dedup():
     assert gate.should_speak(correlation_id="c2", state_signature="s2") is True
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Run test to verify it fails**
 
 Run: `uv run pytest tests/unit/agents/assistant/test_triggers.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'redrobin.application.agents.assistant.triggers'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Write minimal implementation**
 
 Create `redrobin/application/agents/assistant/triggers.py`:
 
@@ -1019,12 +1023,12 @@ class TriggerGate:
 __all__ = ["TriggerGate"]
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Run test to verify it passes**
 
 Run: `uv run pytest tests/unit/agents/assistant/test_triggers.py -v`
 Expected: PASS (5 tests).
 
-- [ ] **Step 5: Commit**
+- [ ] **Commit**
 
 ```bash
 git add redrobin/application/agents/assistant/triggers.py tests/unit/agents/assistant/test_triggers.py
@@ -1033,7 +1037,7 @@ git commit -m "feat(assistant): signal-not-noise TriggerGate (dedup/cooldown/nov
 
 ---
 
-## Task 6: `parse_recommendation` (5-part JSON → `Recommendation`)
+### Step 6: `parse_recommendation` (5-part JSON → `Recommendation`)
 
 Mirrors `enrichment/parser.py` (`parse_deltas`): parse the agent's final message into a typed value. Difference: it NEVER raises — a silent or malformed cycle must not crash the daemon, so it returns `None` (the assistant then simply does not publish → signal-not-noise). Enforces the thesis: a recommendation missing the WHAT or the WHY is dropped (that would be outsourcing, not advising).
 
@@ -1045,7 +1049,7 @@ Mirrors `enrichment/parser.py` (`parse_deltas`): parse the agent's final message
 - Consumes: `Recommendation` from `redrobin.domain.assistant`; `Severity` from `redrobin.domain.events`.
 - Produces: `parse_recommendation(raw: str, *, correlation_id: str | None) -> Recommendation | None`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Write the failing test**
 
 Create `tests/unit/agents/assistant/test_parser.py`:
 
@@ -1097,12 +1101,12 @@ def test_unknown_severity_falls_back_to_info():
     assert rec is not None and rec.opsec_risk is Severity.INFO
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Run test to verify it fails**
 
 Run: `uv run pytest tests/unit/agents/assistant/test_parser.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'redrobin.application.agents.assistant.parser'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Write minimal implementation**
 
 Create `redrobin/application/agents/assistant/parser.py`:
 
@@ -1173,17 +1177,17 @@ def parse_recommendation(raw: str, *, correlation_id: str | None) -> Recommendat
 __all__ = ["parse_recommendation"]
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Run test to verify it passes**
 
 Run: `uv run pytest tests/unit/agents/assistant/test_parser.py -v`
 Expected: PASS (6 tests).
 
-- [ ] **Step 5: Verify mypy strict**
+- [ ] **Verify mypy strict**
 
 Run: `uv run mypy redrobin/domain redrobin/application`
 Expected: `Success: no issues found`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Commit**
 
 ```bash
 git add redrobin/application/agents/assistant/parser.py tests/unit/agents/assistant/test_parser.py
@@ -1192,18 +1196,18 @@ git commit -m "feat(assistant): parse_recommendation (5-part JSON -> Recommendat
 
 ---
 
-## Task 7: agent cycle — push-context assembly + Tool Runner call
+### Step 7: agent cycle — push-context assembly + Tool Runner call
 
 The "how to think one cycle" module (spec's `agent.py` — the agentic loop, Tool Runner underneath the `AgentLLM`). Owns the FROZEN system prompt (the persona + the 5-part JSON output contract, cached as the 1h prefix), the VOLATILE push-context assembly (L2 working-memory snapshot + L5 summary + the trigger command, in the user message), the cheap `state_signature` for the trigger's novelty check, and `run_cycle` (assemble → `AgentLLM.run` → `parse_recommendation`).
 
-It also owns `apply_deltas_to_snapshot` — a pure forward-merge that extends the cached L2 snapshot with the just-published `working_memory.deltas`, so the reactive cycle reasons over THIS command's freshly-extracted facts rather than a one-step-stale snapshot. This matters because production event order is `working_memory.deltas` → `enrichment.completed` → `working_memory_snapshot`, and the assistant reacts on the MIDDLE event (the authoritative snapshot for that command has not landed yet). The Assistant consumer (Task 8) calls this on every `working_memory.deltas`.
+It also owns `apply_deltas_to_snapshot` — a pure forward-merge that extends the cached L2 snapshot with the just-published `working_memory.deltas`, so the reactive cycle reasons over THIS command's freshly-extracted facts rather than a one-step-stale snapshot. This matters because production event order is `working_memory.deltas` → `enrichment.completed` → `working_memory_snapshot`, and the assistant reacts on the MIDDLE event (the authoritative snapshot for that command has not landed yet). The Assistant consumer (Step 8) calls this on every `working_memory.deltas`.
 
 **Files:**
 - Create: `redrobin/application/agents/assistant/agent.py`
 - Test: `tests/unit/agents/assistant/test_agent.py`
 
 **Interfaces:**
-- Consumes: `AgentLLM` (Task 3), `parse_recommendation` (Task 6), `AgentTool` + `Recommendation` (Task 1), `build_tool_registry` (Task 4, in tests).
+- Consumes: `AgentLLM` (Step 3), `parse_recommendation` (Step 6), `AgentTool` + `Recommendation` (Step 1), `build_tool_registry` (Step 4, in tests).
 - Produces:
   - `build_system_prompt() -> str`
   - `build_push_context(*, wm_snapshot: dict[str, Any], l5_summary: str, trigger_command: str) -> str`
@@ -1211,7 +1215,7 @@ It also owns `apply_deltas_to_snapshot` — a pure forward-merge that extends th
   - `apply_deltas_to_snapshot(snapshot: dict[str, Any], deltas_payload: dict[str, Any]) -> dict[str, Any]` (pure forward-merge; extends the snapshot's list fields — `hosts`/`credentials`/`findings`/`tools_used`/`defenses_observed` = `WorkingMemoryDeltas.to_payload()` keys — with the deltas'; new dict, no mutation)
   - `async run_cycle(*, llm: AgentLLM, tools: list[AgentTool], wm_snapshot: dict[str, Any], l5_summary: str, trigger_command: str, correlation_id: str | None, max_tokens: int = 2048) -> Recommendation | None`
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Write the failing test**
 
 Create `tests/unit/agents/assistant/test_agent.py`:
 
@@ -1330,12 +1334,12 @@ async def test_run_cycle_silent_returns_none():
     assert rec is None
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Run test to verify it fails**
 
 Run: `uv run pytest tests/unit/agents/assistant/test_agent.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'redrobin.application.agents.assistant.agent'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Write minimal implementation**
 
 Create `redrobin/application/agents/assistant/agent.py`:
 
@@ -1484,17 +1488,17 @@ __all__ = [
 ]
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Run test to verify it passes**
 
 Run: `uv run pytest tests/unit/agents/assistant/test_agent.py -v`
 Expected: PASS (7 tests).
 
-- [ ] **Step 5: Verify mypy strict**
+- [ ] **Verify mypy strict**
 
 Run: `uv run mypy redrobin/domain redrobin/application`
 Expected: `Success: no issues found`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Commit**
 
 ```bash
 git add redrobin/application/agents/assistant/agent.py tests/unit/agents/assistant/test_agent.py
@@ -1503,25 +1507,25 @@ git commit -m "feat(assistant): agent cycle — push-context assembly + Tool Run
 
 ---
 
-## Task 8: reactive bus consumer → `advisor.recommendation`
+### Step 8: reactive bus consumer → `advisor.recommendation`
 
 The "when to think" module — the `Assistant` bus consumer (spec's `assistant.py`). Mirrors `WorkingMemoryEnricher.run`: subscribe, handle the close sentinel, dispatch by event type, PUBLISH (never write memory), catch every exception per event (never crash), degrade to silent when `llm is None`. It caches the latest `working_memory_snapshot` (the L2 push context — bus-native, like the enricher caches `beacon.initial`) AND forward-merges each `working_memory.deltas` onto that cache, so the reactive cycle reasons over THIS command's freshly-extracted facts (see the event-order note); on each `enrichment.completed` it runs the trigger gate → one cycle → publishes `advisor.recommendation`. The trigger/dedup key is `f"{beacon_id or 'unknown'}:{command}"` (the wire `correlation_id` is not on `enrichment.completed`, and `beacon_id` may be `None` — see note).
 
-**Note (correlation_id):** `enrichment.completed`'s payload carries `command` + `beacon_id` (not the wire `correlation_id`; see `enricher.py:167-175`). Slice 1 uses `f"{beacon_id or 'unknown'}:{command}"` as the reactive attach/dedup handle — an honest handle to the triggering command (`beacon_id` may be `None`, hence the `'unknown'` fallback). Threading the true `correlation_id` through `enrichment.completed` is a one-line enricher change deferred to a later slice.
+**Note (correlation_id):** `enrichment.completed`'s payload carries `command` + `beacon_id` (not the wire `correlation_id`; see `enricher.py:167-175`). Task 2 (#23) uses `f"{beacon_id or 'unknown'}:{command}"` as the reactive attach/dedup handle — an honest handle to the triggering command (`beacon_id` may be `None`, hence the `'unknown'` fallback). Threading the true `correlation_id` through `enrichment.completed` is a one-line enricher change deferred to a later task.
 
-**Note (event order — fresh working memory):** production order is `working_memory.deltas` → `enrichment.completed` → `working_memory_snapshot` (the enricher publishes the deltas, the reducer applies them and re-emits the authoritative snapshot). The assistant reacts on the MIDDLE event, so the authoritative snapshot for this command has NOT landed yet. It therefore forward-merges the `working_memory.deltas` it just received onto the cached snapshot via `apply_deltas_to_snapshot` (Task 7) — a shallow list-extend — so the cycle sees this command's facts; the authoritative `working_memory_snapshot` then replaces the cache a beat later.
+**Note (event order — fresh working memory):** production order is `working_memory.deltas` → `enrichment.completed` → `working_memory_snapshot` (the enricher publishes the deltas, the reducer applies them and re-emits the authoritative snapshot). The assistant reacts on the MIDDLE event, so the authoritative snapshot for this command has NOT landed yet. It therefore forward-merges the `working_memory.deltas` it just received onto the cached snapshot via `apply_deltas_to_snapshot` (Step 7) — a shallow list-extend — so the cycle sees this command's facts; the authoritative `working_memory_snapshot` then replaces the cache a beat later.
 
 **Files:**
 - Create: `redrobin/application/agents/assistant/assistant.py`
 - Test: `tests/integration/test_assistant.py`
 
 **Interfaces:**
-- Consumes: `EventBus` (`redrobin.application.event_bus`); `run_cycle` + `state_signature` + `apply_deltas_to_snapshot` (Task 7); `TriggerGate` (Task 5); `AgentLLM` (Task 3); `AgentTool` (Task 1). Bus events `working_memory_snapshot` (payload = `working_memory_to_snapshot(wm)`, authoritative replace), `working_memory.deltas` (payload = `WorkingMemoryDeltas.to_payload()`, forward-merged), `enrichment.completed` (payload `{command, beacon_id, ...}`).
+- Consumes: `EventBus` (`redrobin.application.event_bus`); `run_cycle` + `state_signature` + `apply_deltas_to_snapshot` (Step 7); `TriggerGate` (Step 5); `AgentLLM` (Step 3); `AgentTool` (Step 1). Bus events `working_memory_snapshot` (payload = `working_memory_to_snapshot(wm)`, authoritative replace), `working_memory.deltas` (payload = `WorkingMemoryDeltas.to_payload()`, forward-merged), `enrichment.completed` (payload `{command, beacon_id, ...}`).
 - Produces:
   - `Assistant(*, bus: EventBus, llm: AgentLLM | None, tools: list[AgentTool], trigger: TriggerGate, summary_reader: Callable[[], str], enabled: bool = True, max_tokens: int = 2048)` with `on_started: Callable[[], None] | None`, `async run() -> None`.
   - Publishes `{"type": "advisor.recommendation", "payload": Recommendation.to_payload()}`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Write the failing test**
 
 Create `tests/integration/test_assistant.py`:
 
@@ -1704,17 +1708,17 @@ async def test_assistant_silent_model_does_not_publish():
         await _drain(bus, task)
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Run test to verify it fails**
 
 Run: `uv run pytest tests/integration/test_assistant.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'redrobin.application.agents.assistant.assistant'`.
 
-- [ ] **Step 3: Write minimal implementation**
+- [ ] **Write minimal implementation**
 
 Create `redrobin/application/agents/assistant/assistant.py`:
 
 ```python
-"""Assistant — reactive grounded-recommendation bus consumer (slice 1).
+"""Assistant — reactive grounded-recommendation bus consumer (Task 2).
 
 Mirrors WorkingMemoryEnricher: subscribes to the bus, PUBLISHES (never writes
 memory), runs degraded-None (no llm -> silent), and never crashes the daemon
@@ -1844,17 +1848,17 @@ class Assistant:
 __all__ = ["Assistant"]
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Run test to verify it passes**
 
 Run: `uv run pytest tests/integration/test_assistant.py -v`
 Expected: PASS (4 tests).
 
-- [ ] **Step 5: Verify mypy strict**
+- [ ] **Verify mypy strict**
 
 Run: `uv run mypy redrobin/domain redrobin/application`
 Expected: `Success: no issues found`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Commit**
 
 ```bash
 git add redrobin/application/agents/assistant/assistant.py tests/integration/test_assistant.py
@@ -1863,7 +1867,7 @@ git commit -m "feat(assistant): reactive bus consumer -> advisor.recommendation"
 
 ---
 
-## Task 9: TUI advisor-dock handler (reveal + 5-part card)
+### Step 9: TUI advisor-dock handler (reveal + 5-part card)
 
 The live output surface. `tui_ws` already forwards ALL bus events to the TUI (zero changes), and `#advisor-dock` already exists (reserved, `display: none`). This task adds the `advisor.recommendation` frame handler that reveals the dock and renders the 5-part card plainly (spec §6.C — polish/interaction deferred). "Un-hide" is implemented as **reveal-on-first-recommendation** (the existing `#resize-hint` toggle pattern: `widget.display = True` overrides the `.tcss` rule), so the dock shows the moment there is something to show rather than sitting empty — and the existing `test_advisor_dock_is_hidden` stays green. `register_advisor(REGISTRY)` binds the handler without a circular import back into `app.py`.
 
@@ -1880,7 +1884,7 @@ The live output surface. `tui_ws` already forwards ALL bus events to the TUI (ze
   - `_on_recommendation(app: Any, payload: dict[str, Any]) -> None` (FrameHandler).
   - `register_advisor(registry: Registry) -> None`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Write the failing test**
 
 Create `tests/unit/tui_textual/test_advisor.py`:
 
@@ -1929,12 +1933,12 @@ async def test_advisor_dock_reveals_and_renders_on_frame():
         assert "Validate svc_reports" in card.renderable.plain
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Run test to verify it fails**
 
 Run: `uv run pytest tests/unit/tui_textual/test_advisor.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'redrobin.tui.textual_ui.advisor'`.
 
-- [ ] **Step 3: Create the advisor module**
+- [ ] **Create the advisor module**
 
 Create `redrobin/tui/textual_ui/advisor.py`:
 
@@ -1946,7 +1950,7 @@ Create `redrobin/tui/textual_ui/advisor.py`:
 pure Rich renderer (mirrors panels.format_memory) so it unit-tests directly.
 The handler reveals the reserved `#advisor-dock` (hidden until the first
 recommendation — the resize-hint toggle pattern) and renders the 5-part card
-plainly (spec §6.C — polish + interaction affordances deferred to later slices).
+plainly (spec §6.C — polish + interaction affordances deferred to later tasks).
 """
 
 from __future__ import annotations
@@ -2013,7 +2017,7 @@ def register_advisor(registry: Registry) -> None:
 __all__ = ["format_recommendation", "register_advisor"]
 ```
 
-- [ ] **Step 4: Register the handler in `app.py`**
+- [ ] **Register the handler in `app.py`**
 
 In `redrobin/tui/textual_ui/app.py`, add the import near the other `redrobin.tui.textual_ui` imports (after the `frames` import, ~line 22):
 
@@ -2029,14 +2033,14 @@ Then, immediately after `REGISTRY = Registry()` (line 36), add:
 register_advisor(REGISTRY)
 ```
 
-- [ ] **Step 5: Add minimal dock styling in `theme.tcss`**
+- [ ] **Add minimal dock styling in `theme.tcss`**
 
 In `redrobin/tui/textual_ui/theme.tcss`, replace the existing advisor-dock rule (near line 48-54) with (keeps `display: none` as the resting state; the handler reveals it):
 
 ```css
-/* AI Advisor dock (slice 1). Reserved + hidden; the advisor.recommendation
+/* AI Advisor dock (Task 2). Reserved + hidden; the advisor.recommendation
    handler flips display on the first recommendation (reveal-on-first, like
-   #resize-hint). Plain card — polish deferred to a later slice. */
+   #resize-hint). Plain card — polish deferred to a later task. */
 #advisor-dock {
     display: none;
     dock: bottom;
@@ -2050,17 +2054,17 @@ In `redrobin/tui/textual_ui/theme.tcss`, replace the existing advisor-dock rule 
 }
 ```
 
-- [ ] **Step 6: Run test to verify it passes**
+- [ ] **Run test to verify it passes**
 
 Run: `uv run pytest tests/unit/tui_textual/test_advisor.py -v`
 Expected: PASS (3 tests).
 
-- [ ] **Step 7: Verify the existing dock test still passes (reveal-on-first didn't break it)**
+- [ ] **Verify the existing dock test still passes (reveal-on-first didn't break it)**
 
 Run: `uv run pytest tests/unit/tui_textual/test_app_layout.py -v`
 Expected: PASS (including `test_advisor_dock_is_hidden` — no frame dispatched, so the dock stays hidden).
 
-- [ ] **Step 8: Commit**
+- [ ] **Commit**
 
 ```bash
 git add redrobin/tui/textual_ui/advisor.py redrobin/tui/textual_ui/app.py redrobin/tui/textual_ui/theme.tcss tests/unit/tui_textual/test_advisor.py
@@ -2069,7 +2073,7 @@ git commit -m "feat(tui): advisor-dock recommendation handler (reveal + 5-part c
 
 ---
 
-## Task 10: assistant `Settings` + `start_assistant` lifespan wiring
+### Step 10: assistant `Settings` + `start_assistant` lifespan wiring
 
 Wire the assistant into the daemon. Adds assistant `Settings` (enable / model / cooldown / token budget — mirroring the enrichment settings), a `start_assistant` lifespan helper (mirroring `start_enricher`: degraded-None boot, drain-on-close), and registers it in the `app.py` lifespan orchestrator (startup after `start_enricher`; shutdown before `close_enricher` — reverse order). The L5 push context is read via the injected `summary_reader` closure over `ContextSummaryRepo.list_recent`.
 
@@ -2080,12 +2084,12 @@ Wire the assistant into the daemon. Adds assistant `Settings` (enable / model / 
 - Test: `tests/integration/test_assistant_lifespan.py`
 
 **Interfaces:**
-- Consumes: `Assistant` (Task 8), `build_agent_llm` (Task 3), `build_kb_service` + `build_tool_registry` (Task 4), `TriggerGate` (Task 5). `app.state.event_bus`, `app.state.summary_repo`, `app.state.engagement_id` (set by earlier helpers).
+- Consumes: `Assistant` (Step 8), `build_agent_llm` (Step 3), `build_kb_service` + `build_tool_registry` (Step 4), `TriggerGate` (Step 5). `app.state.event_bus`, `app.state.summary_repo`, `app.state.engagement_id` (set by earlier helpers).
 - Produces:
   - `Settings.assistant_enabled: bool`, `assistant_model: str`, `assistant_cooldown_sec: float`, `assistant_max_tokens: int`.
   - `start_assistant(app: FastAPI, settings: Settings) -> tuple[Assistant, CloseHook]`; `app.state.assistant`, `app.state.assistant_task`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Write the failing test**
 
 Create `tests/integration/test_assistant_lifespan.py`:
 
@@ -2147,17 +2151,17 @@ async def test_lifespan_starts_assistant_task(tmp_path, monkeypatch):
     assert app.state.assistant_task.cancelled() is False
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Run test to verify it fails**
 
 Run: `uv run pytest tests/integration/test_assistant_lifespan.py -v`
 Expected: FAIL — `AttributeError: 'Settings' object has no attribute 'assistant_enabled'` (and the import of `start_assistant` fails).
 
-- [ ] **Step 3: Add the assistant Settings**
+- [ ] **Add the assistant Settings**
 
 In `redrobin/infrastructure/config.py`, add these fields immediately after the enrichment block (after `enrichment_self_annotation_prefix`, before the `# Operator policy` comment, ~line 82):
 
 ```python
-    # AI assistant (reactive grounded recommendation — slice 1)
+    # AI assistant (reactive grounded recommendation — Task 2)
     assistant_enabled: bool = Field(default=True, alias="REDROBIN_ASSISTANT_ENABLED")
     assistant_model: str = Field(default="claude-haiku-4-5", alias="REDROBIN_ASSISTANT_MODEL")
     assistant_cooldown_sec: float = Field(default=30.0, alias="REDROBIN_ASSISTANT_COOLDOWN_SEC")
@@ -2183,7 +2187,7 @@ Add `"assistant_cooldown_sec"` to the `_positive_float` `@field_validator` list:
     @field_validator("promoter_interval_sec", "l5_interval_sec", "assistant_cooldown_sec")
 ```
 
-- [ ] **Step 4: Add `start_assistant` to `lifespan_helpers.py`**
+- [ ] **Add `start_assistant` to `lifespan_helpers.py`**
 
 Add these imports near the top of `redrobin/api/lifespan_helpers.py` (with the other `redrobin.application` imports):
 
@@ -2198,7 +2202,7 @@ Add the helper (place it after `start_enricher`, before `start_dedup`):
 
 ```python
 async def start_assistant(app: FastAPI, settings: Settings) -> tuple[Assistant, CloseHook]:
-    """Start the reactive AI assistant (slice 1).
+    """Start the reactive AI assistant (Task 2).
 
     Subscribes to the bus, consumes ``enrichment.completed``, and publishes
     ``advisor.recommendation``. Degraded-None: missing ANTHROPIC_API_KEY ->
@@ -2259,7 +2263,7 @@ Add `"start_assistant"` to the `__all__` list at the bottom of the module (alpha
     "start_assistant",
 ```
 
-- [ ] **Step 5: Wire `start_assistant` into the `app.py` lifespan**
+- [ ] **Wire `start_assistant` into the `app.py` lifespan**
 
 In `redrobin/api/app.py`, add `start_assistant` to the import block from `redrobin.api.lifespan_helpers` (alphabetical, after `start_adapters`):
 
@@ -2282,12 +2286,12 @@ In the shutdown `finally` block, add a close call immediately BEFORE the existin
             logger.exception("close_assistant failed")
 ```
 
-- [ ] **Step 6: Run test to verify it passes**
+- [ ] **Run test to verify it passes**
 
 Run: `uv run pytest tests/integration/test_assistant_lifespan.py -v`
 Expected: PASS (4 tests).
 
-- [ ] **Step 7: Run the full gate**
+- [ ] **Run the full gate**
 
 Run:
 ```bash
@@ -2297,9 +2301,9 @@ uv run mypy redrobin/domain redrobin/application
 uv run lint-imports --config importlinter.cfg
 uv run pytest tests/ -v --tb=short
 ```
-Expected: all PASS. (This is the deterministic acceptance for the whole CI-testable slice.)
+Expected: all PASS. (This is the deterministic acceptance for the whole CI-testable Task 2 (#23).)
 
-- [ ] **Step 8: Commit**
+- [ ] **Commit**
 
 ```bash
 git add redrobin/infrastructure/config.py redrobin/api/lifespan_helpers.py redrobin/api/app.py tests/integration/test_assistant_lifespan.py
@@ -2308,9 +2312,9 @@ git commit -m "feat(assistant): Settings + start_assistant lifespan wiring"
 
 ---
 
-## Task 11: operator-smoke fixture + runbook (the live-surface acceptance)
+### Step 11: operator-smoke fixture + runbook (the live-surface acceptance)
 
-The live surface — the `#advisor-dock` rendering a real recommendation over a real beacon, the enricher/reducer producing real working memory — is **not** CI-testable (`development-workflow.md` §5). The ONLY acceptance for it is an **operator smoke** (skill **smoke-test**). This task renames the draft fixture, EXPANDS it to a richer recon→loot→follow-the-hint scenario (a second breadcrumb the first points to), and writes the step-by-step runbook with checkpoints tagged `[Slice 1]` (expected now) vs `[later slice]` (deliberately NOT expected). No TDD — a lab fixture + doc; acceptance is the manual smoke.
+The live surface — the `#advisor-dock` rendering a real recommendation over a real beacon, the enricher/reducer producing real working memory — is **not** CI-testable (`development-workflow.md` §5). The ONLY acceptance for it is an **operator smoke** (skill **smoke-test**). This task renames the draft fixture, EXPANDS it to a richer recon→loot→follow-the-hint scenario (a second breadcrumb the first points to), and writes the step-by-step runbook with checkpoints tagged `[Task 2]` (expected now) vs `[later task]` (deliberately NOT expected). No TDD — a lab fixture + doc; acceptance is the manual smoke.
 
 **Files:**
 - Rename: `scripts/smoke/rr-slice1-fixture.ps1` → `scripts/smoke/rr-assistant-smoke-fixture.ps1` (+ expand)
@@ -2318,13 +2322,13 @@ The live surface — the `#advisor-dock` rendering a real recommendation over a 
 
 **Interfaces:** none (operator tooling).
 
-- [ ] **Step 1: Rename the fixture (preserve history)**
+- [ ] **Rename the fixture (preserve history)**
 
 ```bash
 git mv scripts/smoke/rr-slice1-fixture.ps1 scripts/smoke/rr-assistant-smoke-fixture.ps1
 ```
 
-- [ ] **Step 2: Expand the fixture — add the "follow-the-hint" second breadcrumb**
+- [ ] **Expand the fixture — add the "follow-the-hint" second breadcrumb**
 
 Replace the whole contents of `scripts/smoke/rr-assistant-smoke-fixture.ps1` with (adds a third decoy at `exports\svc_sql_readme.txt` that the `notes_old.txt` hint points to, so the operator can demonstrate recon → loot → follow the hint across two steps):
 
@@ -2424,17 +2428,17 @@ Write-Host ""
 Write-Host "Cleanup when done:  powershell -ExecutionPolicy Bypass -File .\rr-assistant-smoke-fixture.ps1 -Cleanup" -ForegroundColor DarkGray
 ```
 
-- [ ] **Step 3: Write the runbook**
+- [ ] **Write the runbook**
 
 Create `scripts/smoke/rr-assistant-smoke-runbook.md`:
 
 ````markdown
-# Operator smoke — AI assistant slice 1 (reactive grounded recommendation)
+# Operator smoke — AI assistant Task 2 #23 (reactive grounded recommendation)
 
 The live surface (the `#advisor-dock` render over a real CS beacon + the
 enricher/reducer over real output) is NOT CI-testable — this manual smoke is its
 only acceptance (skill **smoke-test**, `development-workflow.md` §5). Checkpoints
-are tagged `[Slice 1]` (must pass now) or `[later slice]` (deliberately NOT
+are tagged `[Task 2]` (must pass now) or `[later task]` (deliberately NOT
 expected yet — do not fail the smoke on these).
 
 ## Preconditions
@@ -2458,21 +2462,21 @@ shell type "C:\Users\Public\RR-Smoke\db_backup.config"
 shell type "C:\Users\Public\RR-Smoke\notes_old.txt"
 ```
 
-- **[Slice 1] Checkpoint A — an advisor card appears** in `#advisor-dock` within a
+- **[Task 2] Checkpoint A — an advisor card appears** in `#advisor-dock` within a
   few seconds (the dock reveals itself; it was hidden before). It appears
   *reactively*, triggered by the command output — you did not ask for it.
-- **[Slice 1] Checkpoint B — the card has all 5 parts:** `→` a concrete WHAT
+- **[Task 2] Checkpoint B — the card has all 5 parts:** `→` a concrete WHAT
   (e.g. validate `svc_reports` against SQL01), `why` a tradecraft rationale,
   `opsec` INFO/WARN/DANGER with a reason, `conf` a confidence that names what it
   is NOT sure about, `refs` grounding.
-- **[Slice 1] Checkpoint C — references are grounded (extracted facts, not raw
+- **[Task 2] Checkpoint C — references are grounded (extracted facts, not raw
   output):** `refs` cite the freshly-extracted facts the enricher pulled from your
   command (e.g. the `svc_reports` credential extracted from the
   `type db_backup.config` output) and/or a KB chunk (e.g.
-  `vault/Techniques/...#chunk_n`) — grounded, not invented. Slice 1 has NO
+  `vault/Techniques/...#chunk_n`) — grounded, not invented. Task 2 (#23) has NO
   Operational Journal (raw transcript) yet, so do NOT expect `refs` to quote the raw
   output text verbatim.
-- **[Slice 1] Checkpoint D — advisory only:** the card says advisory / nothing
+- **[Task 2] Checkpoint D — advisory only:** the card says advisory / nothing
   dispatched; NO command was sent to the beacon (read-only by construction).
 
 ## Run — step 2: follow the hint
@@ -2481,61 +2485,61 @@ shell dir  "C:\Users\Public\RR-Smoke\exports"
 shell type "C:\Users\Public\RR-Smoke\exports\svc_sql_readme.txt"
 ```
 
-- **[Slice 1] Checkpoint E — a second recommendation** appears for the `svc_sql`
+- **[Task 2] Checkpoint E — a second recommendation** appears for the `svc_sql`
   finding, grounded in the new output (the assistant reacted again on new state).
-- **[Slice 1] Checkpoint F — signal-not-noise:** re-running the SAME `type`
+- **[Task 2] Checkpoint F — signal-not-noise:** re-running the SAME `type`
   (no new state) does NOT produce a duplicate card (dedup/novelty/cooldown).
 
 ## Degraded / never-crash
-- **[Slice 1] Checkpoint G:** restart the daemon with `ANTHROPIC_API_KEY` unset →
+- **[Task 2] Checkpoint G:** restart the daemon with `ANTHROPIC_API_KEY` unset →
   the daemon still boots, the TUI still works, NO advisor cards appear (silent),
   nothing crashes.
 
-## Explicitly out of scope (do NOT expect — later slices)
-- **[later slice]** A *proactive* card on a lull / phase boundary with no command.
-- **[later slice]** Asking the assistant a question in a Chat pane ("what's my
+## Explicitly out of scope (do NOT expect — later tasks)
+- **[later task]** A *proactive* card on a lull / phase boundary with no command.
+- **[later task]** Asking the assistant a question in a Chat pane ("what's my
   path to DA?") and getting a deep answer (conversational mode).
-- **[later slice]** Pushing back ("too loud") and it capturing a lesson (learning loop).
-- **[later slice]** The assistant writing `current_phase` / objective status, or a
+- **[later task]** Pushing back ("too loud") and it capturing a lesson (learning loop).
+- **[later task]** The assistant writing `current_phase` / objective status, or a
   propose-and-confirm affordance (interpretation-write).
-- **[later slice]** `search_journal` / `get_lessons` tools, or the deep Sonnet sub-agent.
+- **[later task]** `search_journal` / `get_lessons` tools, or the deep Sonnet sub-agent.
 
 ## Teardown
 `powershell -ExecutionPolicy Bypass -File .\rr-assistant-smoke-fixture.ps1 -Cleanup`
 ````
 
-- [ ] **Step 4: Commit the fixture + runbook**
+- [ ] **Commit the fixture + runbook**
 
 ```bash
 git add scripts/smoke/rr-assistant-smoke-fixture.ps1 scripts/smoke/rr-assistant-smoke-runbook.md
 git commit -m "test(assistant): operator-smoke fixture + runbook (rename + expand)"
 ```
 
-- [ ] **Step 5: Run the operator smoke (acceptance — manual, live beacon)**
+- [ ] **Run the operator smoke (acceptance — manual, live beacon)**
 
 Invoke the **smoke-test** skill and walk the runbook against a live CS beacon.
-Acceptance = all `[Slice 1]` checkpoints (A–G) pass. This is the ONLY acceptance
+Acceptance = all `[Task 2]` checkpoints (A–G) pass. This is the ONLY acceptance
 for the live surface; CI cannot exercise it. (No commit — this is a verification
 gate, not a code change.)
 
 ---
 
-## Remaining slices (this planning pass — separate plan docs)
+## Remaining tasks (this planning pass — separate plan docs)
 
-The design is fully locked (spec §6 all-closed); only the per-slice PLAN docs
-remain — **no re-brainstorming**. Each plugs into the seams this slice proved
+The design is fully locked (spec §6 all-closed); only the per-task PLAN docs
+remain — **no re-brainstorming**. Each plugs into the seams this task proved
 (register a tool / add a trigger / add an output handler) without re-architecture:
 
-1. **Operational Journal + its tool** — index the existing `events.jsonl` (join
+1. **Task 3 (#24) — Operational Journal + its tool** — index the existing `events.jsonl` (join
    `beacon.command_input` + `beacon.command_output` by `correlation_id`, Voyage
    index) + a `search_journal` PULL tool appended to `build_tool_registry` (spec §6.B).
-2. **Proactive mode** — a debounced background check (lull / material state-change)
+2. **Task 4 (#25) — Proactive mode** — a debounced background check (lull / material state-change)
    through the SAME `TriggerGate`, rate-limited; new tunable `Settings` (spec §6.A).
-3. **Conversational mode + learning loop** — the TUI Chat pane +
+3. **Task 5 (#26) — Conversational mode + learning loop** — the TUI Chat pane +
    `operator.question`/`operator.answer`; correction → a context-scoped `Lesson`
    (engagement vs operator scope) + a `get_lessons` tool that closes the
    L1-written-but-never-read gap (spec §6.A, §6.D).
-4. **Interpretation-write + propose-and-confirm** — publish `engagement.milestone`
+4. **Task 6 (#27) — Interpretation-write + propose-and-confirm** — publish `engagement.milestone`
    (the reducer merge-case already exists) for soft auto-writes; async non-blocking
    binary confirm for close/commit changes (spec §6.C).
 
@@ -2547,10 +2551,10 @@ Sonnet sub-agent (spec §6.A), LLM-boundary secret redaction (spec §6.E), and
 
 ## Execution
 
-Plan complete and saved to `docs/superpowers/plans/2026-07-16-ai-assistant-slice-1.md`. Two execution options:
+Plan complete and saved to `docs/superpowers/plans/2026-07-16-ai-assistant-tasks-1-2.md`. Two execution options:
 
 **1. Subagent-Driven (recommended)** — dispatch a fresh subagent per task, review between tasks, fast iteration (REQUIRED SUB-SKILL: `superpowers:subagent-driven-development`; fresh subagent per task + a spec-and-quality review gate per task + a whole-branch review at the end, per `development-workflow.md` §4).
 
 **2. Inline Execution** — execute tasks in this session with checkpoints (REQUIRED SUB-SKILL: `superpowers:executing-plans`).
 
-Recommended order is Task 0 → 11 as written (Task 0 lands first as its own reviewable change; Tasks 1→10 are the CI-tested feature; Task 11 is the live-surface operator smoke).
+Recommended order is Task 1 (#22) then Steps 1 → 11 as written (Task 1 (#22) lands first as its own reviewable change; Steps 1→10 are the CI-tested feature; Step 11 is the live-surface operator smoke).
