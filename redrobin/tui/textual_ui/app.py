@@ -18,6 +18,7 @@ from textual.events import Resize
 from textual.reactive import reactive
 from textual.widgets import Footer, Static
 
+from redrobin.tui.textual_ui.advisor import register_advisor
 from redrobin.tui.textual_ui.commands import RedRobinCommands
 from redrobin.tui.textual_ui.frames import Registry
 from redrobin.tui.textual_ui.help_screen import HelpScreen
@@ -34,6 +35,10 @@ from redrobin.tui.textual_ui.panels import (
 # Module-level registry: handlers register at import time (Task 5). A future
 # feature adds its frame type with a new @REGISTRY.register — no edits here.
 REGISTRY = Registry()
+
+# Advisor frames register on the shared REGISTRY via a binder (avoids a circular
+# import: advisor.py imports only frames, never app).
+register_advisor(REGISTRY)
 
 
 def is_too_small(width: int, height: int) -> bool:
