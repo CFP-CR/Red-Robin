@@ -35,8 +35,12 @@ cached-block path here would just bypass every block.
 
 from __future__ import annotations
 
-import anthropic
+from typing import Any
 
+import anthropic
+from anthropic.lib.tools import BetaAsyncFunctionTool, beta_async_tool
+
+from redrobin.domain.assistant import AgentTool
 from redrobin.domain.llm import LLMProvider, LLMResponse
 from redrobin.infrastructure.llm.api_keys import get_anthropic_key
 
@@ -268,3 +272,79 @@ class AnthropicEnricherClient:
             ],
         )
         return response.content[0].text
+
+
+# --- appended for the AI assistant (Task 2) -------------------------------
+def _to_runner_tool(tool: AgentTool) -> BetaAsyncFunctionTool[Any]:
+    """Adapt a provider-agnostic ``AgentTool`` into a Tool Runner async tool.
+
+    Mirrors ``anthropic.lib.tools.mcp.async_mcp_tool``: a ``**kwargs`` coroutine
+    plus an explicit name/description/input_schema (so we keep OUR schema rather
+    than deriving one from the signature). The runner passes tool arguments as
+    kwargs; we hand them to the AgentTool's handler as a dict."""
+
+    async def _call(**kwargs: Any) -> str:
+        return await tool.handler(dict(kwargs))
+
+    return beta_async_tool(
+        _call,
+        name=tool.name,
+        description=tool.description,
+        input_schema=tool.input_schema,  # type: ignore[arg-type]
+    )
+
+
+def _first_text(message: Any) -> str:
+    """Return the first ``text`` block of a (Parsed)BetaMessage, or '' if none
+    (e.g. the model ended on a tool_use with no trailing text)."""
+    for block in message.content:
+        if getattr(block, "type", None) == "text":
+            return str(block.text)
+    return ""
+
+
+class AnthropicAgentClient:
+    """AgentLLM impl — ONE native Tool Runner cycle per call.
+
+    ``client.beta.messages.tool_runner`` drives the request -> tool -> loop cycle
+    for us on the shared ``AsyncAnthropic`` client; the beta tool-loop is fully
+    insulated here so the assistant (application) depends only on the ``AgentLLM``
+    Protocol. Haiku-class model (the fast reactive path, spec §6.A). The system
+    prompt is sent as a FROZEN 1h-cached block; the volatile working-set is in the
+    user message (caching refinement: never co-locate the mutating snapshot with
+    the cached prefix)."""
+
+    def __init__(
+        self, *, model: str = "claude-haiku-4-5", max_retries: int = 5, max_iterations: int = 8
+    ) -> None:
+        self._model = model
+        self._max_iterations = max_iterations
+        self._client = anthropic.AsyncAnthropic(
+            api_key=get_anthropic_key(),
+            max_retries=max_retries,
+        )
+
+    async def run(
+        self,
+        *,
+        system: str,
+        user_message: str,
+        tools: list[AgentTool],
+        max_tokens: int = 2048,
+    ) -> str:
+        runner = self._client.beta.messages.tool_runner(
+            model=self._model,
+            max_tokens=max_tokens,
+            max_iterations=self._max_iterations,
+            system=[
+                {
+                    "type": "text",
+                    "text": system,
+                    "cache_control": {"type": "ephemeral", "ttl": "1h"},
+                }
+            ],
+            tools=[_to_runner_tool(t) for t in tools],
+            messages=[{"role": "user", "content": user_message}],
+        )
+        message = await runner.until_done()
+        return _first_text(message)
