@@ -43,3 +43,22 @@ def test_unknown_severity_falls_back_to_info():
         '{"suggested_action":"a","rationale":"b","opsec_risk":"NOPE"}', correlation_id=None
     )
     assert rec is not None and rec.opsec_risk is Severity.INFO
+
+
+def test_non_list_numeric_references_does_not_raise():
+    # A truthy non-list `references` (5) must NOT raise (never-raises contract) — it
+    # is coerced to an empty list, not iterated.
+    rec = parse_recommendation(
+        '{"suggested_action":"a","rationale":"b","references":5}', correlation_id="x"
+    )
+    assert rec is not None
+    assert rec.references == []
+
+
+def test_string_references_does_not_char_splat():
+    # A string `references` ("abc") must become [] — not char-splat into ["a","b","c"].
+    rec = parse_recommendation(
+        '{"suggested_action":"a","rationale":"b","references":"abc"}', correlation_id="x"
+    )
+    assert rec is not None
+    assert rec.references == []

@@ -49,7 +49,8 @@ def parse_recommendation(raw: str, *, correlation_id: str | None) -> Recommendat
     risk_raw = str(data.get("opsec_risk", "INFO")).strip().upper()
     risk = Severity(risk_raw) if risk_raw in _VALID_SEVERITIES else Severity.INFO
     confidence = str(data.get("confidence", "")).strip()
-    refs_raw = data.get("references") or []
+    _refs = data.get("references")
+    refs_raw = _refs if isinstance(_refs, list) else []
     references = [str(r) for r in refs_raw if isinstance(r, (str, int, float))]
     return Recommendation(
         suggested_action=action,
