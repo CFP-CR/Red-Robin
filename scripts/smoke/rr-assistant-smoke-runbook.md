@@ -45,6 +45,11 @@ shell type "C:\Users\Public\RR-Smoke\notes_old.txt"
   dispatched; NO command was sent to the beacon (read-only by construction).
 
 ## Run — step 2: follow the hint
+> **Wait ~30 s after step 1's card before running step 2** — the assistant cooldown
+> (`assistant_cooldown_sec`, default 30.0) is signal-not-noise and will *correctly*
+> suppress a second card fired too soon, so a fast step 2 with no Checkpoint-E card is
+> the cooldown working, not a failure.
+
 ```
 shell dir  "C:\Users\Public\RR-Smoke\exports"
 shell type "C:\Users\Public\RR-Smoke\exports\svc_sql_readme.txt"
