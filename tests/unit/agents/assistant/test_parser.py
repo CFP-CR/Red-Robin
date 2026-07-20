@@ -32,6 +32,24 @@ def test_missing_action_or_rationale_returns_none():
     assert parse_recommendation('{"rationale":"b"}', correlation_id="x") is None
 
 
+def test_null_action_or_rationale_returns_none():
+    # An explicit JSON null (not a missing key) must be coalesced to "" and dropped —
+    # not coerced into the truthy literal "None" that would pass the WHAT/WHY gate.
+    assert (
+        parse_recommendation('{"suggested_action":null,"rationale":null}', correlation_id="x")
+        is None
+    )
+
+
+def test_null_confidence_becomes_empty_string():
+    # A valid WHAT+WHY with an explicit null confidence must render as "" — never "None".
+    rec = parse_recommendation(
+        '{"suggested_action":"a","rationale":"b","confidence":null}', correlation_id="x"
+    )
+    assert rec is not None
+    assert rec.confidence == ""
+
+
 def test_empty_and_malformed_return_none():
     assert parse_recommendation("", correlation_id="x") is None
     assert parse_recommendation("not json at all", correlation_id="x") is None
