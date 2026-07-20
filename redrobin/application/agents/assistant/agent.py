@@ -47,13 +47,28 @@ def build_system_prompt() -> str:
     return _SYSTEM_PROMPT
 
 
+# Default resident-set cap (spec §6.B refinement 2). A backwards-compat fallback
+# for direct callers/tests; production threads ``settings.assistant_wm_max_items``.
+_DEFAULT_WM_MAX_ITEMS = 20
+
+
 def build_push_context(
-    *, wm_snapshot: dict[str, Any], l5_summary: str, trigger_command: str
+    *,
+    wm_snapshot: dict[str, Any],
+    l5_summary: str,
+    trigger_command: str,
+    wm_max_items: int = _DEFAULT_WM_MAX_ITEMS,
 ) -> str:
     """Assemble the small, token-bounded PUSH working-set: L2 (current working
     memory) + L5 (story so far) + the triggering command. The volatile block —
-    lives in the user message, after the cached system prefix."""
-    wm_json = json.dumps(wm_snapshot, ensure_ascii=False, sort_keys=True)
+    lives in the user message, after the cached system prefix.
+
+    The L2 snapshot is capped to the most-recent ``wm_max_items`` per category
+    (context-rot guard, spec §6.B refinement 2) so a long engagement never
+    re-sends an ever-growing resident set. Non-mutating: the cached snapshot is
+    left intact (see :func:`cap_wm_snapshot`)."""
+    capped = cap_wm_snapshot(wm_snapshot, wm_max_items)
+    wm_json = json.dumps(capped, ensure_ascii=False, sort_keys=True)
     return "\n".join(
         [
             "# Engagement working memory (L2)",
@@ -80,6 +95,26 @@ def state_signature(wm_snapshot: dict[str, Any]) -> str:
 # The list-valued fact types the enricher extracts — exactly the
 # ``WorkingMemoryDeltas.to_payload()`` keys.
 _DELTA_LIST_KEYS = ("hosts", "credentials", "findings", "tools_used", "defenses_observed")
+
+
+def cap_wm_snapshot(snapshot: dict[str, Any], max_items: int) -> dict[str, Any]:
+    """Cap the resident working-memory set to the most-recent ``max_items`` per
+    category (spec §6.B refinement 2 — context-rot guard).
+
+    For each of the enricher's five list-valued fact categories, keep only the
+    LAST ``max_items`` items — the tail, since the enricher appends newest-last —
+    so a long engagement's WM lists don't grow unbounded and get re-sent every
+    cycle (recall degrades as resident tokens grow). Non-mutating: returns a NEW
+    dict, and a NEW list for any category it caps; the input ``snapshot`` (the
+    assistant's cached L2) is never altered — mirrors
+    :func:`apply_deltas_to_snapshot`. Scalar fields and other keys pass through.
+    """
+    capped = dict(snapshot)
+    for key in _DELTA_LIST_KEYS:
+        value = capped.get(key)
+        if isinstance(value, list) and len(value) > max_items:
+            capped[key] = value[-max_items:]
+    return capped
 
 
 def apply_deltas_to_snapshot(
@@ -117,13 +152,17 @@ async def run_cycle(
     trigger_command: str,
     correlation_id: str | None,
     max_tokens: int = 2048,
+    wm_max_items: int = _DEFAULT_WM_MAX_ITEMS,
 ) -> Recommendation | None:
     """Run ONE agent cycle: assemble -> Tool Runner loop (via AgentLLM) -> parse
     into a Recommendation, or None to stay silent."""
     raw = await llm.run(
         system=build_system_prompt(),
         user_message=build_push_context(
-            wm_snapshot=wm_snapshot, l5_summary=l5_summary, trigger_command=trigger_command
+            wm_snapshot=wm_snapshot,
+            l5_summary=l5_summary,
+            trigger_command=trigger_command,
+            wm_max_items=wm_max_items,
         ),
         tools=tools,
         max_tokens=max_tokens,
@@ -137,6 +176,7 @@ async def run_cycle(
 
 __all__ = [
     "apply_deltas_to_snapshot",
+    "cap_wm_snapshot",
     "build_system_prompt",
     "build_push_context",
     "state_signature",

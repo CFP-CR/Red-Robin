@@ -85,6 +85,10 @@ class Settings(BaseSettings):
     assistant_model: str = Field(default="claude-haiku-4-5", alias="REDROBIN_ASSISTANT_MODEL")
     assistant_cooldown_sec: float = Field(default=30.0, alias="REDROBIN_ASSISTANT_COOLDOWN_SEC")
     assistant_max_tokens: int = Field(default=2048, alias="REDROBIN_ASSISTANT_MAX_TOKENS")
+    # Context-rot cap (spec §6.B refinement 2): most-recent items kept per working-
+    # memory category in the pushed context so long engagements don't re-send an
+    # ever-growing resident set every cycle.
+    assistant_wm_max_items: int = Field(default=20, alias="REDROBIN_ASSISTANT_WM_MAX_ITEMS")
 
     # Operator policy
     allow_degraded_layer_b: bool = Field(default=False, alias="REDROBIN_ALLOW_DEGRADED")
@@ -125,6 +129,7 @@ class Settings(BaseSettings):
         "enrichment_chunk_max_chars",
         "enrichment_max_concurrency",
         "assistant_max_tokens",
+        "assistant_wm_max_items",
     )
     @classmethod
     def _positive_int(cls, v: int) -> int:

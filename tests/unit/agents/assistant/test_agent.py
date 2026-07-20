@@ -1,9 +1,12 @@
+import copy
+
 import pytest
 
 from redrobin.application.agents.assistant.agent import (
     apply_deltas_to_snapshot,
     build_push_context,
     build_system_prompt,
+    cap_wm_snapshot,
     run_cycle,
     state_signature,
 )
@@ -32,6 +35,40 @@ def test_push_context_carries_l2_l5_and_trigger():
 
 def test_state_signature_changes_with_state():
     assert state_signature({"hosts": []}) != state_signature({"hosts": [{"name": "ws01"}]})
+
+
+def test_push_context_caps_working_memory_per_category_without_mutating():
+    # spec §6.B refinement 2 (context-rot): only the most-recent K items of each
+    # list category are pushed to the model; the cached snapshot is never altered.
+    snapshot = {
+        "hosts": [{"name": f"h{i}"} for i in range(30)],  # > K -> capped
+        "credentials": [{"username": f"u{i}"} for i in range(3)],  # < K -> untouched
+        "current_phase": "lateral-movement",  # non-list scalar -> untouched
+    }
+    original = copy.deepcopy(snapshot)
+    ctx = build_push_context(
+        wm_snapshot=snapshot, l5_summary="", trigger_command="whoami", wm_max_items=10
+    )
+    # only the last 10 hosts (the newest — enricher appends) survive
+    assert '"h29"' in ctx and '"h20"' in ctx
+    assert '"h19"' not in ctx and '"h0"' not in ctx
+    # a small category is passed through unchanged
+    assert '"u0"' in ctx and '"u2"' in ctx
+    # the scalar field is preserved
+    assert "lateral-movement" in ctx
+    # the cached snapshot is NOT mutated (non-mutating copy, like apply_deltas)
+    assert snapshot == original
+
+
+def test_cap_wm_snapshot_returns_new_dict_and_lists():
+    snapshot = {"findings": [1, 2, 3, 4, 5], "tools_used": ["a"]}
+    capped = cap_wm_snapshot(snapshot, 2)
+    assert capped["findings"] == [4, 5]  # last K (tail = newest)
+    assert capped["tools_used"] == ["a"]  # under the cap -> unchanged
+    # non-mutating: a new dict and a new capped list
+    assert capped is not snapshot
+    assert capped["findings"] is not snapshot["findings"]
+    assert snapshot["findings"] == [1, 2, 3, 4, 5]
 
 
 def test_apply_deltas_extends_snapshot_lists_without_mutating_input():

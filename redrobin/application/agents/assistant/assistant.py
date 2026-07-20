@@ -38,6 +38,7 @@ class Assistant:
         summary_reader: Callable[[], str],
         enabled: bool = True,
         max_tokens: int = 2048,
+        wm_max_items: int = 20,
     ) -> None:
         self._bus = bus
         self._llm = llm
@@ -46,6 +47,7 @@ class Assistant:
         self._summary_reader = summary_reader
         self._enabled = enabled
         self._max_tokens = max_tokens
+        self._wm_max_items = wm_max_items
         self._wm_snapshot: dict[str, Any] = {}
         self.on_started: Callable[[], None] | None = None
 
@@ -110,6 +112,7 @@ class Assistant:
             trigger_command=trigger_command,
             correlation_id=trigger_key,
             max_tokens=self._max_tokens,
+            wm_max_items=self._wm_max_items,
         )
         if rec is None:
             return  # signal-not-noise: the model stayed silent, or the output was unusable

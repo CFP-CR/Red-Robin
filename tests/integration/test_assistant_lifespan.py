@@ -15,6 +15,7 @@ def test_settings_expose_assistant_knobs(monkeypatch):
     assert s.assistant_model == "claude-haiku-4-5"
     assert s.assistant_cooldown_sec == 30.0
     assert s.assistant_max_tokens == 2048
+    assert s.assistant_wm_max_items == 20
 
 
 def test_settings_assistant_model_override(monkeypatch):
@@ -22,6 +23,24 @@ def test_settings_assistant_model_override(monkeypatch):
     from redrobin.application.config import Settings
 
     assert Settings().assistant_model == "claude-sonnet-4-6"
+
+
+def test_settings_assistant_wm_max_items_override(monkeypatch):
+    monkeypatch.setenv("REDROBIN_ASSISTANT_WM_MAX_ITEMS", "5")
+    from redrobin.application.config import Settings
+
+    assert Settings().assistant_wm_max_items == 5
+
+
+def test_settings_assistant_wm_max_items_rejects_below_one(monkeypatch):
+    import pytest as _pytest
+
+    monkeypatch.setenv("REDROBIN_ASSISTANT_WM_MAX_ITEMS", "0")
+    from redrobin.application.config import Settings
+
+    with _pytest.raises(Exception) as exc:
+        Settings()
+    assert ">= 1" in str(exc.value) or "assistant_wm_max_items" in str(exc.value).lower()
 
 
 def test_start_assistant_is_importable():
