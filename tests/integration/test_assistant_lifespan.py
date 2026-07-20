@@ -11,7 +11,10 @@ def test_settings_expose_assistant_knobs(monkeypatch):
     from redrobin.application.config import Settings
 
     s = Settings()
-    assert s.assistant_enabled is True
+    # Off by default (dark-launched): opt in with REDROBIN_ASSISTANT_ENABLED=1
+    # until the whole assistant ships. The lifespan task still boots either way;
+    # `enabled` only gates whether a cycle publishes (see test_assistant.py).
+    assert s.assistant_enabled is False
     assert s.assistant_model == "claude-haiku-4-5"
     assert s.assistant_cooldown_sec == 30.0
     assert s.assistant_max_tokens == 2048

@@ -81,7 +81,12 @@ class Settings(BaseSettings):
     )
 
     # AI assistant (reactive grounded recommendation — Task 2)
-    assistant_enabled: bool = Field(default=True, alias="REDROBIN_ASSISTANT_ENABLED")
+    # Off by default: the feature is built incrementally (reactive mode is 1 of 3
+    # trigger modes; proactive/conversational land in later tasks). Dark-launched
+    # so a merge to the shared integration branch stays inert until an operator
+    # opts in with REDROBIN_ASSISTANT_ENABLED=1. Flip the default to True once the
+    # whole assistant ships and its whole-feature smoke/review sign off.
+    assistant_enabled: bool = Field(default=False, alias="REDROBIN_ASSISTANT_ENABLED")
     assistant_model: str = Field(default="claude-haiku-4-5", alias="REDROBIN_ASSISTANT_MODEL")
     assistant_cooldown_sec: float = Field(default=30.0, alias="REDROBIN_ASSISTANT_COOLDOWN_SEC")
     assistant_max_tokens: int = Field(default=2048, alias="REDROBIN_ASSISTANT_MAX_TOKENS")
