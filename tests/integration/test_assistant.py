@@ -158,6 +158,49 @@ async def test_assistant_survives_cycle_exception():
 
 
 @pytest.mark.asyncio
+async def test_assistant_disabled_flag_is_silent():
+    # enabled=False must silence the assistant even with a working llm present —
+    # distinct from the llm=None degraded path. The disabled guard short-circuits
+    # BEFORE the cycle, so the llm is never called.
+    bus = EventBus()
+    observer = await bus.subscribe()
+    llm = _FakeAgentLLM(
+        '{"suggested_action":"x","rationale":"y","opsec_risk":"INFO",'
+        '"confidence":"z","references":["r"]}'
+    )
+    assistant = Assistant(
+        bus=bus,
+        llm=llm,  # llm present, but the assistant is disabled
+        tools=build_tool_registry(None),
+        trigger=TriggerGate(cooldown_sec=0.0, clock=lambda: 0.0),
+        summary_reader=lambda: "recon done",
+        enabled=False,
+    )
+    started = asyncio.Event()
+    assistant.on_started = started.set  # type: ignore[assignment]
+    task = asyncio.create_task(assistant.run())
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+    try:
+        await bus.publish(
+            {"type": "working_memory_snapshot", "payload": {"hosts": [{"name": "ws01"}]}}
+        )
+        await bus.publish(
+            {"type": "enrichment.completed", "payload": {"command": "whoami", "beacon_id": "B-1"}}
+        )
+        await asyncio.sleep(0.2)
+        seen = []
+        try:
+            while True:
+                seen.append(observer.get_nowait().get("type"))
+        except asyncio.QueueEmpty:
+            pass
+        assert "advisor.recommendation" not in seen
+        assert llm.calls == 0  # the disabled guard short-circuited before the cycle
+    finally:
+        await _drain(bus, task)
+
+
+@pytest.mark.asyncio
 async def test_assistant_silent_model_does_not_publish():
     bus = EventBus()
     observer = await bus.subscribe()

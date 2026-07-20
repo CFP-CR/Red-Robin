@@ -44,3 +44,19 @@ def test_silent_cycle_does_not_burn_cooldown_or_dedup():
     assert gate.should_speak(correlation_id="c1", state_signature="s1") is True
     # no record_spoken -> the next distinct signal still speaks
     assert gate.should_speak(correlation_id="c2", state_signature="s2") is True
+
+
+def test_corr_cache_evicts_oldest_beyond_max():
+    # The dedup cache is bounded (FIFO) so a long engagement can't grow it
+    # unbounded. Record 257 distinct correlations (one past _CORR_CACHE_MAX=256):
+    # the oldest is evicted, so should_speak no longer dedups it.
+    now = [100.0]
+    gate = TriggerGate(cooldown_sec=0.0, clock=lambda: now[0])
+    for i in range(257):
+        gate.record_spoken(correlation_id=f"c{i}", state_signature=f"s{i}")
+    assert len(gate._seen_corr) == 256
+    now[0] = 1000.0  # well past any cooldown
+    # the oldest correlation (c0) was evicted -> a fresh, novel signal speaks again
+    assert gate.should_speak(correlation_id="c0", state_signature="s-new") is True
+    # a still-resident recent correlation is still deduped
+    assert gate.should_speak(correlation_id="c256", state_signature="s-new2") is False
