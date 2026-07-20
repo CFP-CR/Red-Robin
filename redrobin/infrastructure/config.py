@@ -80,6 +80,12 @@ class Settings(BaseSettings):
         default="[Red Robin]", alias="REDROBIN_ENRICHMENT_SELF_ANNOTATION_PREFIX"
     )
 
+    # AI assistant (reactive grounded recommendation — Task 2)
+    assistant_enabled: bool = Field(default=True, alias="REDROBIN_ASSISTANT_ENABLED")
+    assistant_model: str = Field(default="claude-haiku-4-5", alias="REDROBIN_ASSISTANT_MODEL")
+    assistant_cooldown_sec: float = Field(default=30.0, alias="REDROBIN_ASSISTANT_COOLDOWN_SEC")
+    assistant_max_tokens: int = Field(default=2048, alias="REDROBIN_ASSISTANT_MAX_TOKENS")
+
     # Operator policy
     allow_degraded_layer_b: bool = Field(default=False, alias="REDROBIN_ALLOW_DEGRADED")
 
@@ -118,6 +124,7 @@ class Settings(BaseSettings):
         "enrichment_min_output_chars",
         "enrichment_chunk_max_chars",
         "enrichment_max_concurrency",
+        "assistant_max_tokens",
     )
     @classmethod
     def _positive_int(cls, v: int) -> int:
@@ -125,7 +132,7 @@ class Settings(BaseSettings):
             raise ValueError(f"must be >= 1, got {v}")
         return v
 
-    @field_validator("promoter_interval_sec", "l5_interval_sec")
+    @field_validator("promoter_interval_sec", "l5_interval_sec", "assistant_cooldown_sec")
     @classmethod
     def _positive_float(cls, v: float) -> float:
         if v <= 0:

@@ -28,6 +28,10 @@ from fastapi import FastAPI
 from redrobin.application.config import Settings
 from redrobin.application.cs_adapter_lifecycle import build_adapter, load_adapter_configs
 from redrobin.application.dedup_keys import DedupKeys, DedupKeysRepo
+from redrobin.application.agents.assistant.assistant import Assistant
+from redrobin.application.agents.assistant.llm import build_agent_llm
+from redrobin.application.agents.assistant.tools import build_kb_service, build_tool_registry
+from redrobin.application.agents.assistant.triggers import TriggerGate
 from redrobin.application.agents.enricher.enricher import WorkingMemoryEnricher
 from redrobin.application.agents.enricher.llm import build_enricher_llm
 from redrobin.application.engagement_loader import Engagement, EngagementLoader
@@ -529,6 +533,62 @@ async def start_enricher(
     return enricher, close
 
 
+async def start_assistant(app: FastAPI, settings: Settings) -> tuple[Assistant, CloseHook]:
+    """Start the reactive AI assistant (Task 2).
+
+    Subscribes to the bus, consumes ``enrichment.completed``, and publishes
+    ``advisor.recommendation``. Degraded-None: missing ANTHROPIC_API_KEY ->
+    ``build_agent_llm`` returns None and the assistant stays silent; missing
+    VOYAGE_API_KEY -> ``build_kb_service`` returns None and kb_retrieve degrades;
+    either way the daemon still boots. Mirrors ``start_enricher``.
+
+    Reads the L5 summary via a closure over ``app.state.summary_repo`` (the
+    ContextSummaryRepo the summariser writes) so the push-context carries the
+    story-so-far without coupling the assistant to persistence.
+    """
+    summary_repo = app.state.summary_repo
+    engagement_id = app.state.engagement_id
+
+    # Re-read the active engagement_id off ``app.state`` each call so a future
+    # engagement switch surfaces the right summary without rebuilding the assistant
+    # (mirrors Layer B's ``_engagement_id_provider``). The captured value is only a
+    # fallback if the attribute is ever missing.
+    def _engagement_id_provider() -> str:
+        return getattr(app.state, "engagement_id", engagement_id)
+
+    def _read_summary() -> str:
+        try:
+            rows = summary_repo.list_recent(_engagement_id_provider(), limit=1)
+        except Exception:
+            logger.exception("assistant: failed reading L5 summary")
+            return ""
+        return rows[0].text if rows else ""
+
+    assistant = Assistant(
+        bus=app.state.event_bus,
+        llm=build_agent_llm(model=settings.assistant_model),
+        tools=build_tool_registry(build_kb_service()),
+        trigger=TriggerGate(cooldown_sec=settings.assistant_cooldown_sec),
+        summary_reader=_read_summary,
+        enabled=settings.assistant_enabled,
+        max_tokens=settings.assistant_max_tokens,
+    )
+    started = asyncio.Event()
+    assistant.on_started = started.set  # type: ignore[attr-defined]
+    assistant_task = asyncio.create_task(assistant.run(), name="assistant")
+    await started.wait()
+    app.state.assistant = assistant
+    app.state.assistant_task = assistant_task
+
+    async def close() -> None:
+        try:
+            await asyncio.wait_for(assistant_task, timeout=2.0)
+        except asyncio.TimeoutError:
+            assistant_task.cancel()
+
+    return assistant, close
+
+
 async def start_dedup(app: FastAPI, settings: Settings) -> tuple[DedupKeys, CloseHook]:
     """Load the per-engagement dedup-key set into ``app.state.dedup_keys``.
 
@@ -566,6 +626,7 @@ async def start_dedup(app: FastAPI, settings: Settings) -> tuple[DedupKeys, Clos
 __all__ = [
     "CloseHook",
     "start_adapters",
+    "start_assistant",
     "start_dedup",
     "start_engagement",
     "start_enricher",
