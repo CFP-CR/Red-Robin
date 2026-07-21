@@ -102,8 +102,13 @@ class Assistant:
                         # Forward-merge THIS command's freshly-extracted facts so the
                         # cycle fired on the following enrichment.completed reasons over
                         # fresh working memory, not the one-step-stale snapshot.
+                        # Material trigger = a NEW defence (D3), not a re-observed one: the
+                        # non-dedup forward-merge would otherwise change the state_signature
+                        # and the novelty gate would not suppress a wasted proactive cycle.
+                        prior_defenses = set(self._wm_snapshot.get("defenses_observed") or [])
                         self._wm_snapshot = apply_deltas_to_snapshot(self._wm_snapshot, payload)
-                        if payload.get("defenses_observed"):
+                        new_defenses = payload.get("defenses_observed") or []
+                        if any(d not in prior_defenses for d in new_defenses):
                             self._material_pending = True  # a new defence — backstop after reactive
                     continue
                 if etype != "enrichment.completed":

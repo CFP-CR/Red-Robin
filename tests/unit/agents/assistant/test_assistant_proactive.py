@@ -133,6 +133,38 @@ async def test_material_change_backstops_when_reactive_silent():
 
 
 @pytest.mark.asyncio
+async def test_material_backstop_does_not_fire_on_re_observed_defense():
+    # A defence already in the snapshot, re-observed, must NOT arm the material
+    # backstop (D3 — material = a NEW defence). Reactive stays silent (FramingLLM),
+    # so the correct outcome is NO advisor.recommendation at all.
+    bus = EventBus()
+    sub = await bus.subscribe()
+    a = _assistant(bus, lambda: 1000.0)
+    a._wm_snapshot = {"defenses_observed": ["CrowdStrike"]}  # already known
+    started = asyncio.Event()
+    a.on_started = started.set
+    task = asyncio.create_task(a.run())
+    await asyncio.wait_for(started.wait(), 1.0)
+    await bus.publish(
+        {"type": "working_memory.deltas", "payload": {"defenses_observed": ["CrowdStrike"]}}
+    )
+    await bus.publish(
+        {"type": "enrichment.completed", "payload": {"command": "seatbelt", "beacon_id": "b1"}}
+    )
+    saw_rec = False
+    for _ in range(10):
+        try:
+            evt = await asyncio.wait_for(sub.get(), 0.05)
+        except TimeoutError:
+            break
+        if evt.get("type") == "advisor.recommendation":
+            saw_rec = True
+    assert not saw_rec
+    await bus.publish({"_type": "_close"})
+    await asyncio.wait_for(task, 1.0)
+
+
+@pytest.mark.asyncio
 async def test_lull_fires_after_idle():
     # Small real lull so the wait_for timeout elapses fast; after a beat with no
     # further events, the lull proactive fires.
