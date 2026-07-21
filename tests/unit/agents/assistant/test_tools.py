@@ -78,3 +78,20 @@ def test_build_kb_service_degraded_without_voyage_key(monkeypatch):
     # which build_kb_service catches and degrades to None (assistant still runs).
     monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
     assert build_kb_service() is None
+
+
+def test_build_kb_service_degraded_on_corrupt_index(monkeypatch, tmp_path):
+    # A corrupt kb-index makes VectorStore.load raise a NON-RuntimeError (e.g.
+    # ValueError out of numpy). build_kb_service must degrade to None, not propagate
+    # — an unguarded raise here fails the daemon boot (blocking the C2 adapters that
+    # start after start_assistant). Mirrors build_journal_service's broad-except.
+    monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path))
+    index_path = tmp_path / "shared" / "kb-index" / "index.npz"
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    index_path.write_bytes(b"not a real npz")  # exists -> VectorStore.load is called
+
+    def _boom(path):
+        raise ValueError("corrupt index")
+
+    monkeypatch.setattr(VectorStore, "load", _boom)
+    assert build_kb_service() is None

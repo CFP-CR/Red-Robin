@@ -92,6 +92,9 @@ def build_kb_service() -> KBService | None:
             "assistant: VOYAGE_API_KEY missing — kb_retrieve degraded (no tradecraft retrieval)"
         )
         return None
+    except Exception:
+        logger.exception("assistant: KB index load failed — kb_retrieve degraded")
+        return None
 
 
 async def build_journal_service() -> JournalService | None:
