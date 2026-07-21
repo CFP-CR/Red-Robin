@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from redrobin.application.journal_service import JournalService
 from redrobin.application.kb_service import KBService
 from redrobin.domain.assistant import AgentTool
 
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 # Return-cap so a large index can never blow the agent's context window (spec
 # §6.B refinement 3: cap tool output, return high-signal excerpts not dumps).
 _MAX_TOOL_CHARS = 6000
+_MAX_JOURNAL_CHARS = 6000
 
 _KB_RETRIEVE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -29,6 +31,21 @@ _KB_RETRIEVE_SCHEMA: dict[str, Any] = {
             "description": (
                 "A tradecraft / technique / OPSEC question, e.g. 'quiet ways to "
                 "validate a MSSQL service credential without triggering EDR'."
+            ),
+        }
+    },
+    "required": ["query"],
+    "additionalProperties": False,
+}
+
+_SEARCH_JOURNAL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "query": {
+            "type": "string",
+            "description": (
+                "A question about something already run or observed in THIS engagement, "
+                "e.g. 'the exact output when we dumped LSASS' or 'when did we first see host DC01'."
             ),
         }
     },
@@ -57,8 +74,47 @@ def build_kb_service() -> KBService | None:
         return None
 
 
-def build_tool_registry(kb: KBService | None) -> list[AgentTool]:
-    """The pull-tool set for one cycle. Task 2: only ``kb_retrieve``."""
+async def build_journal_service() -> JournalService | None:
+    """Build + warm the current engagement's Operational Journal (Voyage over the
+    joined events.jsonl transcript). Returns None without VOYAGE_API_KEY, with no
+    active engagement, or on any indexing failure — the assistant still runs;
+    search_journal reports it's unavailable. Async because it warms the backlog at
+    boot (off the reactive hot path); the tool keeps it current via retrieve()'s
+    incremental refresh. Uses EngagementService().current() — the same source
+    events_router uses to decide where events.jsonl is written — so the journal
+    reads exactly the file the events were written to. Mirrors build_kb_service."""
+    try:
+        from redrobin.application.engagement_service import EngagementService
+        from redrobin.infrastructure.filesystem import redrobin_root
+        from redrobin.infrastructure.llm.voyage_client import VoyageClient
+        from redrobin.infrastructure.vector_store import VectorStore
+
+        active = EngagementService().current()
+        if active is None:
+            logger.info("assistant: no active engagement — search_journal degraded")
+            return None
+        events_path = redrobin_root() / "engagements" / active / "events.jsonl"
+        service = JournalService(
+            voyage=VoyageClient(), store=VectorStore(), events_path=events_path
+        )
+        n = await service.refresh()
+        logger.info("assistant: journal indexed %d entries (engagement=%s)", n, active)
+        return service
+    except RuntimeError:
+        logger.info("assistant: VOYAGE_API_KEY missing — search_journal degraded")
+        return None
+    except Exception:
+        logger.exception("assistant: journal indexing failed — search_journal degraded")
+        return None
+
+
+def build_tool_registry(
+    kb: KBService | None, journal: JournalService | None = None
+) -> list[AgentTool]:
+    """The pull-tool set for one cycle. kb_retrieve (curated tradecraft) +
+    search_journal (this engagement's verbatim transcript). Adding a tool is a
+    pure append — the list[AgentTool] the agent loop consumes is the seam
+    (spec §6.F); ``journal`` is an additive, backward-compatible param (D1)."""
 
     async def _kb_retrieve(args: dict[str, Any]) -> str:
         query = str(args.get("query", "")).strip()
@@ -76,6 +132,24 @@ def build_tool_registry(kb: KBService | None) -> list[AgentTool]:
         lines = [f"[source: {source} | score={score:.2f}]\n{text}" for text, source, score in hits]
         return "\n\n".join(lines)[:_MAX_TOOL_CHARS]
 
+    async def _search_journal(args: dict[str, Any]) -> str:
+        query = str(args.get("query", "")).strip()
+        if not query:
+            return "No query provided."
+        if journal is None:
+            return (
+                "Operational journal unavailable (no transcript indexed / VOYAGE_API_KEY not set)."
+            )
+        try:
+            hits = await journal.retrieve(query, top_k=5)
+        except Exception:
+            logger.exception("assistant: search_journal failed for query=%s", query)
+            return "Operational journal retrieval failed."
+        if not hits:
+            return "No matching journal entries found."
+        lines = [f"[source: {source} | score={score:.2f}]\n{text}" for text, source, score in hits]
+        return "\n\n".join(lines)[:_MAX_JOURNAL_CHARS]
+
     return [
         AgentTool(
             name="kb_retrieve",
@@ -87,8 +161,20 @@ def build_tool_registry(kb: KBService | None) -> list[AgentTool]:
             ),
             input_schema=_KB_RETRIEVE_SCHEMA,
             handler=_kb_retrieve,
-        )
+        ),
+        AgentTool(
+            name="search_journal",
+            description=(
+                "Search the operational journal — the verbatim transcript of THIS engagement's "
+                "past commands and their exact output. CALL THIS whenever you need the precise "
+                "text of something already run or seen (a prior command's output, when a host or "
+                "credential was first observed, what a tool actually returned) instead of relying "
+                "on the distilled working-memory summary — then cite the returned journal sources."
+            ),
+            input_schema=_SEARCH_JOURNAL_SCHEMA,
+            handler=_search_journal,
+        ),
     ]
 
 
-__all__ = ["build_kb_service", "build_tool_registry"]
+__all__ = ["build_journal_service", "build_kb_service", "build_tool_registry"]
