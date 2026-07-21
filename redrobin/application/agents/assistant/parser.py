@@ -13,7 +13,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from redrobin.domain.assistant import Recommendation
+from redrobin.domain.assistant import Interpretation, Recommendation
 from redrobin.domain.events import Severity
 
 logger = logging.getLogger(__name__)
@@ -114,4 +114,41 @@ def parse_answer(raw: str) -> ParsedAnswer | None:
     )
 
 
-__all__ = ["ParsedAnswer", "parse_answer", "parse_recommendation"]
+def parse_interpretation(raw: str) -> Interpretation | None:
+    """Parse the interpretation cycle's output, or None (no material change / silent).
+    NEVER raises. Requires at least one of phase/milestone_id (else there is nothing
+    to write). progress_pct clamped 0..100."""
+    text = _strip_fences(raw)
+    if not text:
+        return None
+    try:
+        data: Any = json.loads(text)
+    except json.JSONDecodeError:
+        logger.warning("assistant: unparseable interpretation JSON — no write")
+        return None
+    if not isinstance(data, dict):
+        return None
+    phase = str(data.get("phase") or "").strip()
+    milestone_id = str(data.get("milestone_id") or "").strip()
+    if not phase and not milestone_id:
+        return None  # nothing to write
+    try:
+        progress = int(data.get("progress_pct") or 0)
+    except (TypeError, ValueError):
+        progress = 0
+    progress = max(0, min(100, progress))
+    # A confirm is always ABOUT a specific objective/kill-chain id — without one it
+    # can't be tracked/resolved, so downgrade it to a soft auto-write (prevents an
+    # untrackable empty-id pending that a plain operator answer could collide with).
+    needs_confirm = bool(data.get("needs_confirm")) and bool(milestone_id)
+    return Interpretation(
+        phase=phase,
+        milestone_id=milestone_id,
+        status=str(data.get("status") or "").strip(),
+        progress_pct=progress,
+        needs_confirm=needs_confirm,
+        prompt=str(data.get("prompt") or "").strip(),
+    )
+
+
+__all__ = ["ParsedAnswer", "parse_answer", "parse_interpretation", "parse_recommendation"]

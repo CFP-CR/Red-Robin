@@ -18,9 +18,10 @@ from redrobin.application.agents.assistant.llm import AgentLLM
 from redrobin.application.agents.assistant.parser import (
     ParsedAnswer,
     parse_answer,
+    parse_interpretation,
     parse_recommendation,
 )
-from redrobin.domain.assistant import AgentTool, Recommendation
+from redrobin.domain.assistant import AgentTool, Interpretation, Recommendation
 
 logger = logging.getLogger(__name__)
 
@@ -264,13 +265,72 @@ async def run_answer_cycle(
     return parse_answer(raw)
 
 
+_INTERPRET_SYSTEM_PROMPT = (
+    "You are Red Robin, an operation-aware AI copilot behind a red-team operator's C2. "
+    "Read the engagement state and decide whether the SHARED PICTURE should be updated: the "
+    "current_phase, an objective's status/progress_pct, or a kill-chain milestone. Reason only "
+    "over the given state — never invent progress.\n\n"
+    "Return ONLY JSON, no prose/fences. If nothing materially changed, return "
+    '{"milestone_id": "", "phase": ""} (or null). Otherwise:\n'
+    '{"phase": "the current phase, or \\"\\" to leave it",\n'
+    ' "milestone_id": "the objective/kill-chain id this is about, or \\"\\"",\n'
+    ' "status": "the new status (e.g. in_progress, COMPLETE)",\n'
+    ' "progress_pct": 0-100,\n'
+    ' "needs_confirm": true ONLY for a change that CLOSES or COMMITS (an objective -> COMPLETE, a '
+    "kill-chain goal reached); false for a soft, reversible read (a phase nudge, a progress bump),\n"
+    ' "prompt": "if needs_confirm, a one-line yes/no question for the operator; else \\"\\""}'
+)
+
+
+def build_interpret_context(
+    *, wm_snapshot: dict[str, Any], l5_summary: str, wm_max_items: int = _DEFAULT_WM_MAX_ITEMS
+) -> str:
+    capped = cap_wm_snapshot(wm_snapshot, wm_max_items)
+    return "\n".join(
+        [
+            "# Engagement working memory (L2)",
+            json.dumps(capped, ensure_ascii=False, sort_keys=True),
+            "",
+            "# Story so far (L5)",
+            l5_summary or "(no summary yet)",
+            "",
+            "Given this, should the shared picture be updated? Return the interpretation JSON or null.",
+        ]
+    )
+
+
+async def run_interpretation_cycle(
+    *,
+    llm: AgentLLM,
+    tools: list[AgentTool],
+    wm_snapshot: dict[str, Any],
+    l5_summary: str,
+    max_tokens: int = 1024,
+    wm_max_items: int = _DEFAULT_WM_MAX_ITEMS,
+) -> Interpretation | None:
+    """Run ONE interpretation cycle → Interpretation or None (no material change)."""
+    raw = await llm.run(
+        system=_INTERPRET_SYSTEM_PROMPT,
+        user_message=build_interpret_context(
+            wm_snapshot=wm_snapshot,
+            l5_summary=l5_summary,
+            wm_max_items=wm_max_items,
+        ),
+        tools=tools,
+        max_tokens=max_tokens,
+    )
+    return parse_interpretation(raw)
+
+
 __all__ = [
     "apply_deltas_to_snapshot",
     "cap_wm_snapshot",
     "build_system_prompt",
     "build_push_context",
     "build_answer_context",
+    "build_interpret_context",
     "state_signature",
     "run_cycle",
     "run_answer_cycle",
+    "run_interpretation_cycle",
 ]

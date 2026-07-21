@@ -44,6 +44,21 @@ class Recommendation:
 
 
 @dataclass(frozen=True)
+class Interpretation:
+    """The assistant's read of the shared engagement picture (spec §6.C): a phase
+    nudge / objective status+progress / kill-chain read. ``needs_confirm`` gates the
+    tier — False = auto-write (soft/reversible), True = propose-and-confirm (close/
+    commit). ``prompt`` is the binary-confirm question shown for the True tier."""
+
+    phase: str
+    milestone_id: str
+    status: str
+    progress_pct: int
+    needs_confirm: bool
+    prompt: str
+
+
+@dataclass(frozen=True)
 class AgentTool:
     """A single pull-tool the agent may call during a cycle. Provider-agnostic:
     ``handler`` takes the parsed tool arguments and returns a text result the
@@ -55,4 +70,4 @@ class AgentTool:
     handler: Callable[[dict[str, Any]], Awaitable[str]]
 
 
-__all__ = ["Recommendation", "AgentTool"]
+__all__ = ["Recommendation", "Interpretation", "AgentTool"]
