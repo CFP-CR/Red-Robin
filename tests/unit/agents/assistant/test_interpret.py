@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from redrobin.application.agents.assistant.agent import run_interpretation_cycle
+from redrobin.application.agents.assistant.assistant import Assistant
 from redrobin.application.agents.assistant.interpret import (
     is_own_proposal_question,
     milestone_events,
     resolve_confirm,
 )
 from redrobin.application.agents.assistant.parser import parse_interpretation
+from redrobin.application.agents.assistant.triggers import TriggerGate
+from redrobin.application.event_bus import EventBus
 from redrobin.domain.assistant import Interpretation
 from redrobin.domain.memory import PendingMilestone
 
@@ -147,3 +152,150 @@ def test_is_own_proposal_question():
     assert is_own_proposal_question({"context_refs": ["milestone:obj1"]}) is True
     assert is_own_proposal_question({"context_refs": ["host:DC01"]}) is False
     assert is_own_proposal_question({"text": "what's my path to DA?"}) is False
+
+
+class _InterpretLLM:
+    def __init__(self, payload):
+        self._p = payload
+
+    async def run(self, *, system, user_message, tools, max_tokens=2048):
+        # reactive/answer cycles stay silent; the interpretation cycle returns the milestone
+        if "should the shared picture be updated" in user_message:
+            return self._p
+        return '{"speak": false}'
+
+
+def _assistant(bus, llm, snapshot=None):
+    a = Assistant(
+        bus=bus,
+        llm=llm,
+        tools=[],
+        trigger=TriggerGate(cooldown_sec=0.0, clock=lambda: 0.0),
+        summary_reader=lambda: "recon done",
+        enabled=True,
+    )
+    a._wm_snapshot = snapshot if snapshot is not None else {"objectives": [{"id": "obj1"}]}
+    return a
+
+
+@pytest.mark.asyncio
+async def test_soft_interpretation_publishes_commit_milestone(tmp_path):
+    bus = EventBus()
+    sub = await bus.subscribe()
+    llm = _InterpretLLM(
+        '{"phase":"recon","milestone_id":"obj1","status":"in_progress","progress_pct":30,"needs_confirm":false,"prompt":""}'
+    )
+    a = _assistant(bus, llm)
+    started = asyncio.Event()
+    a.on_started = started.set
+    task = asyncio.create_task(a.run())
+    await asyncio.wait_for(started.wait(), 1.0)
+    await bus.publish(
+        {"type": "enrichment.completed", "payload": {"command": "seatbelt", "beacon_id": "b1"}}
+    )
+    got = None
+    for _ in range(20):
+        try:
+            evt = await asyncio.wait_for(sub.get(), 0.2)
+        except TimeoutError:
+            break
+        if evt.get("type") == "engagement.milestone":
+            got = evt
+    assert (
+        got is not None
+        and got["payload"]["milestone_id"] == "obj1"
+        and not got["payload"].get("pending")
+    )
+    await bus.publish({"_type": "_close"})
+    await asyncio.wait_for(task, 1.0)
+
+
+@pytest.mark.asyncio
+async def test_confirm_answer_commits_pending(tmp_path):
+    bus = EventBus()
+    sub = await bus.subscribe()
+    a = _assistant(
+        bus,
+        _InterpretLLM('{"speak": false}'),
+        snapshot={
+            "objectives": [{"id": "obj1"}],
+            "pending_milestones": [
+                {
+                    "milestone_id": "obj1",
+                    "phase": "lateral",
+                    "status": "COMPLETE",
+                    "progress_pct": 100,
+                    "prompt": "?",
+                }
+            ],
+        },
+    )
+    started = asyncio.Event()
+    a.on_started = started.set
+    task = asyncio.create_task(a.run())
+    await asyncio.wait_for(started.wait(), 1.0)
+    await bus.publish(
+        {"type": "operator.answer", "payload": {"question_id": "obj1", "text": "yes"}}
+    )
+    got = None
+    for _ in range(20):
+        try:
+            evt = await asyncio.wait_for(sub.get(), 0.2)
+        except TimeoutError:
+            break
+        if evt.get("type") == "engagement.milestone":
+            got = evt
+    assert (
+        got is not None
+        and got["payload"]["milestone_id"] == "obj1"
+        and not got["payload"].get("pending")
+    )
+    await bus.publish({"_type": "_close"})
+    await asyncio.wait_for(task, 1.0)
+
+
+@pytest.mark.asyncio
+async def test_interpretation_survives_cycle_exception(tmp_path):
+    class _Boom:
+        async def run(self, *, system, user_message, tools, max_tokens=2048):
+            if "should the shared picture be updated" in user_message:
+                raise RuntimeError("boom")
+            return '{"speak": false}'
+
+    bus = EventBus()
+    await bus.subscribe()
+    a = _assistant(bus, _Boom())
+    started = asyncio.Event()
+    a.on_started = started.set
+    task = asyncio.create_task(a.run())
+    await asyncio.wait_for(started.wait(), 1.0)
+    await bus.publish(
+        {"type": "enrichment.completed", "payload": {"command": "x", "beacon_id": "b1"}}
+    )
+    await asyncio.sleep(0.05)
+    assert not task.done()
+    await bus.publish({"_type": "_close"})
+    await asyncio.wait_for(task, 1.0)
+
+
+@pytest.mark.asyncio
+async def test_confirm_malformed_pending_survives(tmp_path):
+    # a malformed pending dict (missing fields) in the cache is skipped, not crashed
+    bus = EventBus()
+    await bus.subscribe()
+    a = _assistant(
+        bus,
+        _InterpretLLM('{"speak": false}'),
+        snapshot={"objectives": [], "pending_milestones": [{"milestone_id": "obj1"}]},
+    )
+    started = asyncio.Event()
+    a.on_started = started.set
+    task = asyncio.create_task(a.run())
+    await asyncio.wait_for(started.wait(), 1.0)
+    await bus.publish(
+        {"type": "operator.answer", "payload": {"question_id": "obj1", "text": "yes"}}
+    )
+    await asyncio.sleep(0.05)
+    assert not task.done()  # PendingMilestone(**p) TypeError skipped, loop survives
+    await bus.publish({"_type": "_close"})
+    await asyncio.wait_for(task, 1.0)

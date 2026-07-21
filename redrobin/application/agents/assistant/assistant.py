@@ -21,13 +21,20 @@ from redrobin.application.agents.assistant.agent import (
     apply_deltas_to_snapshot,
     run_answer_cycle,
     run_cycle,
+    run_interpretation_cycle,
     state_signature,
+)
+from redrobin.application.agents.assistant.interpret import (
+    is_own_proposal_question,
+    milestone_events,
+    resolve_confirm,
 )
 from redrobin.application.agents.assistant.lessons import LessonStore, capture_lesson
 from redrobin.application.agents.assistant.llm import AgentLLM
 from redrobin.application.agents.assistant.triggers import TriggerGate
 from redrobin.application.event_bus import EventBus
 from redrobin.domain.assistant import AgentTool
+from redrobin.domain.memory import PendingMilestone
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +76,7 @@ class Assistant:
         self._last_beat: float | None = None  # last beacon beat OR lull-check; drives the debounce
         self._last_proactive: float | None = None  # proactive rate-limit (N)
         self._material_pending = False  # a new defence awaits the post-reactive backstop
+        self._last_interp_sig: str | None = None  # interpretation novelty gate (signal-not-noise)
 
     async def run(self) -> None:
         sub = await self._bus.subscribe()
@@ -125,6 +133,14 @@ class Assistant:
                     except Exception:
                         logger.exception("assistant failed to process operator.question")
                     continue
+                if etype == "operator.answer":
+                    # resolving a confirm is activity — defer the lull
+                    self._last_beat = self._clock()
+                    try:
+                        await self._on_confirm(evt.get("payload") or {})
+                    except Exception:
+                        logger.exception("assistant failed to process operator.answer")
+                    continue
                 if etype != "enrichment.completed":
                     continue
                 self._last_beat = self._clock()  # a beacon beat resets the lull debounce
@@ -135,6 +151,8 @@ class Assistant:
                 if self._material_pending:
                     self._material_pending = False
                     await self._safe_proactive("material_change")
+                # the interpretation write (never-crash, novelty-gated)
+                await self._safe_interpret()
         finally:
             await self._bus.unsubscribe(sub)
 
@@ -178,6 +196,8 @@ class Assistant:
         )
 
     async def _on_question(self, payload: dict[str, Any]) -> None:
+        if is_own_proposal_question(payload):
+            return  # our own confirm proposal, not an operator ask (no loop)
         if self._llm is None or not self._enabled:
             return
         question = str(payload.get("text") or "").strip()
@@ -223,6 +243,68 @@ class Assistant:
             }
         )
         logger.info("assistant: published operator.answer question_id=%s", question_id)
+
+    async def _safe_interpret(self) -> None:
+        if self._llm is None or not self._enabled or not self._wm_snapshot:
+            return
+        # Novelty gate: only interpret when the state changed since the last interpretation
+        # (bounds cost + stops re-firing the same confirm every command — signal-not-noise).
+        sig = state_signature(self._wm_snapshot)
+        if sig == self._last_interp_sig:
+            return
+        self._last_interp_sig = sig
+        try:
+            try:
+                l5 = self._summary_reader()
+            except Exception:
+                logger.exception("assistant: summary_reader failed; empty L5")
+                l5 = ""
+            it = await run_interpretation_cycle(
+                llm=self._llm,
+                tools=self._tools,
+                wm_snapshot=self._wm_snapshot,
+                l5_summary=l5,
+                max_tokens=self._max_tokens,
+                wm_max_items=self._wm_max_items,
+            )
+            if it is None:
+                return
+            # Don't re-publish a confirm for an id already pending (no duplicate operator.question).
+            if it.needs_confirm and any(
+                str(p.get("milestone_id")) == it.milestone_id
+                for p in (self._wm_snapshot.get("pending_milestones") or [])
+                if isinstance(p, dict)
+            ):
+                return
+            for evt in milestone_events(it):
+                await self._bus.publish(evt)
+            logger.info(
+                "assistant: interpretation %s milestone=%s confirm=%s",
+                "proposed" if it.needs_confirm else "auto-write",
+                it.milestone_id,
+                it.needs_confirm,
+            )
+        except Exception:
+            logger.exception("assistant: interpretation write failed")
+
+    async def _on_confirm(self, payload: dict[str, Any]) -> None:
+        pend_raw = self._wm_snapshot.get("pending_milestones") or []
+        pend: list[PendingMilestone] = []
+        for p in pend_raw:
+            if isinstance(p, dict):
+                try:
+                    pend.append(PendingMilestone(**p))
+                except TypeError:
+                    continue  # a malformed pending dict is skipped, never crashes
+        evt = resolve_confirm(answer_payload=payload, pending_milestones=pend)
+        if evt is None:
+            return  # not a confirm for one of our pending proposals — ignore (no loop)
+        await self._bus.publish(evt)
+        logger.info(
+            "assistant: confirm resolved milestone=%s drop=%s",
+            evt["payload"].get("milestone_id"),
+            evt["payload"].get("drop", False),
+        )
 
     def _lull_timeout(self) -> float | None:
         """Seconds until the next proactive lull check, or None when proactive is
