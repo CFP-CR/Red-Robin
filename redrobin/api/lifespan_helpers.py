@@ -570,7 +570,10 @@ async def start_assistant(app: FastAPI, settings: Settings) -> tuple[Assistant, 
         return rows[0].text if rows else ""
 
     kb = build_kb_service()
-    journal = await build_journal_service()
+    # Only build/warm the journal when the assistant is actually enabled — otherwise
+    # a boot with a real VOYAGE_API_KEY would embed the whole events.jsonl backlog for
+    # a turned-off feature (and delay the adapters/C2 boundary that starts after us).
+    journal = await build_journal_service() if settings.assistant_enabled else None
     assistant = Assistant(
         bus=app.state.event_bus,
         llm=build_agent_llm(model=settings.assistant_model),

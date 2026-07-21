@@ -98,3 +98,42 @@ async def test_lifespan_starts_assistant_with_journal_degraded(tmp_path, monkeyp
         assert not app.state.assistant_task.done()
     assert app.state.assistant_task.done()
     assert app.state.assistant_task.cancelled() is False
+
+
+@pytest.mark.asyncio
+async def test_journal_built_only_when_assistant_enabled(tmp_path, monkeypatch):
+    # The journal warm (a full-backlog embed) must not run when the assistant is
+    # disabled — otherwise a boot with a VOYAGE key pays that cost for an off feature.
+    import redrobin.api.lifespan_helpers as lh
+
+    calls: list[bool] = []
+
+    async def _spy():
+        calls.append(True)
+        return None
+
+    monkeypatch.setattr(lh, "build_journal_service", _spy)
+    monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path))
+    monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
+    monkeypatch.delenv("REDROBIN_ENGAGEMENT_SLUG", raising=False)
+    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
+    monkeypatch.setenv("REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json"))
+    monkeypatch.setenv("REDROBIN_ENGAGEMENT_ID", "eng-gate")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
+
+    from redrobin.api.app import create_app
+
+    # disabled (default) -> journal factory NOT called
+    monkeypatch.setenv("REDROBIN_ASSISTANT_ENABLED", "0")
+    app = create_app()
+    async with app.router.lifespan_context(app):
+        pass
+    assert calls == []
+
+    # enabled -> journal factory IS called (returns None, degraded — still boots)
+    monkeypatch.setenv("REDROBIN_ASSISTANT_ENABLED", "1")
+    app2 = create_app()
+    async with app2.router.lifespan_context(app2):
+        pass
+    assert calls == [True]
