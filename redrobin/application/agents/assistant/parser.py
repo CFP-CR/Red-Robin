@@ -13,7 +13,11 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from redrobin.domain.assistant import Interpretation, Recommendation
+from redrobin.domain.assistant import (
+    OPERATOR_QUESTION_ID_PREFIX,
+    Interpretation,
+    Recommendation,
+)
 from redrobin.domain.events import Severity
 
 logger = logging.getLogger(__name__)
@@ -130,6 +134,8 @@ def parse_interpretation(raw: str) -> Interpretation | None:
         return None
     phase = str(data.get("phase") or "").strip()
     milestone_id = str(data.get("milestone_id") or "").strip()
+    if milestone_id.startswith(OPERATOR_QUESTION_ID_PREFIX):
+        milestone_id = ""  # reserved operator-question namespace — never a milestone (review #1)
     if not phase and not milestone_id:
         return None  # nothing to write
     try:

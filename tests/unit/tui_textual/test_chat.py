@@ -14,6 +14,7 @@ from redrobin.tui.textual_ui.chat import (
     next_operator_message,
     register_chat,
 )
+from redrobin.domain.assistant import OPERATOR_QUESTION_ID_PREFIX
 from redrobin.tui.textual_ui.frames import Registry
 
 
@@ -58,9 +59,10 @@ def test_is_confirm_question():
 
 
 def test_next_operator_message_routes_ask_vs_confirm():
-    # no pending -> a new question with a minted id
+    # no pending -> a new question with a minted id (reserved-namespace prefix, #28 review #1)
     kind, msg = next_operator_message("what's my path to DA?", pending=[], q_index=0)
-    assert kind == "question" and msg["type"] == "operator.question" and msg["question_id"] == "q0"
+    assert kind == "question" and msg["type"] == "operator.question"
+    assert msg["question_id"] == "opq-0"
     # pending confirm + the EXPLICIT /y token -> an answer to the oldest pending
     kind, msg = next_operator_message("/y", pending=["obj1"], q_index=3)
     assert kind == "answer"
@@ -75,6 +77,16 @@ def test_next_operator_message_routes_ask_vs_confirm():
     assert kind == "question"
     kind, msg = next_operator_message("no creds?", pending=["obj1"], q_index=3)
     assert kind == "question"
+
+
+def test_next_operator_message_mints_reserved_prefix_id():
+    # A minted question id carries OPERATOR_QUESTION_ID_PREFIX — exactly the prefix
+    # parse_interpretation rejects in a milestone_id — so a minted question id can NEVER
+    # equal an accepted milestone_id (the two namespaces are disjoint by construction).
+    kind, msg = next_operator_message("what's my path?", pending=[], q_index=0)
+    assert kind == "question"
+    assert msg["question_id"].startswith(OPERATOR_QUESTION_ID_PREFIX)
+    assert msg["question_id"] == "opq-0"
 
 
 class _ChatHarness(App):

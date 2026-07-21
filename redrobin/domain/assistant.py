@@ -19,6 +19,12 @@ from typing import Any
 
 from redrobin.domain.events import Severity
 
+# A minted operator-question id ALWAYS carries this prefix; an accepted milestone_id
+# NEVER may (parse_interpretation drops any that does). This makes the operator-question
+# and milestone id namespaces provably disjoint, so a plain operator question can never
+# collide with a pending milestone and silently commit/drop it (#28 whole-branch review #1).
+OPERATOR_QUESTION_ID_PREFIX = "opq-"
+
 
 @dataclass(frozen=True)
 class Recommendation:
@@ -70,4 +76,4 @@ class AgentTool:
     handler: Callable[[dict[str, Any]], Awaitable[str]]
 
 
-__all__ = ["Recommendation", "Interpretation", "AgentTool"]
+__all__ = ["Recommendation", "Interpretation", "AgentTool", "OPERATOR_QUESTION_ID_PREFIX"]

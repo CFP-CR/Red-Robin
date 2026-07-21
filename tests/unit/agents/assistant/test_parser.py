@@ -1,4 +1,8 @@
-from redrobin.application.agents.assistant.parser import parse_recommendation
+from redrobin.application.agents.assistant.parser import (
+    parse_interpretation,
+    parse_recommendation,
+)
+from redrobin.domain.assistant import OPERATOR_QUESTION_ID_PREFIX
 from redrobin.domain.events import Severity
 
 
@@ -80,3 +84,34 @@ def test_string_references_does_not_char_splat():
     )
     assert rec is not None
     assert rec.references == []
+
+
+# ---- #28 review #1: the reserved operator-question id namespace is disjoint from milestone_id ----
+
+
+def test_parse_interpretation_drops_reserved_id_no_phase_returns_none():
+    # A milestone_id in the reserved operator-question namespace (opq-*) is the exact prefix
+    # next_operator_message mints; parse_interpretation drops it so a minted question id can
+    # never become an accepted milestone_id. With no phase left, nothing to write -> None.
+    assert (
+        parse_interpretation(
+            '{"milestone_id": "opq-3", "phase": "", "needs_confirm": true, "prompt": "done?"}'
+        )
+        is None
+    )
+
+
+def test_parse_interpretation_reserved_id_dropped_but_phase_kept_downgrades_confirm():
+    it = parse_interpretation('{"milestone_id": "opq-7", "phase": "recon"}')
+    assert it is not None
+    assert it.milestone_id == ""  # reserved namespace dropped
+    assert it.needs_confirm is False  # dropping the id also downgrades needs_confirm
+
+
+def test_parse_interpretation_semantic_milestone_id_unchanged():
+    it = parse_interpretation('{"milestone_id": "obj-dc-compromise", "phase": "recon"}')
+    assert it is not None and it.milestone_id == "obj-dc-compromise"
+
+
+def test_reserved_prefix_constant_is_opq():
+    assert OPERATOR_QUESTION_ID_PREFIX == "opq-"

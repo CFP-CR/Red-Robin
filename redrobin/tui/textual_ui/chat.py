@@ -15,6 +15,7 @@ from textual.app import ComposeResult
 from textual.containers import Container
 from textual.widgets import Input, RichLog
 
+from redrobin.domain.assistant import OPERATOR_QUESTION_ID_PREFIX
 from redrobin.tui.textual_ui.frames import Registry
 
 _ACCENT = "#58a6ff"
@@ -103,13 +104,19 @@ def next_operator_message(
     ('ok', 'no creds?') is NEVER mistaken for a confirm and can never silently commit/
     drop engagement state. Everything else is a question with a minted id. The daemon's
     resolve_confirm still authorizes the commit/drop; the slash token makes routing
-    collision-free (the minted 'q<N>' also never collides with a semantic milestone id)."""
+    collision-free. The minted id also never collides with a semantic milestone id — this is
+    now ENFORCED, not merely likely: minted ids carry the reserved OPERATOR_QUESTION_ID_PREFIX,
+    which parse_interpretation forbids in a milestone_id (the two namespaces are disjoint)."""
     t = text.strip()
     low = t.lower()
     if pending and low in ("/y", "/yes", "/n", "/no"):
         answer = "yes" if low in ("/y", "/yes") else "no"
         return "answer", {"type": "operator.answer", "question_id": pending[0], "text": answer}
-    return "question", {"type": "operator.question", "question_id": f"q{q_index}", "text": t}
+    return "question", {
+        "type": "operator.question",
+        "question_id": f"{OPERATOR_QUESTION_ID_PREFIX}{q_index}",
+        "text": t,
+    }
 
 
 def _chat(app: Any) -> "ChatPane | None":
