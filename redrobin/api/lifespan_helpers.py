@@ -574,10 +574,18 @@ async def start_assistant(app: FastAPI, settings: Settings) -> tuple[Assistant, 
     # a boot with a real VOYAGE_API_KEY would embed the whole events.jsonl backlog for
     # a turned-off feature (and delay the adapters/C2 boundary that starts after us).
     journal = await build_journal_service() if settings.assistant_enabled else None
+    lesson_store = getattr(
+        app.state, "longterm_repo", None
+    )  # set by start_working_memory, runs earlier
     assistant = Assistant(
         bus=app.state.event_bus,
         llm=build_agent_llm(model=settings.assistant_model),
-        tools=build_tool_registry(kb, journal=journal),
+        tools=build_tool_registry(
+            kb,
+            journal=journal,
+            lesson_store=lesson_store,
+            engagement_provider=_engagement_id_provider,
+        ),
         trigger=TriggerGate(cooldown_sec=settings.assistant_cooldown_sec),
         summary_reader=_read_summary,
         enabled=settings.assistant_enabled,
@@ -585,6 +593,8 @@ async def start_assistant(app: FastAPI, settings: Settings) -> tuple[Assistant, 
         wm_max_items=settings.assistant_wm_max_items,
         lull_sec=settings.assistant_lull_sec,
         proactive_min_interval_sec=settings.assistant_proactive_min_interval_sec,
+        lesson_store=lesson_store,
+        engagement_provider=_engagement_id_provider,
     )
     started = asyncio.Event()
     assistant.on_started = started.set  # type: ignore[attr-defined]

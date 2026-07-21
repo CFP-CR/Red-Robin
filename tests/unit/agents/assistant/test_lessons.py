@@ -4,6 +4,7 @@ from datetime import datetime
 
 import pytest
 
+from redrobin.application.agents.assistant.lessons import capture_lesson
 from redrobin.application.agents.assistant.tools import build_tool_registry
 from redrobin.domain.memory import Lesson
 from redrobin.infrastructure.persistence.longterm_repo import LongtermRepo
@@ -64,3 +65,17 @@ async def test_get_lessons_empty_is_graceful(tmp_path):
     tools = build_tool_registry(None, None, lesson_store=empty, engagement_provider=lambda: "eng-A")
     out = await tools[2].handler({})
     assert "no operator lessons" in out.lower()
+
+
+def test_capture_lesson_system_attaches_provenance(tmp_path):
+    store = LongtermRepo(tmp_path / "longterm.db")
+    parsed = {"scope": "operator", "context": "EDR", "lesson": "prefer comsvcs", "why": "too loud"}
+    le = capture_lesson(parsed, engagement_id="eng-A", now=datetime(2026, 7, 20), store=store)
+    assert le is not None and le.id is not None
+    assert le.engagement_id == "eng-A"  # provenance system-attached, NOT from the model
+    assert store.list_operator_lessons(engagement_id="eng-A")[0].lesson == "prefer comsvcs"
+
+
+def test_capture_lesson_none_store_is_graceful():
+    parsed = {"scope": "operator", "context": "x", "lesson": "y", "why": "z"}
+    assert capture_lesson(parsed, engagement_id="e", now=datetime(2026, 7, 20), store=None) is None

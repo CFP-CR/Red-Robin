@@ -14,13 +14,16 @@ import asyncio
 import logging
 import time
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any
 
 from redrobin.application.agents.assistant.agent import (
     apply_deltas_to_snapshot,
+    run_answer_cycle,
     run_cycle,
     state_signature,
 )
+from redrobin.application.agents.assistant.lessons import LessonStore, capture_lesson
 from redrobin.application.agents.assistant.llm import AgentLLM
 from redrobin.application.agents.assistant.triggers import TriggerGate
 from redrobin.application.event_bus import EventBus
@@ -44,6 +47,8 @@ class Assistant:
         clock: Callable[[], float] = time.monotonic,
         lull_sec: float = 300.0,
         proactive_min_interval_sec: float = 600.0,
+        lesson_store: LessonStore | None = None,
+        engagement_provider: Callable[[], str | None] | None = None,
     ) -> None:
         self._bus = bus
         self._llm = llm
@@ -53,6 +58,8 @@ class Assistant:
         self._enabled = enabled
         self._max_tokens = max_tokens
         self._wm_max_items = wm_max_items
+        self._lesson_store = lesson_store
+        self._engagement_provider = engagement_provider
         self._wm_snapshot: dict[str, Any] = {}
         self.on_started: Callable[[], None] | None = None
         # Proactive cadence (spec §6.A): a debounced background check, no scheduler.
@@ -111,6 +118,13 @@ class Assistant:
                         if any(d not in prior_defenses for d in new_defenses):
                             self._material_pending = True  # a new defence — backstop after reactive
                     continue
+                if etype == "operator.question":
+                    self._last_beat = self._clock()  # a question is activity — defer the lull
+                    try:
+                        await self._on_question(evt.get("payload") or {})
+                    except Exception:
+                        logger.exception("assistant failed to process operator.question")
+                    continue
                 if etype != "enrichment.completed":
                     continue
                 self._last_beat = self._clock()  # a beacon beat resets the lull debounce
@@ -162,6 +176,53 @@ class Assistant:
             beacon_id,
             rec.opsec_risk.value,
         )
+
+    async def _on_question(self, payload: dict[str, Any]) -> None:
+        if self._llm is None or not self._enabled:
+            return
+        question = str(payload.get("text") or "").strip()
+        question_id = str(payload.get("question_id") or payload.get("id") or "")
+        if not question:
+            return
+        try:
+            l5_summary = self._summary_reader()
+        except Exception:
+            logger.exception("assistant: summary_reader failed; proceeding with empty L5")
+            l5_summary = ""
+        parsed = await run_answer_cycle(
+            llm=self._llm,
+            tools=self._tools,
+            wm_snapshot=self._wm_snapshot,
+            l5_summary=l5_summary,
+            question=question,
+            max_tokens=self._max_tokens,
+            wm_max_items=self._wm_max_items,
+        )
+        if parsed is None:
+            return  # degraded / unparseable -> no reply
+        engagement_id = (
+            self._engagement_provider() if self._engagement_provider is not None else None
+        )
+        if parsed.lesson is not None:
+            le = capture_lesson(
+                parsed.lesson,
+                engagement_id=engagement_id,
+                now=datetime.now(),
+                store=self._lesson_store,
+            )
+            if le is not None:
+                logger.info("assistant: captured %s-scoped lesson: %s", le.scope, le.lesson)
+        await self._bus.publish(
+            {
+                "type": "operator.answer",
+                "payload": {
+                    "question_id": question_id,
+                    "text": parsed.answer,
+                    "citations": parsed.citations,
+                },
+            }
+        )
+        logger.info("assistant: published operator.answer question_id=%s", question_id)
 
     def _lull_timeout(self) -> float | None:
         """Seconds until the next proactive lull check, or None when proactive is
