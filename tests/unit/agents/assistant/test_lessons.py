@@ -79,3 +79,15 @@ def test_capture_lesson_system_attaches_provenance(tmp_path):
 def test_capture_lesson_none_store_is_graceful():
     parsed = {"scope": "operator", "context": "x", "lesson": "y", "why": "z"}
     assert capture_lesson(parsed, engagement_id="e", now=datetime(2026, 7, 20), store=None) is None
+
+
+@pytest.mark.asyncio
+async def test_get_lessons_raising_provider_is_graceful(tmp_path):
+    def _boom() -> str:
+        raise RuntimeError("provider exploded")
+
+    tools = build_tool_registry(
+        None, None, lesson_store=_store(tmp_path), engagement_provider=_boom
+    )
+    out = await tools[2].handler({})
+    assert out == "Operator-lesson retrieval failed."  # degraded, did NOT raise

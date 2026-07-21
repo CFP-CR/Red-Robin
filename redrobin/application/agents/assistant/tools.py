@@ -175,8 +175,8 @@ def build_tool_registry(
     async def _get_lessons(args: dict[str, Any]) -> str:
         if lesson_store is None:
             return "No operator lessons available."
-        engagement_id = engagement_provider() if engagement_provider is not None else None
         try:
+            engagement_id = engagement_provider() if engagement_provider is not None else None
             lessons = lesson_store.list_operator_lessons(engagement_id=engagement_id)
         except Exception:
             logger.exception("assistant: get_lessons failed")
