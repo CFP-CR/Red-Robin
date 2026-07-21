@@ -3,8 +3,14 @@ from __future__ import annotations
 import pytest
 
 from redrobin.application.agents.assistant.agent import run_interpretation_cycle
+from redrobin.application.agents.assistant.interpret import (
+    is_own_proposal_question,
+    milestone_events,
+    resolve_confirm,
+)
 from redrobin.application.agents.assistant.parser import parse_interpretation
 from redrobin.domain.assistant import Interpretation
+from redrobin.domain.memory import PendingMilestone
 
 
 def test_parse_soft_interpretation_no_confirm():
@@ -61,3 +67,83 @@ async def test_run_interpretation_cycle_parses():
         llm=_LLM(), tools=[], wm_snapshot={"objectives": []}, l5_summary=""
     )
     assert it is not None and it.phase == "recon"
+
+
+def test_soft_interpretation_emits_one_commit_milestone():
+    it = Interpretation("recon", "obj1", "in_progress", 40, False, "")
+    evts = milestone_events(it)
+    assert len(evts) == 1
+    assert evts[0]["type"] == "engagement.milestone"
+    assert evts[0]["payload"]["milestone_id"] == "obj1"
+    assert not evts[0]["payload"].get("pending")
+
+
+def test_confirm_interpretation_emits_pending_milestone_and_question():
+    it = Interpretation("", "obj1", "COMPLETE", 100, True, "Objective obj1 done?")
+    evts = milestone_events(it)
+    types = [e["type"] for e in evts]
+    assert types == ["engagement.milestone", "operator.question"]
+    assert evts[0]["payload"]["pending"] is True
+    assert evts[1]["payload"]["context_refs"] == ["milestone:obj1"]
+    assert evts[1]["payload"]["text"] == "Objective obj1 done?"
+
+
+def test_resolve_confirm_yes_commits():
+    pend = [PendingMilestone("obj1", "lateral", "COMPLETE", 100, "?")]
+    evt = resolve_confirm(
+        answer_payload={"question_id": "obj1", "text": "yes, do it"}, pending_milestones=pend
+    )
+    assert evt is not None and evt["type"] == "engagement.milestone"
+    assert evt["payload"]["milestone_id"] == "obj1" and not evt["payload"].get("pending")
+    assert not evt["payload"].get("drop")
+
+
+def test_resolve_confirm_no_drops():
+    pend = [PendingMilestone("obj1", "lateral", "COMPLETE", 100, "?")]
+    evt = resolve_confirm(
+        answer_payload={"question_id": "obj1", "text": "no, not yet"}, pending_milestones=pend
+    )
+    assert evt is not None and evt["payload"]["drop"] is True
+
+
+def test_resolve_confirm_unmatched_answer_is_ignored():
+    assert (
+        resolve_confirm(
+            answer_payload={"question_id": "other", "text": "yes"}, pending_milestones=[]
+        )
+        is None
+    )
+
+
+def test_resolve_confirm_empty_qid_never_matches():
+    # an operator ask carries no question_id (-> "") — it must NOT collide with an empty-id pending
+    pend = [PendingMilestone("", "p", "COMPLETE", 100, "?")]
+    assert (
+        resolve_confirm(answer_payload={"question_id": "", "text": "yes"}, pending_milestones=pend)
+        is None
+    )
+
+
+def test_resolve_confirm_negation_wins_and_ambiguous_leaves_pending():
+    pend = [PendingMilestone("obj1", "lateral", "COMPLETE", 100, "?")]
+    # "no, not yet" -> drop (the "y" in "yet" must NOT read as affirmative)
+    assert (
+        resolve_confirm(
+            answer_payload={"question_id": "obj1", "text": "no, not yet"}, pending_milestones=pend
+        )["payload"]["drop"]
+        is True
+    )
+    # ambiguous -> None (leave the pending alive; never guess a commit)
+    assert (
+        resolve_confirm(
+            answer_payload={"question_id": "obj1", "text": "hmm, interesting"},
+            pending_milestones=pend,
+        )
+        is None
+    )
+
+
+def test_is_own_proposal_question():
+    assert is_own_proposal_question({"context_refs": ["milestone:obj1"]}) is True
+    assert is_own_proposal_question({"context_refs": ["host:DC01"]}) is False
+    assert is_own_proposal_question({"text": "what's my path to DA?"}) is False
