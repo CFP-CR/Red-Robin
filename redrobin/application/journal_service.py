@@ -122,9 +122,14 @@ class JournalService:
     async def refresh(self) -> int:
         """Read the events.jsonl lines appended since the last refresh, join them
         (continuing the persistent corr->command map), embed the new entries in
-        batches, and add them to the store. Returns entries added this call. A
-        trailing partial line (no newline yet) is left for the next refresh.
-        Never raises past a logged warning (never-crash, spec §6.E)."""
+        batches, and add them to the store. Returns entries added this call.
+
+        Atomic + retryable: the store, the line offset, and the command map are
+        committed ONLY after every batch embeds successfully. A trailing partial
+        line (no newline yet) is left for the next refresh. Any failure — a
+        missing/unreadable file or an embedding error — is logged and returns 0
+        without advancing, so the same lines are retried next call; refresh never
+        raises past a logged warning (never-crash, spec §6.E)."""
         async with self._lock:
             if not self._events_path.exists():
                 return 0
@@ -137,23 +142,44 @@ class JournalService:
             # still-being-written partial line — either way, don't consume it yet.
             complete = text.split("\n")[:-1]
             new_lines = complete[self._consumed :]
-            self._consumed = len(complete)
-            entries = join_transcript(_event_bodies(new_lines), self._commands)
+            # Join into a COPY of the persistent map so a mid-embed failure leaves
+            # neither the store, the offset, nor the command map half-updated.
+            pending_commands = dict(self._commands)
+            entries = join_transcript(_event_bodies(new_lines), pending_commands)
             if not entries:
+                # Nothing to embed (e.g. input-only lines) — commit the advanced
+                # offset + remembered commands so we don't reprocess them.
+                self._consumed = len(complete)
+                self._commands = pending_commands
                 return 0
-            added = 0
-            for i in range(0, len(entries), _EMBED_BATCH):
-                batch = entries[i : i + _EMBED_BATCH]
-                texts = [_entry_text(e) for e in batch]
-                ids = [f"journal:{e.correlation_id}#{self._seq + j}" for j, e in enumerate(batch)]
-                metas: list[dict[str, Any]] = [
-                    {"source": f"journal:{e.correlation_id}", "command": e.command} for e in batch
-                ]
-                result = await self._voyage.embed_documents(texts)
-                self._store.add(ids=ids, texts=texts, vectors=result.vectors, metadatas=metas)
-                self._seq += len(batch)
-                added += len(batch)
-            return added
+            # Embed the delta in batches (Voyage request-size limits), staging the
+            # results BEFORE mutating the store — so a failure on any batch is a
+            # clean no-op that retries on the next refresh (never a lost/partial
+            # index, never a raised exception past this logged warning).
+            staged: list[tuple[list[str], list[str], list[list[float]], list[dict[str, Any]]]] = []
+            try:
+                for i in range(0, len(entries), _EMBED_BATCH):
+                    batch = entries[i : i + _EMBED_BATCH]
+                    texts = [_entry_text(e) for e in batch]
+                    ids = [
+                        f"journal:{e.correlation_id}#{self._seq + i + j}"
+                        for j, e in enumerate(batch)
+                    ]
+                    metas: list[dict[str, Any]] = [
+                        {"source": f"journal:{e.correlation_id}", "command": e.command}
+                        for e in batch
+                    ]
+                    result = await self._voyage.embed_documents(texts)
+                    staged.append((ids, texts, list(result.vectors), metas))
+            except Exception:
+                logger.exception("assistant: journal embedding failed — will retry on next refresh")
+                return 0
+            for ids, texts, vectors, metas in staged:
+                self._store.add(ids=ids, texts=texts, vectors=vectors, metadatas=metas)
+            self._consumed = len(complete)
+            self._seq += len(entries)
+            self._commands = pending_commands
+            return len(entries)
 
     async def retrieve(self, query: str, *, top_k: int = 5) -> list[tuple[str, str, float]]:
         """Catch the index up to the latest events.jsonl, then return the top-K

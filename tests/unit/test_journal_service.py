@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+import redrobin.application.journal_service as journal_module
 from redrobin.application.journal_service import (
     JournalEntry,
     JournalService,
@@ -242,3 +243,81 @@ async def test_retrieve_on_empty_store_returns_empty(tmp_path):
         voyage=_fixed_voyage(), store=VectorStore(), events_path=tmp_path / "nope.jsonl"
     )
     assert await svc.retrieve("anything") == []
+
+
+@pytest.mark.asyncio
+async def test_refresh_multi_batch_indexes_all(tmp_path, monkeypatch):
+    # Force multiple embed batches; every entry across batches is indexed.
+    monkeypatch.setattr(journal_module, "_EMBED_BATCH", 2)
+    path = tmp_path / "events.jsonl"
+    lines = []
+    for i in range(5):
+        lines.append(
+            _envelope({"type": "beacon.command_input", "correlation_id": f"k{i}", "raw": f"cmd{i}"})
+        )
+        lines.append(
+            _envelope(
+                {"type": "beacon.command_output", "correlation_id": f"k{i}", "output": f"out{i}"}
+            )
+        )
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    store = VectorStore()
+    svc = JournalService(voyage=_fixed_voyage(), store=store, events_path=path)
+    assert await svc.refresh() == 5
+    assert store.count() == 5
+
+
+@pytest.mark.asyncio
+async def test_refresh_two_outputs_same_correlation_id_are_distinct_entries(tmp_path):
+    path = tmp_path / "events.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                _envelope({"type": "beacon.command_input", "correlation_id": "c1", "raw": "run"}),
+                _envelope(
+                    {"type": "beacon.command_output", "correlation_id": "c1", "output": "first"}
+                ),
+                _envelope(
+                    {"type": "beacon.command_output", "correlation_id": "c1", "output": "second"}
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    store = VectorStore()
+    svc = JournalService(voyage=_fixed_voyage(), store=store, events_path=path)
+    assert await svc.refresh() == 2  # two outputs -> two entries, neither lost
+    assert store.count() == 2
+
+
+@pytest.mark.asyncio
+async def test_refresh_embedding_failure_is_retried_not_lost(tmp_path):
+    path = tmp_path / "events.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                _envelope(
+                    {"type": "beacon.command_input", "correlation_id": "c1", "raw": "whoami"}
+                ),
+                _envelope(
+                    {"type": "beacon.command_output", "correlation_id": "c1", "output": "system"}
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    voyage = AsyncMock()
+    voyage.embed_documents = AsyncMock(
+        side_effect=[
+            RuntimeError("voyage down"),  # first refresh fails mid-embed
+            type("R", (), {"vectors": [[1.0, 0.0]], "total_tokens": 0})(),  # second succeeds
+        ]
+    )
+    store = VectorStore()
+    svc = JournalService(voyage=voyage, store=store, events_path=path)
+    assert await svc.refresh() == 0  # embedding failed -> nothing added, does NOT raise
+    assert store.count() == 0
+    assert await svc.refresh() == 1  # same lines retried (offset not advanced) -> now indexed
+    assert store.count() == 1
