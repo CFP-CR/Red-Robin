@@ -84,12 +84,43 @@ for the test set a short lull + rate-limit so the cadence is observable:
   confirm no second proactive card within `N` even across further idle. Advisory-only
   throughout (nothing dispatched to the beacon).
 
+## [Task 6 (#27)] Interpretation-write
+
+Prereq: assistant enabled with an ANTHROPIC key (Task 2 preconditions). The assistant
+now READS the shared picture as it works: on each command it may auto-write a soft,
+reversible read (a phase nudge / progress bump) and, on a close/commit, PROPOSE a binary
+confirm the operator resolves later — the beacon is never held. Batch these onto the same
+live run as the Task 2/4 checkpoints.
+
+- **[Task 6] Checkpoint K — Soft auto-write (the assistant's read):** run a couple of
+  commands that advance an objective (e.g. recon → a first foothold on a host in an
+  objective's scope). EXPECT: the Working-Memory panel's `current_phase` and/or the
+  objective's `progress` update on their own — the assistant's inference, no operator
+  edit. It is a SOFT read: reversible by a later operator edit/commit (the "labeled as
+  the assistant's read" *presentation* is #28; the value + reversibility hold now).
+- **[Task 6] Checkpoint L — Propose-and-confirm (close/commit):** advance state to where
+  an objective looks DONE (or a kill-chain goal is reached). EXPECT: a pending confirm —
+  a one-line yes/no question surfaced over `operator.question` (rendered by #28's Chat
+  pane; until then observe it on the bus / logs as `assistant: interpretation proposed`).
+  The beacon is NOT blocked while it is outstanding — you can keep tasking.
+- **[Task 6] Checkpoint M — Resolve non-blocking (yes / no):** answer the pending confirm.
+  On **yes**, EXPECT the objective commits (status → COMPLETE in the WM panel); on **no**,
+  EXPECT the pending is dropped and nothing commits. Either way the resolution happens in a
+  later cycle from the persisted WM — a plain operator question (no `question_id` matching a
+  pending) NEVER commits, and the assistant never loops on its own proposal.
+- **[Task 6] Checkpoint N — Signal-not-noise / no re-ask:** with state unchanged, confirm
+  the interpretation does NOT re-fire (novelty-gated) and an already-pending confirm is NOT
+  re-asked every command. Advisory + single-writer throughout (the assistant publishes
+  `engagement.milestone`; the reducer writes WM — nothing dispatched to the beacon).
+
 ## Explicitly out of scope (do NOT expect — later tasks)
 - **[later task]** Asking the assistant a question in a Chat pane ("what's my
   path to DA?") and getting a deep answer (conversational mode).
 - **[later task]** Pushing back ("too loud") and it capturing a lesson (learning loop).
-- **[later task]** The assistant writing `current_phase` / objective status, or a
-  propose-and-confirm affordance (interpretation-write).
+- **[later task, #28]** The confirm-affordance VISUAL — a Chat pane rendering
+  `operator.question`/`operator.answer` and the pending confirm, and labelling the written
+  value AS "the assistant's read". Task 6 delivers the interpretation-write mechanics + the
+  bus-level path (Checkpoints K–N); the operator resolves via `operator.answer`.
 - **[later task]** `search_journal` / `get_lessons` tools, or the deep Sonnet sub-agent.
 
 ## Teardown
