@@ -82,22 +82,26 @@ def test_operator_question_round_trips_over_socket(app_client):
             pytest.fail("operator.question was never published back over the socket")
 
 
-def test_malformed_inbound_frame_does_not_kill_socket(app_client):
-    # C6 guard: a bad inbound frame must NOT crash the receive loop — the socket
-    # must still deliver a subsequently published bus event.
+def test_malformed_inbound_frame_does_not_kill_receive(app_client):
+    # C6 guard — RECEIVE-SIDE survival: a bad inbound frame must NOT crash the
+    # _receive loop. We prove this by driving a subsequent frame THROUGH that same
+    # loop: after a malformed frame, a valid operator.question must still be received,
+    # published, and fan back out tagged source="operator". If _receive's try/except
+    # is removed, the loop dies on the bad frame and never publishes the follow-up →
+    # this times out. (Publishing directly on the bus would pass even with a dead
+    # receive loop, so that would NOT discriminate — this drives the receive path.)
     app, client = app_client
     token = get_or_create_token()
     with client.websocket_connect(f"/v1/tui?token={token}") as ws:
         ws.receive_json()  # discard the initial snapshot
-        ws.send_text("not json")  # malformed — would kill an un-guarded receive loop
-        client.portal.call(
-            app.state.event_bus.publish,
-            {"type": "opsec.verdict", "payload": {"verdict": "PASS"}},
-        )
-        for _ in range(10):  # bounded: read until the post-malformed event arrives
+        ws.send_text("not json")  # malformed — must be dropped by _receive, not fatal
+        # follow-up MUST flow through the same receive loop that saw the bad frame:
+        ws.send_json({"type": "operator.question", "text": "still alive?", "question_id": "q9"})
+        for _ in range(10):  # bounded: read until the post-malformed question round-trips
             evt = ws.receive_json()
-            if evt.get("type") == "opsec.verdict":
-                assert evt["payload"]["verdict"] == "PASS"
+            if evt.get("type") == "operator.question":
+                assert evt["payload"]["question_id"] == "q9"
+                assert evt["payload"]["source"] == "operator"
                 break
         else:  # pragma: no cover - only hit on regression
-            pytest.fail("socket stopped delivering after a malformed inbound frame")
+            pytest.fail("receive loop stopped publishing after a malformed inbound frame")
