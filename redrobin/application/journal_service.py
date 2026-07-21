@@ -174,8 +174,18 @@ class JournalService:
             except Exception:
                 logger.exception("assistant: journal embedding failed — will retry on next refresh")
                 return 0
+            all_ids: list[str] = []
+            all_texts: list[str] = []
+            all_vectors: list[list[float]] = []
+            all_metas: list[dict[str, Any]] = []
             for ids, texts, vectors, metas in staged:
-                self._store.add(ids=ids, texts=texts, vectors=vectors, metadatas=metas)
+                all_ids += ids
+                all_texts += texts
+                all_vectors += vectors
+                all_metas += metas
+            # ONE store mutation: a mid-add failure can't leave an earlier batch indexed with the
+            # offset unadvanced (which would double-index it on the next refresh).
+            self._store.add(ids=all_ids, texts=all_texts, vectors=all_vectors, metadatas=all_metas)
             self._consumed = len(complete)
             self._seq += len(entries)
             self._commands = pending_commands

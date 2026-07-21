@@ -268,6 +268,39 @@ async def test_refresh_multi_batch_indexes_all(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_refresh_multi_batch_adds_store_once(tmp_path, monkeypatch):
+    # A refresh spanning MULTIPLE embed batches must mutate the store in a SINGLE
+    # store.add — so a mid-add failure can't leave an earlier batch indexed while the
+    # line offset stays put (which would double-index that batch on the next refresh).
+    monkeypatch.setattr(journal_module, "_EMBED_BATCH", 2)
+    path = tmp_path / "events.jsonl"
+    lines = []
+    for i in range(5):
+        lines.append(
+            _envelope({"type": "beacon.command_input", "correlation_id": f"k{i}", "raw": f"cmd{i}"})
+        )
+        lines.append(
+            _envelope(
+                {"type": "beacon.command_output", "correlation_id": f"k{i}", "output": f"out{i}"}
+            )
+        )
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    store = VectorStore()
+    real_add = store.add
+    add_calls: list[int] = []
+
+    def _counting_add(**kwargs):
+        add_calls.append(len(kwargs["ids"]))
+        return real_add(**kwargs)
+
+    monkeypatch.setattr(store, "add", _counting_add)
+    svc = JournalService(voyage=_fixed_voyage(), store=store, events_path=path)
+    assert await svc.refresh() == 5
+    assert add_calls == [5]  # ONE store.add of all 5 entries across the 3 batches (was 3 calls)
+    assert store.count() == 5
+
+
+@pytest.mark.asyncio
 async def test_refresh_two_outputs_same_correlation_id_are_distinct_entries(tmp_path):
     path = tmp_path / "events.jsonl"
     path.write_text(
