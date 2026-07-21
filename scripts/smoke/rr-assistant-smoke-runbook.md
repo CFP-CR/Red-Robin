@@ -114,9 +114,10 @@ live run as the Task 2/4 checkpoints.
   `engagement.milestone`; the reducer writes WM — nothing dispatched to the beacon).
 
 ## Explicitly out of scope (do NOT expect — later tasks)
-- **[later task]** Asking the assistant a question in a Chat pane ("what's my
-  path to DA?") and getting a deep answer (conversational mode).
-- **[later task]** Pushing back ("too loud") and it capturing a lesson (learning loop).
+- **[later task, #28]** The conversational Q&A + learning-loop *Chat-pane UI* — the
+  backend shipped (Task 5: `operator.question`→`operator.answer`, correction→lesson
+  capture); only the TUI Chat pane that renders it (asking "what's my path to DA?",
+  pushing back "too loud" and it capturing a lesson) is deferred to #28.
 - **[later task, #28]** The confirm-affordance VISUAL — a Chat pane rendering
   `operator.question`/`operator.answer` and the pending confirm, and labelling the written
   value AS "the assistant's read". Task 6 delivers the interpretation-write mechanics + the

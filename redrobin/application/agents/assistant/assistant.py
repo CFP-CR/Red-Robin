@@ -247,13 +247,13 @@ class Assistant:
     async def _safe_interpret(self) -> None:
         if self._llm is None or not self._enabled or not self._wm_snapshot:
             return
-        # Novelty gate: only interpret when the state changed since the last interpretation
-        # (bounds cost + stops re-firing the same confirm every command — signal-not-noise).
-        sig = state_signature(self._wm_snapshot)
-        if sig == self._last_interp_sig:
-            return
-        self._last_interp_sig = sig
         try:
+            # Novelty gate: only interpret when the state changed since the last interpretation
+            # (bounds cost + stops re-firing the same confirm every command — signal-not-noise).
+            sig = state_signature(self._wm_snapshot)
+            if sig == self._last_interp_sig:
+                return
+            self._last_interp_sig = sig
             try:
                 l5 = self._summary_reader()
             except Exception:
@@ -288,6 +288,8 @@ class Assistant:
             logger.exception("assistant: interpretation write failed")
 
     async def _on_confirm(self, payload: dict[str, Any]) -> None:
+        if self._llm is None or not self._enabled:
+            return
         pend_raw = self._wm_snapshot.get("pending_milestones") or []
         pend: list[PendingMilestone] = []
         for p in pend_raw:
