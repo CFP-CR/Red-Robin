@@ -583,6 +583,8 @@ async def start_assistant(app: FastAPI, settings: Settings) -> tuple[Assistant, 
         enabled=settings.assistant_enabled,
         max_tokens=settings.assistant_max_tokens,
         wm_max_items=settings.assistant_wm_max_items,
+        lull_sec=settings.assistant_lull_sec,
+        proactive_min_interval_sec=settings.assistant_proactive_min_interval_sec,
     )
     started = asyncio.Event()
     assistant.on_started = started.set  # type: ignore[attr-defined]

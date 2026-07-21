@@ -100,6 +100,37 @@ async def test_lifespan_starts_assistant_with_journal_degraded(tmp_path, monkeyp
     assert app.state.assistant_task.cancelled() is False
 
 
+def test_settings_expose_proactive_knobs(monkeypatch):
+    monkeypatch.delenv("REDROBIN_ASSISTANT_LULL_SEC", raising=False)
+    monkeypatch.delenv("REDROBIN_ASSISTANT_PROACTIVE_MIN_INTERVAL_SEC", raising=False)
+    from redrobin.application.config import Settings
+
+    s = Settings()
+    assert s.assistant_lull_sec == 300.0
+    assert s.assistant_proactive_min_interval_sec == 600.0
+
+
+def test_settings_proactive_knobs_override(monkeypatch):
+    monkeypatch.setenv("REDROBIN_ASSISTANT_LULL_SEC", "45")
+    monkeypatch.setenv("REDROBIN_ASSISTANT_PROACTIVE_MIN_INTERVAL_SEC", "90")
+    from redrobin.application.config import Settings
+
+    s = Settings()
+    assert s.assistant_lull_sec == 45.0
+    assert s.assistant_proactive_min_interval_sec == 90.0
+
+
+def test_settings_proactive_knobs_reject_non_positive(monkeypatch):
+    import pytest as _pytest
+
+    monkeypatch.setenv("REDROBIN_ASSISTANT_LULL_SEC", "0")
+    from redrobin.application.config import Settings
+
+    with _pytest.raises(Exception) as exc:
+        Settings()
+    assert "> 0" in str(exc.value) or "assistant_lull_sec" in str(exc.value).lower()
+
+
 @pytest.mark.asyncio
 async def test_journal_built_only_when_assistant_enabled(tmp_path, monkeypatch):
     # The journal warm (a full-backlog embed) must not run when the assistant is
