@@ -1,10 +1,10 @@
-# Operator smoke — AI assistant Task 2 #23 (reactive grounded recommendation)
+# Operator smoke — AI assistant (Tasks 2/4/6 #23/#25/#27 + #28 — the full assistant live surface)
 
-The live surface (the `#advisor-dock` render over a real CS beacon + the
-enricher/reducer over real output) is NOT CI-testable — this manual smoke is its
-only acceptance (skill **smoke-test**, `development-workflow.md` §5). Checkpoints
-are tagged `[Task 2]` (must pass now) or `[later task]` (deliberately NOT
-expected yet — do not fail the smoke on these).
+The live surface (the `#advisor-dock` card + the Chat pane over a real CS beacon +
+the enricher/reducer over real output) is NOT CI-testable — this manual smoke is its
+only acceptance (skill **smoke-test**, `development-workflow.md` §5). Checkpoints are
+tagged by the unit that must pass now (`[Task 2]`, `[Task 4]`, `[Task 6]`, `[#28]`) or
+`[later task]` (deliberately NOT expected yet — do not fail the smoke on these).
 
 ## Preconditions
 - Daemon built + running with `ANTHROPIC_API_KEY` and `VOYAGE_API_KEY` exported
@@ -113,15 +113,47 @@ live run as the Task 2/4 checkpoints.
   re-asked every command. Advisory + single-writer throughout (the assistant publishes
   `engagement.milestone`; the reducer writes WM — nothing dispatched to the beacon).
 
+## [#28] Conversational + confirm affordance
+
+Prereq: assistant enabled (`REDROBIN_ASSISTANT_ENABLED=1`) with an ANTHROPIC key, and
+a live beacon that has already produced some engagement state (run at least the Task 2
+loot steps first, so the assistant has a picture to answer over). The Chat pane REPLACES
+the old Verdicts/Events pane in the CENTER of the TUI — press `c` to focus it, type in
+the Input, Enter to send. Assistant-authored lines render as `Red Robin  …`; the topbar
+verdict COUNT is unchanged. Batch these onto the same live run as the Task 2/4/6
+checkpoints.
+
+- **[#28] Checkpoint O — Ask (conversational Q&A):** type a question in the Chat pane
+  (e.g. `what's my path to DA?`). EXPECT: your line echoes as the operator's, then a
+  grounded `Red Robin  …` answer renders with `refs` (extracted facts / KB chunks) —
+  grounded, not invented. This is the bidirectional round-trip: your message reached the
+  assistant (published `operator.question`) and its `operator.answer` rendered back.
+- **[#28] Checkpoint P — Correct (the learning loop):** type a correction / push-back
+  (e.g. `that's too loud`). EXPECT: the assistant acknowledges and a LESSON is captured —
+  confirm via the DB (the lessons table) OR by watching a later cycle honour it (a
+  subsequent recommendation is quieter / cites the lesson). This is the Task-5 learning
+  loop, now operator-usable straight from the chat.
+- **[#28] Checkpoint Q — Confirm (interpretation-write, Task 6) resolves INLINE:** drive
+  state to a close/commit (advance an objective to DONE, as in Checkpoint L). EXPECT: a
+  pending `CONFIRM …  [reply /y or /n]` renders INLINE in the Chat pane (not merely on the
+  bus / logs as in Task 6). Reply `/y` → the objective commits (status → COMPLETE in the
+  Working-Memory panel); reply `/n` → the pending is dropped and nothing commits. The
+  beacon is NEVER held while the confirm is outstanding — you can keep tasking throughout.
+- **[#28] Checkpoint R — Safety (a plain question never commits):** with a confirm still
+  pending, type an ordinary question — even a short one like `ok` or `status?`. EXPECT: it
+  is treated as a QUESTION (a `Red Robin  …` answer), and it does NOT resolve or commit the
+  pending confirm. ONLY the explicit `/y` / `/n` token resolves a confirm (the
+  false-commit-proof routing; a minted ask id `q<N>` never matches a semantic
+  `milestone_id`, so an ordinary word can't false-match a pending).
+- **[#28] Checkpoint S — Never-crash (bad frame, either direction):** the chat socket
+  survives a malformed frame — a bad/partial WS frame is dropped and the daemon receive
+  loop / TUI worker keep running (the chat still sends + renders afterward). You should
+  never be able to kill the socket from the chat.
+
 ## Explicitly out of scope (do NOT expect — later tasks)
-- **[later task, #28]** The conversational Q&A + learning-loop *Chat-pane UI* — the
-  backend shipped (Task 5: `operator.question`→`operator.answer`, correction→lesson
-  capture); only the TUI Chat pane that renders it (asking "what's my path to DA?",
-  pushing back "too loud" and it capturing a lesson) is deferred to #28.
-- **[later task, #28]** The confirm-affordance VISUAL — a Chat pane rendering
-  `operator.question`/`operator.answer` and the pending confirm, and labelling the written
-  value AS "the assistant's read". Task 6 delivers the interpretation-write mechanics + the
-  bus-level path (Checkpoints K–N); the operator resolves via `operator.answer`.
+> The conversational Q&A + learning loop and the confirm-affordance visual are now DONE and
+> live (Task-5 backend + #28 UI) — see the `[#28]` checkpoints above. They are no longer
+> deferred; the only remaining out-of-scope items are the deep-agent tools below.
 - **[later task]** `search_journal` / `get_lessons` tools, or the deep Sonnet sub-agent.
 
 ## Teardown
