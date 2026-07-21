@@ -14,7 +14,9 @@ async def test_tab_cycles_the_three_panes():
             await pilot.press("tab")
             await pilot.pause()
             order.append(app.focused.id)
-        assert order == ["events-log", "memory-panel", "sessions-table"]
+        # The Chat scrollback (#chat-log) is can_focus=False, so only its Input is a
+        # tab stop: sessions-table → chat-input → memory-panel (wrapping).
+        assert order == ["chat-input", "memory-panel", "sessions-table"]
 
 
 @pytest.mark.asyncio
@@ -77,10 +79,10 @@ async def test_command_specs_focus_a_pane():
     async with app.run_test() as pilot:
         from redrobin.tui.textual_ui.commands import command_specs
 
-        runnable = next(cmd for name, cmd, _ in command_specs(app) if "Verdicts" in name)
+        runnable = next(cmd for name, cmd, _ in command_specs(app) if "Chat" in name)
         runnable()
         await pilot.pause()
-        assert app.focused is not None and app.focused.id == "events-log"
+        assert app.focused is not None and app.focused.id == "chat-input"
 
 
 def test_app_registers_red_robin_command_provider():

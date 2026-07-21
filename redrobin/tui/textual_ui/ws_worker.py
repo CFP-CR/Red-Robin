@@ -57,6 +57,7 @@ async def ws_loop(
     async for ws in connect(full, ping_interval=20, ping_timeout=20):
         if set_state:
             set_state("connected")
+        setattr(target, "_ws_send", ws.send)  # the app sends operator messages via this
         try:
             async for raw in ws:
                 if stop_event.is_set():
@@ -65,12 +66,14 @@ async def ws_loop(
                     raw = raw.decode("utf-8", errors="replace")
                 handle_raw(target=target, raw=raw, registry=registry)
         except Exception as exc:
+            setattr(target, "_ws_send", None)
             logger.warning("ws_worker reconnecting after error: %s", exc)
             if set_state:
                 set_state("connecting")
             if stop_event.is_set():
                 return
             continue
+        setattr(target, "_ws_send", None)
         if stop_event.is_set():
             return
 

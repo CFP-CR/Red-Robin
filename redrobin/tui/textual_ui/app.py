@@ -9,8 +9,11 @@ the panes with DataTable/RichLog widgets.
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 import os
 
+from rich.text import Text
 from textual.app import App, ComposeResult, ScreenStackError
 from textual.containers import Container, Horizontal
 from textual.css.query import NoMatches
@@ -19,18 +22,20 @@ from textual.reactive import reactive
 from textual.widgets import Footer, Static
 
 from redrobin.tui.textual_ui.advisor import register_advisor
+from redrobin.tui.textual_ui.chat import ChatPane
 from redrobin.tui.textual_ui.commands import RedRobinCommands
 from redrobin.tui.textual_ui.frames import Registry
 from redrobin.tui.textual_ui.help_screen import HelpScreen
 from redrobin.tui.textual_ui.inspector import InspectorScreen
 from redrobin.tui.textual_ui.panels import (
-    EventsLog,
     MemoryPanel,
     SessionsTable,
     TopBar,
     apply_verdict,
     verdict_counts,
 )
+
+logger = logging.getLogger(__name__)
 
 # Module-level registry: handlers register at import time (Task 5). A future
 # feature adds its frame type with a new @REGISTRY.register — no edits here.
@@ -52,6 +57,7 @@ class RedRobinApp(App):
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("i", "inspect", "Inspector"),
+        ("c", "focus_chat", "Chat"),
         ("question_mark", "help", "Help"),
     ]
     COMMANDS = App.COMMANDS | {RedRobinCommands}
@@ -78,11 +84,9 @@ class RedRobinApp(App):
             with Container(id="sessions") as sessions_box:
                 sessions_box.border_title = "Sessions"
                 yield SessionsTable(id="sessions-table")
-            with Container(id="events") as events_box:
-                events_box.border_title = "Verdicts / Events"
-                yield EventsLog(
-                    id="events-log", highlight=False, markup=False, wrap=True, min_width=0
-                )
+            chat = ChatPane(id="events")
+            chat.border_title = "Assistant Chat"
+            yield chat
             with Container(id="memory") as memory_box:
                 memory_box.border_title = "Working Memory"
                 yield MemoryPanel(id="memory-panel")
@@ -101,12 +105,10 @@ class RedRobinApp(App):
             pass  # pre-mount (no screen yet) or widgets not mounted — compose seeds them
 
     def watch_events(self, events: list) -> None:
-        """Re-render the verdict/event log + header counts whenever events change."""
+        """Re-render the header verdict counts whenever events change. The verdict
+        STREAM display was superseded by the Chat pane (#28); the topbar COUNT
+        survives — it reads app.events, still updated by the opsec.verdict handler."""
         self._refresh_topbar()
-        try:
-            self.query_one("#events-log", EventsLog).render_events(events)
-        except (NoMatches, ScreenStackError):
-            pass
 
     def _refresh_topbar(self) -> None:
         """Re-render the header from current snapshot + connection state + verdict counts."""
@@ -131,6 +133,31 @@ class RedRobinApp(App):
     def action_help(self) -> None:
         """Open the keymap help overlay."""
         self.push_screen(HelpScreen())
+
+    def action_focus_chat(self) -> None:
+        """Focus the Chat input (the `c` binding)."""
+        try:
+            self.query_one("#chat-input").focus()
+        except (NoMatches, ScreenStackError):
+            pass
+
+    async def send_operator_message(self, msg: dict) -> None:
+        """Transport an operator message (operator.question/answer) to the daemon
+        over the WS via the worker's ``_ws_send`` handle. Local echo is the caller's
+        job — this only sends. If disconnected, append a '(not connected)' line."""
+        send = getattr(self, "_ws_send", None)
+        if send is None:
+            try:
+                self.query_one("#events", ChatPane).append_line(
+                    Text("(not connected — message not sent)", style="#8b949e")
+                )
+            except (NoMatches, ScreenStackError):
+                pass
+            return
+        try:
+            await send(json.dumps(msg))
+        except Exception:
+            logger.exception("tui: failed to send operator message")
 
     def on_mount(self) -> None:
         """Start the WS worker unless disabled (tests pass start_worker=False)."""
