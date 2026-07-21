@@ -168,6 +168,26 @@ class PromotedLesson:
 
 
 @dataclass(frozen=True)
+class Lesson:
+    """L1 operator-correction lesson (spec §6.D) — a context-scoped, NEVER-blanket
+    record captured when the operator corrects the assistant. Distinct from
+    ``PromotedLesson`` (the verdict-aggregation record keyed by command/verdict):
+    this is the operator-correction lesson-source (§10). ``scope`` is
+    ``"operator"`` (persists cross-engagement — cumulative) or ``"engagement"``
+    (quarantined — read back only for its own engagement, so a honeypot fact never
+    contaminates the next client). Provenance (``engagement_id``, ``created_at``)
+    is system-attached at capture, never model-supplied."""
+
+    scope: str  # "operator" | "engagement"
+    context: str  # the situation it applies in
+    lesson: str  # what to do differently
+    why: str  # the reason
+    engagement_id: str | None  # provenance + the quarantine key
+    created_at: datetime
+    id: int | None = None  # None until persisted
+
+
+@dataclass(frozen=True)
 class ContextSummary:
     """L5 sliding-window summary — engagement-specific compression of recent episodes.
 
