@@ -145,10 +145,12 @@ class RedRobinApp(App):
         except (NoMatches, ScreenStackError):
             pass
 
-    async def send_operator_message(self, msg: dict) -> None:
+    async def send_operator_message(self, msg: dict) -> bool:
         """Transport an operator message (operator.question/answer) to the daemon
         over the WS via the worker's ``_ws_send`` handle. Local echo is the caller's
-        job — this only sends. If disconnected, append a '(not connected)' line."""
+        job — this only sends. If disconnected, append a '(not connected)' line.
+        Returns True iff the frame was actually handed to the transport (False if
+        disconnected/failed), so the caller consumes a pending only on a real send."""
         send = getattr(self, "_ws_send", None)
         if send is None:
             try:
@@ -157,11 +159,13 @@ class RedRobinApp(App):
                 )
             except (NoMatches, ScreenStackError):
                 pass
-            return
+            return False
         try:
             await send(json.dumps(msg))
+            return True
         except Exception:
             logger.exception("tui: failed to send operator message")
+            return False
 
     def on_mount(self) -> None:
         """Start the WS worker unless disabled (tests pass start_worker=False)."""

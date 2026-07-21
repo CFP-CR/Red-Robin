@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from rich.text import Text
 from textual.app import App, ComposeResult
-from textual.widgets import RichLog
+from textual.widgets import Input, RichLog
 
 from redrobin.tui.textual_ui.chat import (
     ChatPane,
@@ -146,6 +146,50 @@ async def test_operator_question_confirm_renders_and_tracks_pending():
             },
         )
         assert pane._pending == ["obj1"]
+
+
+# ---- #28 review #2: consume the pending only on a confirmed send ----
+
+
+class _SendHarness(App):
+    """Harness whose send_operator_message returns a fixed result and records the sends,
+    so on_input_submitted's consume-on-confirmed-send logic can be driven directly."""
+
+    def __init__(self, sent_result: bool) -> None:
+        super().__init__()
+        self._sent_result = sent_result
+        self.sent_msgs: list[dict] = []
+
+    def compose(self) -> ComposeResult:
+        yield ChatPane(id="events")  # the ChatPane IS the #events pane
+
+    async def send_operator_message(self, msg: dict) -> bool:
+        self.sent_msgs.append(msg)
+        return self._sent_result
+
+
+@pytest.mark.asyncio
+async def test_pending_not_consumed_when_send_fails():
+    # A disconnected/failed send (False) must LEAVE the pending so a re-typed /y after
+    # reconnect can still resolve the confirm from the chat.
+    async with _SendHarness(sent_result=False).run_test() as pilot:
+        pane = pilot.app.query_one("#events", ChatPane)
+        pane._pending = ["obj-x"]
+        inp = pane.query_one("#chat-input", Input)
+        await pane.on_input_submitted(Input.Submitted(inp, "/y"))
+        assert pilot.app.sent_msgs and pilot.app.sent_msgs[0]["question_id"] == "obj-x"
+        assert pane._pending == ["obj-x"]  # NOT consumed on a failed send
+
+
+@pytest.mark.asyncio
+async def test_pending_consumed_when_send_confirmed():
+    # A confirmed send (True) consumes the pending it targeted.
+    async with _SendHarness(sent_result=True).run_test() as pilot:
+        pane = pilot.app.query_one("#events", ChatPane)
+        pane._pending = ["obj-x"]
+        inp = pane.query_one("#chat-input", Input)
+        await pane.on_input_submitted(Input.Submitted(inp, "/y"))
+        assert pane._pending == []  # consumed on a confirmed send
 
 
 @pytest.mark.asyncio

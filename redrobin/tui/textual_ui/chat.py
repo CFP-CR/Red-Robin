@@ -49,13 +49,15 @@ class ChatPane(Container):
         if not text:
             return
         kind, msg = next_operator_message(text, pending=self._pending, q_index=self._q_counter)
+        self.append_line(format_operator_echo(text))
+        sent = await self.app.send_operator_message(msg)  # type: ignore[attr-defined]
+        # A question bumps the monotonic local counter unconditionally (harmless on a failed
+        # send). A confirm answer consumes the pending it targeted ONLY on a confirmed send —
+        # otherwise a re-typed /y after reconnect must still be able to resolve it (#28 #2).
         if kind == "question":
             self._q_counter += 1
-        else:  # answer -> consume the pending it targeted
-            if msg["question_id"] in self._pending:
-                self._pending.remove(msg["question_id"])
-        self.append_line(format_operator_echo(text))
-        await self.app.send_operator_message(msg)  # type: ignore[attr-defined]
+        elif sent and msg["question_id"] in self._pending:
+            self._pending.remove(msg["question_id"])
 
 
 def format_operator_echo(text: str) -> Text:
