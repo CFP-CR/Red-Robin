@@ -22,7 +22,7 @@ from textual.reactive import reactive
 from textual.widgets import Footer, Static
 
 from redrobin.tui.textual_ui.advisor import register_advisor
-from redrobin.tui.textual_ui.chat import ChatPane
+from redrobin.tui.textual_ui.chat import ChatPane, register_chat
 from redrobin.tui.textual_ui.commands import RedRobinCommands
 from redrobin.tui.textual_ui.frames import Registry
 from redrobin.tui.textual_ui.help_screen import HelpScreen
@@ -44,6 +44,10 @@ REGISTRY = Registry()
 # Advisor frames register on the shared REGISTRY via a binder (avoids a circular
 # import: advisor.py imports only frames, never app).
 register_advisor(REGISTRY)
+
+# Chat frames (operator.answer / operator.question) bind the same way — chat.py
+# imports only frames, never app (keeps the layered import graph acyclic).
+register_chat(REGISTRY)
 
 
 def is_too_small(width: int, height: int) -> bool:

@@ -2,8 +2,9 @@
 confirms. Replaces the center Verdicts/Events pane (operator decision 2026-07-21).
 Renderers are pure Rich (unit-testable, like advisor.format_recommendation).
 
-The frame handlers (register_chat/_on_answer/_on_question) + Input routing land in
-the next unit; this module is the widget + pure renderers + send-handle surface."""
+The frame handlers (register_chat/_on_answer/_on_question) + Input routing
+(next_operator_message: ask vs an explicit /y /n confirm) live here too; the
+handlers are bound onto the shared REGISTRY from app.py via register_chat."""
 
 from __future__ import annotations
 
@@ -13,6 +14,8 @@ from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Container
 from textual.widgets import Input, RichLog
+
+from redrobin.tui.textual_ui.frames import Registry
 
 _ACCENT = "#58a6ff"
 _MUTED = "#8b949e"
@@ -38,6 +41,20 @@ class ChatPane(Container):
             self.query_one("#chat-log", RichLog).write(text)
         except Exception:
             pass
+
+    async def on_input_submitted(self, event: Input.Submitted) -> None:
+        text = event.value.strip()
+        event.input.value = ""
+        if not text:
+            return
+        kind, msg = next_operator_message(text, pending=self._pending, q_index=self._q_counter)
+        if kind == "question":
+            self._q_counter += 1
+        else:  # answer -> consume the pending it targeted
+            if msg["question_id"] in self._pending:
+                self._pending.remove(msg["question_id"])
+        self.append_line(format_operator_echo(text))
+        await self.app.send_operator_message(msg)  # type: ignore[attr-defined]
 
 
 def format_operator_echo(text: str) -> Text:
@@ -66,4 +83,75 @@ def format_confirm(payload: dict[str, Any]) -> Text:
     return t
 
 
-__all__ = ["ChatPane", "format_answer", "format_confirm", "format_operator_echo"]
+def is_confirm_question(payload: dict[str, Any]) -> bool:
+    refs = payload.get("context_refs")
+    return isinstance(refs, list) and any(str(r).startswith("milestone:") for r in refs)
+
+
+def _milestone_id(payload: dict[str, Any]) -> str:
+    for r in payload.get("context_refs") or []:
+        if str(r).startswith("milestone:"):
+            return str(r).split(":", 1)[1]
+    return ""
+
+
+def next_operator_message(
+    text: str, *, pending: list[str], q_index: int
+) -> tuple[str, dict[str, Any]]:
+    """Route the operator's submitted text. A confirm answer is ONLY an EXPLICIT slash
+    token (/y /yes /n /no) while a confirm is pending — so an ordinary short word
+    ('ok', 'no creds?') is NEVER mistaken for a confirm and can never silently commit/
+    drop engagement state. Everything else is a question with a minted id. The daemon's
+    resolve_confirm still authorizes the commit/drop; the slash token makes routing
+    collision-free (the minted 'q<N>' also never collides with a semantic milestone id)."""
+    t = text.strip()
+    low = t.lower()
+    if pending and low in ("/y", "/yes", "/n", "/no"):
+        answer = "yes" if low in ("/y", "/yes") else "no"
+        return "answer", {"type": "operator.answer", "question_id": pending[0], "text": answer}
+    return "question", {"type": "operator.question", "question_id": f"q{q_index}", "text": t}
+
+
+def _chat(app: Any) -> "ChatPane | None":
+    from textual.css.query import NoMatches
+
+    try:
+        return app.query_one("#events", ChatPane)  # the ChatPane IS the #events pane
+    except NoMatches:
+        return None  # pre-mount — mirror advisor._on_recommendation's guard (never-crash)
+
+
+def _on_answer(app: Any, payload: dict[str, Any]) -> None:
+    if payload.get("source") == "operator":
+        return  # our own echo fanned back — don't re-render
+    pane = _chat(app)
+    if pane is not None:
+        pane.append_line(format_answer(payload))
+
+
+def _on_question(app: Any, payload: dict[str, Any]) -> None:
+    if payload.get("source") == "operator" or not is_confirm_question(payload):
+        return  # a plain operator ask (its own echo) — skip; only assistant confirms render
+    pane = _chat(app)
+    if pane is None:
+        return
+    pane.append_line(format_confirm(payload))
+    mid = _milestone_id(payload)
+    if mid and mid not in pane._pending:
+        pane._pending.append(mid)
+
+
+def register_chat(registry: Registry) -> None:
+    registry.register("operator.answer")(_on_answer)
+    registry.register("operator.question")(_on_question)
+
+
+__all__ = [
+    "ChatPane",
+    "format_answer",
+    "format_confirm",
+    "format_operator_echo",
+    "is_confirm_question",
+    "next_operator_message",
+    "register_chat",
+]
