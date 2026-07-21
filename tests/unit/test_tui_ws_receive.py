@@ -42,9 +42,11 @@ async def test_publish_operator_message_never_raises():
     from redrobin.api.tui_ws import _publish_operator_message
 
     bus = EventBus()
+    sub = await bus.subscribe()
     await _publish_operator_message(bus, "not a dict")  # type: ignore[arg-type]
     await _publish_operator_message(bus, {"no": "type"})
-    # no assertion needed — the point is it does not raise
+    # never raises AND drops both (neither is an allowlisted operator.* event)
+    assert sub.empty()
 
 
 # --- Integration: a real /v1/tui socket exercises the concurrent send/receive
