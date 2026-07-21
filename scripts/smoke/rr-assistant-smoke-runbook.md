@@ -65,8 +65,26 @@ shell type "C:\Users\Public\RR-Smoke\exports\svc_sql_readme.txt"
   the daemon still boots, the TUI still works, NO advisor cards appear (silent),
   nothing crashes.
 
+## [Task 4 (#25)] Proactive mode
+
+Prereq: assistant enabled (`REDROBIN_ASSISTANT_ENABLED=1`) with an ANTHROPIC key;
+for the test set a short lull + rate-limit so the cadence is observable:
+`REDROBIN_ASSISTANT_LULL_SEC=60`, `REDROBIN_ASSISTANT_PROACTIVE_MIN_INTERVAL_SEC=60`.
+
+- **[Task 4] Checkpoint H — Lull:** run one benign command so the assistant has
+  state, then leave the beacon idle (no new commands) for > the lull. EXPECT: a
+  *proactive* `advisor.recommendation` card appears in `#advisor-dock` with NO
+  command having been run, carrying all 5 parts. (If the state is unchanged since
+  the last card, the novelty gate correctly stays silent — advance state first.)
+- **[Task 4] Checkpoint I — Material change:** run a command whose output reveals a
+  new defence (e.g. an AV/EDR banner). EXPECT: either the reactive card (if reactive
+  spoke) or, if reactive stayed silent, a proactive watch-your-back card about the
+  new defence — never both for the same state.
+- **[Task 4] Checkpoint J — Rate-limit / signal-not-noise:** after a proactive card,
+  confirm no second proactive card within `N` even across further idle. Advisory-only
+  throughout (nothing dispatched to the beacon).
+
 ## Explicitly out of scope (do NOT expect — later tasks)
-- **[later task]** A *proactive* card on a lull / phase boundary with no command.
 - **[later task]** Asking the assistant a question in a Chat pane ("what's my
   path to DA?") and getting a deep answer (conversational mode).
 - **[later task]** Pushing back ("too loud") and it capturing a lesson (learning loop).
