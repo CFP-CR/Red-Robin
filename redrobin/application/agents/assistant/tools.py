@@ -1,10 +1,12 @@
 """Retrieval tools the assistant hands to the AgentLLM each cycle.
 
-Task 2 (#23) ships one PULL tool — ``kb_retrieve`` over ``KBService`` (the built,
-curated tradecraft layer). ``build_tool_registry`` is the extensibility seam:
-later tasks append ``search_journal`` / ``get_lessons`` without touching the
-signature. ``build_kb_service`` mirrors ``verdict_pipeline_factory``'s KB
-construction (lazy infra import, degraded-None without VOYAGE_API_KEY).
+Two PULL tools: ``kb_retrieve`` over ``KBService`` (curated cross-op tradecraft)
+and ``search_journal`` over ``JournalService`` (this engagement's verbatim
+events.jsonl transcript, kept current by an incremental refresh). ``build_tool_registry``
+is the extensibility seam — its returned ``list[AgentTool]`` is what the agent loop
+consumes; later tasks append ``get_lessons`` without changing that contract.
+``build_kb_service`` / ``build_journal_service`` construct the backends (lazy infra
+import, degraded-None without VOYAGE_API_KEY).
 """
 
 from __future__ import annotations
