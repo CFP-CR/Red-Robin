@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from redrobin.domain.assistant import Recommendation
@@ -62,4 +63,55 @@ def parse_recommendation(raw: str, *, correlation_id: str | None) -> Recommendat
     )
 
 
-__all__ = ["parse_recommendation"]
+@dataclass(frozen=True)
+class ParsedAnswer:
+    answer: str
+    citations: list[str]
+    lesson: dict[str, str] | None  # {scope, context, lesson, why} when the message was a correction
+
+
+_LESSON_KEYS = ("scope", "context", "lesson", "why")
+
+
+def _parse_lesson(raw_lesson: Any) -> dict[str, str] | None:
+    """A correction's captured lesson, or None. Drops a malformed/partial lesson
+    (never raises). scope must be a known value; all four fields must be non-empty."""
+    if not isinstance(raw_lesson, dict):
+        return None
+    out: dict[str, str] = {}
+    for k in _LESSON_KEYS:
+        v = str(raw_lesson.get(k) or "").strip()
+        if not v:
+            return None
+        out[k] = v
+    if out["scope"] not in ("operator", "engagement"):
+        return None
+    return out
+
+
+def parse_answer(raw: str) -> ParsedAnswer | None:
+    """Parse the conversational cycle's output into an answer (+ optional captured
+    lesson). NEVER raises — a malformed answer means the assistant simply does not
+    reply (degraded-None). An answer with no text is dropped."""
+    text = _strip_fences(raw)
+    if not text:
+        return None
+    try:
+        data: Any = json.loads(text)
+    except json.JSONDecodeError:
+        logger.warning("assistant: unparseable answer JSON — staying silent")
+        return None
+    if not isinstance(data, dict):
+        return None
+    answer = str(data.get("answer") or "").strip()
+    if not answer:
+        return None
+    _cites = data.get("citations")
+    cites_raw = _cites if isinstance(_cites, list) else []
+    citations = [str(c) for c in cites_raw if isinstance(c, (str, int, float))]
+    return ParsedAnswer(
+        answer=answer, citations=citations, lesson=_parse_lesson(data.get("lesson"))
+    )
+
+
+__all__ = ["ParsedAnswer", "parse_answer", "parse_recommendation"]

@@ -15,7 +15,11 @@ import logging
 from typing import Any
 
 from redrobin.application.agents.assistant.llm import AgentLLM
-from redrobin.application.agents.assistant.parser import parse_recommendation
+from redrobin.application.agents.assistant.parser import (
+    ParsedAnswer,
+    parse_answer,
+    parse_recommendation,
+)
 from redrobin.domain.assistant import AgentTool, Recommendation
 
 logger = logging.getLogger(__name__)
@@ -188,11 +192,85 @@ async def run_cycle(
     return parse_recommendation(raw, correlation_id=correlation_id)
 
 
+_ANSWER_SYSTEM_PROMPT = (
+    "You are Red Robin, an operation-aware AI copilot behind a red-team operator's C2. "
+    "The operator is TALKING TO YOU. Answer their question grounded in the engagement state "
+    "and the retrieval tools (kb_retrieve, search_journal, and ALWAYS get_lessons — honour what "
+    "this operator already taught you). Reason over what the tools and state return, never from "
+    "memory, never invent a fact. You are ADVISORY ONLY.\n\n"
+    "If the operator's message is a CORRECTION of your advice (e.g. 'that's too loud', "
+    "'don't do X here'), you must ALSO capture a context-scoped lesson so you never repeat it: "
+    "scope 'operator' if it is a general preference about how THIS operator works (persists across "
+    "engagements), or 'engagement' if it is specific to THIS operation's situation (dies with the op). "
+    "NEVER a blanket rule — always tie it to the context and the why.\n\n"
+    "Return ONLY a JSON object, no prose, no fences:\n"
+    '{"answer": "your grounded answer (or an acknowledgement of the correction)",\n'
+    ' "citations": ["the grounding you used — kb/journal/lesson sources + wm facts"],\n'
+    ' "lesson": null OR {"scope": "operator|engagement", "context": "when it applies", '
+    '"lesson": "what to do differently", "why": "the reason"}}'
+)
+
+
+def build_answer_context(
+    *,
+    wm_snapshot: dict[str, Any],
+    l5_summary: str,
+    question: str,
+    wm_max_items: int = _DEFAULT_WM_MAX_ITEMS,
+) -> str:
+    """Assemble the conversational PUSH context: L2 (current working memory) + L5
+    (story so far) + the operator's question. The L2 snapshot is capped to the
+    most-recent ``wm_max_items`` per category (context-rot guard). Non-mutating."""
+    capped = cap_wm_snapshot(wm_snapshot, wm_max_items)
+    return "\n".join(
+        [
+            "# Engagement working memory (L2)",
+            json.dumps(capped, ensure_ascii=False, sort_keys=True),
+            "",
+            "# Story so far (L5)",
+            l5_summary or "(no summary yet)",
+            "",
+            "# The operator says",
+            question or "(empty)",
+            "",
+            "Answer them. Call get_lessons first. If this is a correction, capture the lesson.",
+        ]
+    )
+
+
+async def run_answer_cycle(
+    *,
+    llm: AgentLLM,
+    tools: list[AgentTool],
+    wm_snapshot: dict[str, Any],
+    l5_summary: str,
+    question: str,
+    max_tokens: int = 2048,
+    wm_max_items: int = _DEFAULT_WM_MAX_ITEMS,
+) -> ParsedAnswer | None:
+    """Run ONE conversational cycle: Q&A prompt -> Tool Runner loop -> ParsedAnswer
+    (answer + citations + optional captured lesson), or None to stay silent."""
+    raw = await llm.run(
+        system=_ANSWER_SYSTEM_PROMPT,
+        user_message=build_answer_context(
+            wm_snapshot=wm_snapshot,
+            l5_summary=l5_summary,
+            question=question,
+            wm_max_items=wm_max_items,
+        ),
+        tools=tools,
+        max_tokens=max_tokens,
+    )
+    return parse_answer(raw)
+
+
 __all__ = [
     "apply_deltas_to_snapshot",
     "cap_wm_snapshot",
     "build_system_prompt",
     "build_push_context",
+    "build_answer_context",
     "state_signature",
     "run_cycle",
+    "run_answer_cycle",
 ]
