@@ -114,17 +114,21 @@ class Assistant:
                 if etype == "working_memory.deltas":
                     payload = evt.get("payload")
                     if isinstance(payload, dict):
-                        # Forward-merge THIS command's freshly-extracted facts so the
-                        # cycle fired on the following enrichment.completed reasons over
-                        # fresh working memory, not the one-step-stale snapshot.
-                        # Material trigger = a NEW defence (D3), not a re-observed one: the
-                        # non-dedup forward-merge would otherwise change the state_signature
-                        # and the novelty gate would not suppress a wasted proactive cycle.
-                        prior_defenses = set(self._wm_snapshot.get("defenses_observed") or [])
-                        self._wm_snapshot = apply_deltas_to_snapshot(self._wm_snapshot, payload)
-                        new_defenses = payload.get("defenses_observed") or []
-                        if any(d not in prior_defenses for d in new_defenses):
-                            self._material_pending = True  # a new defence — backstop after reactive
+                        try:
+                            # Forward-merge THIS command's freshly-extracted facts so the
+                            # cycle fired on the following enrichment.completed reasons over
+                            # fresh working memory, not the one-step-stale snapshot.
+                            # Material trigger = a NEW defence (D3), not a re-observed one: the
+                            # non-dedup forward-merge would otherwise change the state_signature
+                            # and the novelty gate would not suppress a wasted proactive cycle.
+                            prior_defenses = set(self._wm_snapshot.get("defenses_observed") or [])
+                            self._wm_snapshot = apply_deltas_to_snapshot(self._wm_snapshot, payload)
+                            new_defenses = payload.get("defenses_observed") or []
+                            if any(d not in prior_defenses for d in new_defenses):
+                                # a new defence — backstop after reactive
+                                self._material_pending = True
+                        except Exception:
+                            logger.exception("assistant failed to merge working_memory.deltas")
                     continue
                 if etype == "operator.question":
                     self._last_beat = self._clock()  # a question is activity — defer the lull

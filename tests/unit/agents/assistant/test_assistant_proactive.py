@@ -194,6 +194,33 @@ async def test_lull_fires_after_idle():
 
 
 @pytest.mark.asyncio
+async def test_run_loop_survives_malformed_deltas():
+    # A malformed working_memory.deltas payload (an unhashable entry in
+    # defenses_observed makes the new-defence `any(... not in set)` check raise) must
+    # be logged + swallowed by the deltas branch, never crash the run loop
+    # (never-crash, spec §6.E) — the deltas counterpart of
+    # test_proactive_survives_cycle_exception. Without the guard, run() escapes the
+    # while loop, the finally unsubscribes, and the assistant task dies silently.
+    bus = EventBus()
+    a = _assistant(bus, lambda: 1000.0)
+    started = asyncio.Event()
+    a.on_started = started.set
+    task = asyncio.create_task(a.run())
+    await asyncio.wait_for(started.wait(), 1.0)
+    await bus.publish(
+        {
+            "type": "working_memory.deltas",
+            "payload": {"defenses_observed": [{"unhashable": "dict"}]},
+        }
+    )
+    await asyncio.sleep(0.05)
+    assert not task.done()  # the malformed payload did NOT crash the loop
+    # a following benign event is still processed -> the loop exited cleanly
+    await bus.publish({"_type": "_close"})
+    await asyncio.wait_for(task, 1.0)
+
+
+@pytest.mark.asyncio
 async def test_proactive_survives_cycle_exception():
     # A raising LLM inside a proactive cycle is logged and swallowed by
     # _safe_proactive; the run loop survives (never-crash, spec §6.E) — the
