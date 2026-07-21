@@ -75,3 +75,26 @@ async def test_lifespan_starts_assistant_task(tmp_path, monkeypatch):
     # runs before close_assistant), NOT the 2.0s cancel fallback.
     assert app.state.assistant_task.done()
     assert app.state.assistant_task.cancelled() is False
+
+
+@pytest.mark.asyncio
+async def test_lifespan_starts_assistant_with_journal_degraded(tmp_path, monkeypatch):
+    # No VOYAGE_API_KEY -> build_journal_service() returns None; the assistant still
+    # boots with both tools present (search_journal degrades to "unavailable").
+    monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path))
+    monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
+    monkeypatch.delenv("REDROBIN_ENGAGEMENT_SLUG", raising=False)
+    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
+    monkeypatch.setenv("REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json"))
+    monkeypatch.setenv("REDROBIN_ENGAGEMENT_ID", "eng-journal")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
+
+    from redrobin.api.app import create_app
+
+    app = create_app()
+    async with app.router.lifespan_context(app):
+        assert app.state.assistant_task is not None
+        assert not app.state.assistant_task.done()
+    assert app.state.assistant_task.done()
+    assert app.state.assistant_task.cancelled() is False

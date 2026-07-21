@@ -30,7 +30,11 @@ from redrobin.application.cs_adapter_lifecycle import build_adapter, load_adapte
 from redrobin.application.dedup_keys import DedupKeys, DedupKeysRepo
 from redrobin.application.agents.assistant.assistant import Assistant
 from redrobin.application.agents.assistant.llm import build_agent_llm
-from redrobin.application.agents.assistant.tools import build_kb_service, build_tool_registry
+from redrobin.application.agents.assistant.tools import (
+    build_journal_service,
+    build_kb_service,
+    build_tool_registry,
+)
 from redrobin.application.agents.assistant.triggers import TriggerGate
 from redrobin.application.agents.enricher.enricher import WorkingMemoryEnricher
 from redrobin.application.agents.enricher.llm import build_enricher_llm
@@ -539,8 +543,9 @@ async def start_assistant(app: FastAPI, settings: Settings) -> tuple[Assistant, 
     Subscribes to the bus, consumes ``enrichment.completed``, and publishes
     ``advisor.recommendation``. Degraded-None: missing ANTHROPIC_API_KEY ->
     ``build_agent_llm`` returns None and the assistant stays silent; missing
-    VOYAGE_API_KEY -> ``build_kb_service`` returns None and kb_retrieve degrades;
-    either way the daemon still boots. Mirrors ``start_enricher``.
+    VOYAGE_API_KEY -> ``build_kb_service`` and ``build_journal_service`` return None
+    and kb_retrieve / search_journal degrade; either way the daemon still boots.
+    Mirrors ``start_enricher``.
 
     Reads the L5 summary via a closure over ``app.state.summary_repo`` (the
     ContextSummaryRepo the summariser writes) so the push-context carries the
@@ -564,10 +569,12 @@ async def start_assistant(app: FastAPI, settings: Settings) -> tuple[Assistant, 
             return ""
         return rows[0].text if rows else ""
 
+    kb = build_kb_service()
+    journal = await build_journal_service()
     assistant = Assistant(
         bus=app.state.event_bus,
         llm=build_agent_llm(model=settings.assistant_model),
-        tools=build_tool_registry(build_kb_service()),
+        tools=build_tool_registry(kb, journal=journal),
         trigger=TriggerGate(cooldown_sec=settings.assistant_cooldown_sec),
         summary_reader=_read_summary,
         enabled=settings.assistant_enabled,
