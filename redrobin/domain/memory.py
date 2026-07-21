@@ -112,6 +112,20 @@ class Objective:
 
 
 @dataclass
+class PendingMilestone:
+    """A close/commit interpretation the assistant proposed and is awaiting the
+    operator's binary confirm (spec §6.C). Persisted in WM so continuity survives
+    a restart — the assistant holds NO live pending state. Read back by id on the
+    operator's answer; rendered by the confirm affordance (deferred UI, #28)."""
+
+    milestone_id: str
+    phase: str
+    status: str
+    progress_pct: int
+    prompt: str
+
+
+@dataclass
 class WorkingMemory:
     engagement_id: str
     client: str = ""
@@ -128,6 +142,7 @@ class WorkingMemory:
     credentials: list[Credential] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
     sessions: list[Session] = field(default_factory=list)
+    pending_milestones: list[PendingMilestone] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
