@@ -22,7 +22,7 @@ def _seeded_kb() -> KBService:
 
 def test_registry_exposes_kb_retrieve():
     tools = build_tool_registry(_seeded_kb())
-    assert [t.name for t in tools] == ["kb_retrieve", "search_journal"]
+    assert [t.name for t in tools] == ["kb_retrieve", "search_journal", "get_lessons"]
     assert tools[0].input_schema["required"] == ["query"]
     assert tools[0].input_schema["additionalProperties"] is False
 

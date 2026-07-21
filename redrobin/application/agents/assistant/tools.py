@@ -12,8 +12,10 @@ import, degraded-None without VOYAGE_API_KEY).
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
+from redrobin.application.agents.assistant.lessons import LessonStore
 from redrobin.application.journal_service import JournalService
 from redrobin.application.kb_service import KBService
 from redrobin.domain.assistant import AgentTool
@@ -24,6 +26,7 @@ logger = logging.getLogger(__name__)
 # §6.B refinement 3: cap tool output, return high-signal excerpts not dumps).
 _MAX_TOOL_CHARS = 6000
 _MAX_JOURNAL_CHARS = 6000
+_MAX_LESSONS_CHARS = 6000
 
 _KB_RETRIEVE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -52,6 +55,21 @@ _SEARCH_JOURNAL_SCHEMA: dict[str, Any] = {
         }
     },
     "required": ["query"],
+    "additionalProperties": False,
+}
+
+_GET_LESSONS_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "topic": {
+            "type": "string",
+            "description": (
+                "Optional focus, e.g. 'lsass dumping' — filters the operator's past "
+                "corrections. Omit to load all lessons that apply to this engagement."
+            ),
+        }
+    },
+    "required": [],
     "additionalProperties": False,
 }
 
@@ -111,12 +129,14 @@ async def build_journal_service() -> JournalService | None:
 
 
 def build_tool_registry(
-    kb: KBService | None, journal: JournalService | None = None
+    kb: KBService | None,
+    journal: JournalService | None = None,
+    lesson_store: LessonStore | None = None,
+    engagement_provider: Callable[[], str | None] | None = None,
 ) -> list[AgentTool]:
-    """The pull-tool set for one cycle. kb_retrieve (curated tradecraft) +
-    search_journal (this engagement's verbatim transcript). Adding a tool is a
-    pure append — the list[AgentTool] the agent loop consumes is the seam
-    (spec §6.F); ``journal`` is an additive, backward-compatible param (D1)."""
+    """The pull-tool set for one cycle: kb_retrieve + search_journal + get_lessons.
+    Appending a tool is a pure append — the list[AgentTool] the agent loop consumes
+    is the seam (spec §6.F). get_lessons closes the L1-written-but-never-read gap."""
 
     async def _kb_retrieve(args: dict[str, Any]) -> str:
         query = str(args.get("query", "")).strip()
@@ -152,6 +172,30 @@ def build_tool_registry(
         lines = [f"[source: {source} | score={score:.2f}]\n{text}" for text, source, score in hits]
         return "\n\n".join(lines)[:_MAX_JOURNAL_CHARS]
 
+    async def _get_lessons(args: dict[str, Any]) -> str:
+        if lesson_store is None:
+            return "No operator lessons available."
+        engagement_id = engagement_provider() if engagement_provider is not None else None
+        try:
+            lessons = lesson_store.list_operator_lessons(engagement_id=engagement_id)
+        except Exception:
+            logger.exception("assistant: get_lessons failed")
+            return "Operator-lesson retrieval failed."
+        topic = str(args.get("topic", "")).strip().lower()
+        if topic:
+            lessons = [
+                le
+                for le in lessons
+                if topic in (le.context + " " + le.lesson + " " + le.why).lower()
+            ]
+        if not lessons:
+            return "No operator lessons apply here yet."
+        lines = [
+            f"[{le.scope} · {le.created_at.date()}] WHEN {le.context}: {le.lesson} (why: {le.why})"
+            for le in lessons
+        ]
+        return "\n".join(lines)[:_MAX_LESSONS_CHARS]
+
     return [
         AgentTool(
             name="kb_retrieve",
@@ -175,6 +219,17 @@ def build_tool_registry(
             ),
             input_schema=_SEARCH_JOURNAL_SCHEMA,
             handler=_search_journal,
+        ),
+        AgentTool(
+            name="get_lessons",
+            description=(
+                "Load the operator's past corrections that apply to THIS engagement (their "
+                "preferences + this op's context-scoped lessons). ALWAYS call this before "
+                "recommending or answering, so you honour what the operator already taught you "
+                "and never re-suggest something they rejected — then cite the lesson you applied."
+            ),
+            input_schema=_GET_LESSONS_SCHEMA,
+            handler=_get_lessons,
         ),
     ]
 

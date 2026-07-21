@@ -27,7 +27,7 @@ def _seeded_journal() -> JournalService:
 
 def test_registry_exposes_kb_and_journal_tools():
     tools = build_tool_registry(None, _seeded_journal())
-    assert [t.name for t in tools] == ["kb_retrieve", "search_journal"]
+    assert [t.name for t in tools] == ["kb_retrieve", "search_journal", "get_lessons"]
     assert tools[1].input_schema["required"] == ["query"]
 
 
