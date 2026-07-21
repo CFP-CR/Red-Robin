@@ -1,6 +1,6 @@
 # Operator smoke — AI assistant (Tasks 2/4/6 #23/#25/#27 + #28 — the full assistant live surface)
 
-The live surface (the `#advisor-dock` card + the Chat pane over a real CS beacon +
+The live surface (the assistant's advisories + confirms + answers in the Chat pane over a real CS beacon +
 the enricher/reducer over real output) is NOT CI-testable — this manual smoke is its
 only acceptance (skill **smoke-test**, `development-workflow.md` §5). Checkpoints are
 tagged by the unit that must pass now (`[Task 2]`, `[Task 4]`, `[Task 6]`, `[#28]`) or
@@ -27,10 +27,10 @@ shell type "C:\Users\Public\RR-Smoke\db_backup.config"
 shell type "C:\Users\Public\RR-Smoke\notes_old.txt"
 ```
 
-- **[Task 2] Checkpoint A — an advisor card appears** in `#advisor-dock` within a
-  few seconds (the dock reveals itself; it was hidden before). It appears
+- **[Task 2] Checkpoint A — an advisory appears** in the Chat pane within a few
+  seconds, labeled `Red Robin · advisory`. It appears
   *reactively*, triggered by the command output — you did not ask for it.
-- **[Task 2] Checkpoint B — the card has all 5 parts:** `→` a concrete WHAT
+- **[Task 2] Checkpoint B — the advisory has all 5 parts:** `→` a concrete WHAT
   (e.g. validate `svc_reports` against SQL01), `why` a tradecraft rationale,
   `opsec` INFO/WARN/DANGER with a reason, `conf` a confidence that names what it
   is NOT sure about, `refs` grounding.
@@ -41,7 +41,7 @@ shell type "C:\Users\Public\RR-Smoke\notes_old.txt"
   `vault/Techniques/...#chunk_n`) — grounded, not invented. Task 2 (#23) has NO
   Operational Journal (raw transcript) yet, so do NOT expect `refs` to quote the raw
   output text verbatim.
-- **[Task 2] Checkpoint D — advisory only:** the card says advisory / nothing
+- **[Task 2] Checkpoint D — advisory only:** the advisory line says nothing
   dispatched; NO command was sent to the beacon (read-only by construction).
 
 ## Run — step 2: follow the hint
@@ -58,11 +58,11 @@ shell type "C:\Users\Public\RR-Smoke\exports\svc_sql_readme.txt"
 - **[Task 2] Checkpoint E — a second recommendation** appears for the `svc_sql`
   finding, grounded in the new output (the assistant reacted again on new state).
 - **[Task 2] Checkpoint F — signal-not-noise:** re-running the SAME `type`
-  (no new state) does NOT produce a duplicate card (dedup/novelty/cooldown).
+  (no new state) does NOT produce a duplicate advisory (dedup/novelty/cooldown).
 
 ## Degraded / never-crash
 - **[Task 2] Checkpoint G:** restart the daemon with `ANTHROPIC_API_KEY` unset →
-  the daemon still boots, the TUI still works, NO advisor cards appear (silent),
+  the daemon still boots, the TUI still works, NO advisories appear in the Chat pane (silent),
   nothing crashes.
 
 ## [Task 4 (#25)] Proactive mode
@@ -73,7 +73,7 @@ for the test set a short lull + rate-limit so the cadence is observable:
 
 - **[Task 4] Checkpoint H — Lull:** run one benign command so the assistant has
   state, then leave the beacon idle (no new commands) for > the lull. EXPECT: a
-  *proactive* `advisor.recommendation` card appears in `#advisor-dock` with NO
+  *proactive* advisory appears in the Chat pane, labeled `Red Robin · heads-up`, with NO
   command having been run, carrying all 5 parts. (If the state is unchanged since
   the last card, the novelty gate correctly stays silent — advance state first.)
 - **[Task 4] Checkpoint I — Material change:** run a command whose output reveals a

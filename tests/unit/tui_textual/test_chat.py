@@ -264,3 +264,31 @@ async def test_chat_log_has_max_lines_cap():
     async with _ChatHarness().run_test() as pilot:
         log = pilot.app.query_one("#chat-log", RichLog)
         assert log.max_lines == 2000
+
+
+@pytest.mark.asyncio
+async def test_recommendation_routes_to_chat_and_dock_is_gone():
+    # The app REGISTRY now routes advisor.recommendation to the chat log, and the
+    # #advisor-dock no longer exists in the tree.
+    from redrobin.tui.textual_ui.app import REGISTRY, RedRobinApp
+
+    app = RedRobinApp(start_worker=False)
+    async with app.run_test() as pilot:
+        assert not app.query("#advisor-dock")  # dock removed
+        assert REGISTRY.has_handler("advisor.recommendation")  # chat now handles it
+        REGISTRY.dispatch(
+            target=app,
+            frame={
+                "type": "advisor.recommendation",
+                "payload": {
+                    "suggested_action": "quiet baseline check",
+                    "rationale": "why",
+                    "opsec_risk": "INFO",
+                    "confidence": "high",
+                    "references": [],
+                    "correlation_id": "B:whoami",
+                },
+            },
+        )
+        await pilot.pause()
+        assert len(app.query_one("#chat-log", RichLog).lines) >= 1

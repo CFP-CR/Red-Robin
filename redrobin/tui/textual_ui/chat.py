@@ -191,6 +191,7 @@ def _on_question(app: Any, payload: dict[str, Any]) -> None:
 def register_chat(registry: Registry) -> None:
     registry.register("operator.answer")(_on_answer)
     registry.register("operator.question")(_on_question)
+    registry.register("advisor.recommendation")(_on_recommendation)
 
 
 __all__ = [

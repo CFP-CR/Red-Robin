@@ -85,7 +85,7 @@ Write-Host "  2) follow the hint the note points to:" -ForegroundColor Cyan
 Write-Host "       shell dir  `"$Exports`""
 Write-Host "       shell type `"$Exports\svc_sql_readme.txt`""
 Write-Host ""
-Write-Host "Expect within a few seconds of each step: an advisor card in #advisor-dock" -ForegroundColor Cyan
+Write-Host "Expect within a few seconds of each step: an advisory in the Chat pane (Red Robin · advisory)" -ForegroundColor Cyan
 Write-Host "with the 5 parts (WHAT / why / opsec / conf / refs), refs citing the facts the"
 Write-Host "enricher extracted (e.g. the svc_reports cred) + a KB chunk. Nothing is"
 Write-Host "dispatched. See the runbook for checkpoints."

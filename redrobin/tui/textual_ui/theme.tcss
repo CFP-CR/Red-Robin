@@ -43,21 +43,6 @@ Screen {
 #chat-log { overflow-x: hidden; overflow-y: auto; height: 1fr; }
 #chat-input { dock: bottom; height: 3; border: round $panel-lighten-2; }
 
-/* AI Advisor dock (Task 2). Reserved + hidden; the advisor.recommendation
-   handler flips display on the first recommendation (reveal-on-first, like
-   #resize-hint). Plain card — polish deferred to a later task. */
-#advisor-dock {
-    display: none;
-    dock: bottom;
-    height: auto;
-    border-top: heavy $accent;
-    padding: 0 1;
-}
-#advisor-card {
-    height: auto;
-    width: 100%;
-}
-
 /* Below the 80x24 minimum: a centered hint replaces the dashboard (toggled in code). */
 #resize-hint {
     display: none;

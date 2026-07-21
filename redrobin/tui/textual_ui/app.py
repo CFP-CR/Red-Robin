@@ -1,7 +1,7 @@
 """RedRobinApp — the Textual TUI client shell (Phase 1 foundation).
 
 Holds reactive ``snapshot``/``events`` updated by frame handlers, composes the
-layout (topbar + three panes + reserved advisor dock + footer), and starts the
+layout (topbar + three panes + footer), and starts the
 WS worker on mount. Panel content is intentionally minimal here — Phase 2 fills
 the panes with DataTable/RichLog widgets.
 """
@@ -21,7 +21,6 @@ from textual.events import Resize
 from textual.reactive import reactive
 from textual.widgets import Footer, Static
 
-from redrobin.tui.textual_ui.advisor import register_advisor
 from redrobin.tui.textual_ui.chat import ChatPane, register_chat
 from redrobin.tui.textual_ui.commands import RedRobinCommands
 from redrobin.tui.textual_ui.frames import Registry
@@ -41,12 +40,9 @@ logger = logging.getLogger(__name__)
 # feature adds its frame type with a new @REGISTRY.register — no edits here.
 REGISTRY = Registry()
 
-# Advisor frames register on the shared REGISTRY via a binder (avoids a circular
-# import: advisor.py imports only frames, never app).
-register_advisor(REGISTRY)
-
-# Chat frames (operator.answer / operator.question) bind the same way — chat.py
-# imports only frames, never app (keeps the layered import graph acyclic).
+# Chat frames (operator.answer / operator.question / advisor.recommendation) bind
+# on the shared REGISTRY via a binder — chat.py imports only frames, never app
+# (keeps the layered import graph acyclic).
 register_chat(REGISTRY)
 
 
@@ -94,7 +90,6 @@ class RedRobinApp(App):
             with Container(id="memory") as memory_box:
                 memory_box.border_title = "Working Memory"
                 yield MemoryPanel(id="memory-panel")
-        yield Container(id="advisor-dock")  # reserved seam (hidden via .tcss)
         yield Static("Terminal too small — resize to at least 80x24.", id="resize-hint")
         yield Footer()
 
