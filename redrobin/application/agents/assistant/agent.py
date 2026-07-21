@@ -58,32 +58,43 @@ def build_push_context(
     l5_summary: str,
     trigger_command: str,
     wm_max_items: int = _DEFAULT_WM_MAX_ITEMS,
+    proactive: bool = False,
 ) -> str:
     """Assemble the small, token-bounded PUSH working-set: L2 (current working
-    memory) + L5 (story so far) + the triggering command. The volatile block —
-    lives in the user message, after the cached system prefix.
-
-    The L2 snapshot is capped to the most-recent ``wm_max_items`` per category
-    (context-rot guard, spec §6.B refinement 2) so a long engagement never
-    re-sends an ever-growing resident set. Non-mutating: the cached snapshot is
-    left intact (see :func:`cap_wm_snapshot`)."""
+    memory) + L5 (story so far) + the trigger framing. Reactive framing names the
+    command just run; proactive framing (``proactive=True``) asks for a
+    watch-your-back scan of the accumulated state (no command was run). The L2
+    snapshot is capped to the most-recent ``wm_max_items`` per category
+    (context-rot guard, spec §6.B refinement 2). Non-mutating."""
     capped = cap_wm_snapshot(wm_snapshot, wm_max_items)
     wm_json = json.dumps(capped, ensure_ascii=False, sort_keys=True)
-    return "\n".join(
-        [
-            "# Engagement working memory (L2)",
-            wm_json,
+    lines = [
+        "# Engagement working memory (L2)",
+        wm_json,
+        "",
+        "# Story so far (L5)",
+        l5_summary or "(no summary yet)",
+        "",
+    ]
+    if proactive:
+        lines += [
+            "# Proactive check — no command was just run",
+            "Scan the accumulated engagement state for a WATCH-YOUR-BACK concern the "
+            "per-command view may have missed: an unaddressed OPSEC risk, a stalled "
+            "objective, or an untaken opportunity.",
             "",
-            "# Story so far (L5)",
-            l5_summary or "(no summary yet)",
-            "",
+            "If there is a material, grounded one, retrieve any tradecraft you need and "
+            'return the 5-part JSON. If not, return {"speak": false}.',
+        ]
+    else:
+        lines += [
             "# What just happened",
             f"The operator ran: {trigger_command or '(unknown command)'}",
             "",
             "Given this, is there a material, grounded next-step recommendation? If yes, "
             'retrieve any tradecraft you need and return the 5-part JSON. If not, return {"speak": false}.',
         ]
-    )
+    return "\n".join(lines)
 
 
 def state_signature(wm_snapshot: dict[str, Any]) -> str:
@@ -153,9 +164,11 @@ async def run_cycle(
     correlation_id: str | None,
     max_tokens: int = 2048,
     wm_max_items: int = _DEFAULT_WM_MAX_ITEMS,
+    proactive: bool = False,
 ) -> Recommendation | None:
     """Run ONE agent cycle: assemble -> Tool Runner loop (via AgentLLM) -> parse
-    into a Recommendation, or None to stay silent."""
+    into a Recommendation, or None to stay silent. ``proactive=True`` swaps the
+    reactive command framing for the watch-your-back scan (spec §6.A)."""
     raw = await llm.run(
         system=build_system_prompt(),
         user_message=build_push_context(
@@ -163,6 +176,7 @@ async def run_cycle(
             l5_summary=l5_summary,
             trigger_command=trigger_command,
             wm_max_items=wm_max_items,
+            proactive=proactive,
         ),
         tools=tools,
         max_tokens=max_tokens,

@@ -149,3 +149,49 @@ async def test_run_cycle_silent_returns_none():
         correlation_id=None,
     )
     assert rec is None
+
+
+def test_build_push_context_proactive_frames_watch_your_back():
+    ctx = build_push_context(
+        wm_snapshot={"defenses_observed": ["CrowdStrike"]},
+        l5_summary="recon done",
+        trigger_command="",
+        proactive=True,
+    )
+    assert "Proactive check" in ctx
+    assert "no command was just run" in ctx.lower()
+    assert "operator ran" not in ctx.lower()  # NOT the reactive framing
+
+
+def test_build_push_context_reactive_is_unchanged():
+    ctx = build_push_context(
+        wm_snapshot={}, l5_summary="", trigger_command="whoami", proactive=False
+    )
+    assert "The operator ran: whoami" in ctx
+    assert "Proactive check" not in ctx
+
+
+@pytest.mark.asyncio
+async def test_run_cycle_proactive_sends_watch_your_back_and_null_correlation():
+    seen = {}
+
+    class _LLM:
+        async def run(self, *, system, user_message, tools, max_tokens=2048):
+            seen["user_message"] = user_message
+            return (
+                '{"suggested_action":"rotate to comsvcs","rationale":"why","opsec_risk":"WARN",'
+                '"confidence":"medium","references":["wm"]}'
+            )
+
+    rec = await run_cycle(
+        llm=_LLM(),
+        tools=[],
+        wm_snapshot={"defenses_observed": ["CrowdStrike"]},
+        l5_summary="recon done",
+        trigger_command="",
+        correlation_id=None,
+        proactive=True,
+    )
+    assert rec is not None
+    assert rec.correlation_id is None
+    assert "Proactive check" in seen["user_message"]
