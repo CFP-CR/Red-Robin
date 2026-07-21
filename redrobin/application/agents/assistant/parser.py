@@ -47,8 +47,10 @@ def parse_recommendation(raw: str, *, correlation_id: str | None) -> Recommendat
         return None
     if data.get("speak") is False:
         return None  # the model explicitly chose to stay silent
-    action = str(data.get("suggested_action") or "").strip()
-    rationale = str(data.get("rationale") or "").strip()
+    _action = data.get("suggested_action")
+    _rationale = data.get("rationale")
+    action = _action.strip() if isinstance(_action, str) else ""
+    rationale = _rationale.strip() if isinstance(_rationale, str) else ""
     if not action or not rationale:
         return None  # WHAT+WHY are mandatory; without them it is outsourcing, not advice
     risk_raw = str(data.get("opsec_risk", "INFO")).strip().upper()

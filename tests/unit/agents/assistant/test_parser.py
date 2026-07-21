@@ -45,6 +45,24 @@ def test_null_action_or_rationale_returns_none():
     )
 
 
+def test_non_string_action_returns_none():
+    # A dict/list suggested_action must NOT be str()-coerced into a truthy repr and
+    # PUBLISHED — a malformed WHAT stays silent (mirrors the citations/references
+    # type guards). Same for a non-string rationale.
+    assert (
+        parse_recommendation(
+            '{"suggested_action": {"x": 1}, "rationale": "because"}', correlation_id=None
+        )
+        is None
+    )
+    assert (
+        parse_recommendation(
+            '{"suggested_action": "do the thing", "rationale": [1, 2]}', correlation_id=None
+        )
+        is None
+    )
+
+
 def test_null_confidence_becomes_empty_string():
     # A valid WHAT+WHY with an explicit null confidence must render as "" — never "None".
     rec = parse_recommendation(
