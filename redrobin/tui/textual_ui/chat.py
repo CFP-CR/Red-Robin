@@ -1,6 +1,6 @@
 """Assistant Chat pane (#28) — the operator's ask/answer surface + inline pending
 confirms. Replaces the center Verdicts/Events pane (operator decision 2026-07-21).
-Renderers are pure Rich (unit-testable, like advisor.format_recommendation).
+Renderers are pure Rich (unit-testable).
 
 The frame handlers (register_chat/_on_answer/_on_question) + Input routing
 (next_operator_message: ask vs an explicit /y /n confirm) live here too; the
@@ -21,6 +21,7 @@ from redrobin.tui.textual_ui.frames import Registry
 _ACCENT = "#58a6ff"
 _MUTED = "#8b949e"
 _CONFIRM = "#e3b341"
+_RISK_COLORS = {"INFO": "#3fb950", "WARN": "#e3b341", "DANGER": "#f85149", "ESCALATE": "#58a6ff"}
 
 
 class ChatPane(Container):
@@ -32,7 +33,9 @@ class ChatPane(Container):
         self._q_counter = 0
 
     def compose(self) -> ComposeResult:
-        log = RichLog(id="chat-log", highlight=False, markup=False, wrap=True, min_width=0)
+        log = RichLog(
+            id="chat-log", highlight=False, markup=False, wrap=True, min_width=0, max_lines=2000
+        )
         log.can_focus = False  # only the Input is a tab stop (the scrollback isn't interactive)
         yield log
         yield Input(id="chat-input", placeholder="Ask the assistant…  (/y or /n to a confirm)")
@@ -78,9 +81,38 @@ def format_answer(payload: dict[str, Any]) -> Text:
     return t
 
 
+def format_recommendation(payload: dict[str, Any]) -> Text:
+    """The 5-part advisory as a chat message (one voice). The provenance tag is
+    driven by correlation_id: reactive (a command triggered it) carries
+    '<beacon>:<command>'; proactive (self-triggered) carries None -> 'heads-up'."""
+    action = str(payload.get("suggested_action") or "")
+    rationale = str(payload.get("rationale") or "")
+    risk = str(payload.get("opsec_risk") or "INFO")
+    confidence = str(payload.get("confidence") or "")
+    references = payload.get("references") or []
+    tag = "advisory" if payload.get("correlation_id") else "heads-up"
+    t = Text()
+    t.append("Red Robin", style=f"bold {_ACCENT}")
+    t.append(f" · {tag}", style=_MUTED)
+    t.append("  (nothing dispatched)\n", style=_MUTED)
+    t.append("→ ", style="bold")
+    t.append(f"{action}\n", style="bold")
+    t.append("why    ", style=_MUTED)
+    t.append(f"{rationale}\n")
+    t.append("opsec  ", style=_MUTED)
+    t.append(f"{risk}\n", style=f"bold {_RISK_COLORS.get(risk, 'white')}")
+    t.append("conf   ", style=_MUTED)
+    t.append(f"{confidence}\n")
+    t.append("refs   ", style=_MUTED)
+    t.append(", ".join(str(r) for r in references) if references else "(none)")
+    return t
+
+
 def format_confirm(payload: dict[str, Any]) -> Text:
     t = Text()
-    t.append("CONFIRM  ", style=f"bold {_CONFIRM}")
+    t.append("Red Robin", style=f"bold {_ACCENT}")
+    t.append(" · confirm", style=f"bold {_CONFIRM}")
+    t.append("  ")
     t.append(str(payload.get("text") or ""))
     t.append("   [reply /y or /n]", style=_MUTED)
     return t
@@ -127,7 +159,13 @@ def _chat(app: Any) -> "ChatPane | None":
     try:
         return app.query_one("#events", ChatPane)  # the ChatPane IS the #events pane
     except NoMatches:
-        return None  # pre-mount — mirror advisor._on_recommendation's guard (never-crash)
+        return None  # pre-mount — never-crash guard (mirrors _on_answer/_on_question)
+
+
+def _on_recommendation(app: Any, payload: dict[str, Any]) -> None:
+    pane = _chat(app)
+    if pane is not None:
+        pane.append_line(format_recommendation(payload))
 
 
 def _on_answer(app: Any, payload: dict[str, Any]) -> None:
@@ -160,6 +198,7 @@ __all__ = [
     "format_answer",
     "format_confirm",
     "format_operator_echo",
+    "format_recommendation",
     "is_confirm_question",
     "next_operator_message",
     "register_chat",

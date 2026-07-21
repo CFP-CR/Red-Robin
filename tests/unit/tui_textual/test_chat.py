@@ -10,6 +10,7 @@ from redrobin.tui.textual_ui.chat import (
     format_answer,
     format_confirm,
     format_operator_echo,
+    format_recommendation,
     is_confirm_question,
     next_operator_message,
     register_chat,
@@ -27,7 +28,8 @@ def test_format_answer_labels_assistant():
 def test_format_confirm_shows_yn_affordance():
     t = format_confirm({"text": "Objective DA -> COMPLETE?", "context_refs": ["milestone:obj1"]})
     s = t.plain
-    assert "CONFIRM" in s and "Objective DA -> COMPLETE?" in s
+    assert "Red Robin" in s and "confirm" in s  # one-voice label (was "CONFIRM")
+    assert "Objective DA -> COMPLETE?" in s
     assert "/y" in s.lower() and "/n" in s.lower()
 
 
@@ -201,3 +203,64 @@ async def test_chat_log_wraps_no_horizontal_overflow():
         log = pane.query_one("#chat-log", RichLog)
         assert log.wrap is True
         assert log.min_width == 0
+
+
+def test_format_recommendation_reactive_has_five_parts_and_advisory_tag():
+    payload = {
+        "suggested_action": "Validate svc_reports vs SQL01",
+        "rationale": "a quiet bind beats a loud dump",
+        "opsec_risk": "WARN",
+        "confidence": "high cred, unsure scope",
+        "references": ["vault/mssql.md#chunk_0"],
+        "correlation_id": "B-7:type db_backup.config",  # present -> reactive
+    }
+    s = format_recommendation(payload).plain
+    assert "Red Robin" in s
+    assert "advisory" in s and "heads-up" not in s  # reactive tag
+    assert "Validate svc_reports" in s  # WHAT
+    assert "quiet bind" in s  # WHY
+    assert "WARN" in s  # OPSEC
+    assert "unsure scope" in s  # confidence
+    assert "vault/mssql.md#chunk_0" in s  # refs
+    assert "nothing dispatched" in s
+
+
+def test_format_recommendation_proactive_has_heads_up_tag():
+    payload = {
+        "suggested_action": "Baseline the host defences",
+        "rationale": "no command ran; a lull is a good time to check EDR",
+        "opsec_risk": "INFO",
+        "confidence": "medium",
+        "references": [],
+        "correlation_id": None,  # None -> proactive
+    }
+    s = format_recommendation(payload).plain
+    assert "Red Robin" in s
+    assert "heads-up" in s and "advisory" not in s
+    assert "(none)" in s  # empty refs render "(none)"
+
+
+@pytest.mark.asyncio
+async def test_on_recommendation_appends_to_chat_log():
+    from redrobin.tui.textual_ui.chat import _on_recommendation
+
+    async with _ChatHarness().run_test() as pilot:
+        _on_recommendation(
+            pilot.app,
+            {
+                "suggested_action": "x",
+                "rationale": "y",
+                "opsec_risk": "INFO",
+                "confidence": "z",
+                "references": [],
+                "correlation_id": "B:whoami",
+            },
+        )
+        assert len(pilot.app.query_one("#chat-log", RichLog).lines) >= 1
+
+
+@pytest.mark.asyncio
+async def test_chat_log_has_max_lines_cap():
+    async with _ChatHarness().run_test() as pilot:
+        log = pilot.app.query_one("#chat-log", RichLog)
+        assert log.max_lines == 2000
