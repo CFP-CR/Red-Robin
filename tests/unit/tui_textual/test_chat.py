@@ -3,14 +3,17 @@ from __future__ import annotations
 import pytest
 from rich.text import Text
 from textual.app import App, ComposeResult
-from textual.widgets import Input, RichLog
+from textual.widgets import Input, RichLog, Static
 
 from redrobin.tui.textual_ui.chat import (
     ChatPane,
+    _PLACEHOLDER_CONFIRM,
+    _PLACEHOLDER_IDLE,
     format_answer,
-    format_confirm,
+    format_confirm_bar,
     format_operator_echo,
     format_recommendation,
+    format_resolution,
     is_confirm_question,
     next_operator_message,
     register_chat,
@@ -25,12 +28,17 @@ def test_format_answer_labels_assistant():
     assert "Red Robin" in s and "kerberoast then crack" in s
 
 
-def test_format_confirm_shows_yn_affordance():
-    t = format_confirm({"text": "Objective DA -> COMPLETE?", "context_refs": ["milestone:obj1"]})
-    s = t.plain
-    assert "Red Robin" in s and "confirm" in s  # one-voice label (was "CONFIRM")
-    assert "Objective DA -> COMPLETE?" in s
+def test_format_confirm_bar_shows_yn_affordance():
+    s = format_confirm_bar("Mark obj-1 COMPLETE?").plain
+    assert "Mark obj-1 COMPLETE?" in s
     assert "/y" in s.lower() and "/n" in s.lower()
+
+
+def test_format_resolution_confirmed_and_declined():
+    ok = format_resolution("obj-1", True).plain
+    assert "obj-1" in ok and "confirmed" in ok.lower()
+    no = format_resolution("obj-1", False).plain
+    assert "obj-1" in no and "declined" in no.lower()
 
 
 def test_format_operator_echo_labels_you():
@@ -134,17 +142,16 @@ async def test_operator_question_confirm_renders_and_tracks_pending():
         )
         pane = pilot.app.query_one("#events", ChatPane)
         assert pane._pending == ["obj1"]
-        assert len(pane.query_one("#chat-log", RichLog).lines) == 1
-        # an operator-sourced echo must NOT track or render
+        bar = pane.query_one("#confirm-bar", Static)
+        assert bar.display is True  # the confirm reveals the prominent bar...
+        assert pane._pending_prompts["obj1"] == "Obj DA COMPLETE?"  # ...tracking the question
+        assert len(pane.query_one("#chat-log", RichLog).lines) == 0  # NOT a chat line anymore
+        # an operator-sourced echo must NOT track or reveal
         reg.dispatch(
             target=pilot.app,
             frame={
                 "type": "operator.question",
-                "payload": {
-                    "text": "x",
-                    "context_refs": ["milestone:z"],
-                    "source": "operator",
-                },
+                "payload": {"text": "x", "context_refs": ["milestone:z"], "source": "operator"},
             },
         )
         assert pane._pending == ["obj1"]
@@ -292,3 +299,36 @@ async def test_recommendation_routes_to_chat_and_dock_is_gone():
         )
         await pilot.pause()
         assert len(app.query_one("#chat-log", RichLog).lines) >= 1
+
+
+@pytest.mark.asyncio
+async def test_confirm_bar_reveals_on_question_and_hides_on_resolve():
+    reg = Registry()
+    register_chat(reg)
+    async with _SendHarness(sent_result=True).run_test() as pilot:
+        pane = pilot.app.query_one("#events", ChatPane)
+        bar = pane.query_one("#confirm-bar", Static)
+        inp = pane.query_one("#chat-input", Input)
+        assert bar.display is False and inp.placeholder == _PLACEHOLDER_IDLE  # idle at rest
+        reg.dispatch(
+            target=pilot.app,
+            frame={
+                "type": "operator.question",
+                "payload": {
+                    "text": "Mark obj-1 COMPLETE?",
+                    "context_refs": ["milestone:obj-1"],
+                    "source": "assistant",
+                },
+            },
+        )
+        assert bar.display is True  # revealed
+        assert pane._pending_prompts["obj-1"] == "Mark obj-1 COMPLETE?"  # bar renders this prompt
+        assert inp.placeholder == _PLACEHOLDER_CONFIRM  # placeholder reflects the pending confirm
+        assert pane._pending == ["obj-1"]
+        # resolve with /y -> pending consumed, bar hides, placeholder restores, trace in the log
+        await pane.on_input_submitted(Input.Submitted(inp, "/y"))
+        assert pane._pending == []
+        assert bar.display is False
+        assert inp.placeholder == _PLACEHOLDER_IDLE
+        # the echo ("/y") + the resolution trace both landed in the chat log
+        assert len(pane.query_one("#chat-log", RichLog).lines) >= 2

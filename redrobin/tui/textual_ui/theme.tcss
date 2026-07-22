@@ -40,10 +40,23 @@ Screen {
 #memory { width: 2fr; }
 
 /* #28 Chat pane (replaces the Verdicts/Events pane). The #events Container keeps
-   its 3fr width + round border; style the inner scrollback + docked input. The log
+   its width + round border; style the inner scrollback + the docked bottom stack. The log
    never scrolls horizontally — long lines wrap to the pane (wrap=True + min_width=0). */
 #chat-log { overflow-x: hidden; overflow-y: auto; height: 1fr; }
-#chat-input { dock: bottom; height: 3; border: round $panel-lighten-2; }
+
+/* The bottom stack: a prominent (reserved) confirm bar above the input, docked together so
+   the log's 1fr shrinks when the bar reveals. The bar uses the reveal pattern the old
+   #advisor-dock used (display:none until a confirm is pending — toggled in code). */
+#chat-bottom { dock: bottom; height: auto; }
+#confirm-bar {
+    display: none;
+    height: auto;
+    border: round $status-warn;
+    border-title-color: $status-warn;
+    padding: 0 1;
+    margin: 0 0 1 0;
+}
+#chat-input { height: 3; border: round $panel-lighten-2; }
 
 /* Below the 80x24 minimum: a centered hint replaces the dashboard (toggled in code). */
 #resize-hint {

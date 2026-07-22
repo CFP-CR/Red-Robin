@@ -12,8 +12,8 @@ from typing import Any
 
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import Container
-from textual.widgets import Input, RichLog
+from textual.containers import Container, Vertical
+from textual.widgets import Input, RichLog, Static
 
 from redrobin.domain.assistant import OPERATOR_QUESTION_ID_PREFIX
 from redrobin.tui.textual_ui.frames import Registry
@@ -23,6 +23,9 @@ _MUTED = "#8b949e"
 _CONFIRM = "#e3b341"
 _RISK_COLORS = {"INFO": "#3fb950", "WARN": "#e3b341", "DANGER": "#f85149", "ESCALATE": "#58a6ff"}
 
+_PLACEHOLDER_IDLE = "Ask the assistant…  (/y or /n to a confirm)"
+_PLACEHOLDER_CONFIRM = "▶ Confirm pending — reply /y or /n"
+
 
 class ChatPane(Container):
     """A scrollback (RichLog) + an Input. `border_title` set by app.compose."""
@@ -30,6 +33,7 @@ class ChatPane(Container):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._pending: list[str] = []
+        self._pending_prompts: dict[str, str] = {}  # milestone_id -> its confirm question text
         self._q_counter = 0
 
     def compose(self) -> ComposeResult:
@@ -38,7 +42,13 @@ class ChatPane(Container):
         )
         log.can_focus = False  # only the Input is a tab stop (the scrollback isn't interactive)
         yield log
-        yield Input(id="chat-input", placeholder="Ask the assistant…  (/y or /n to a confirm)")
+        with Vertical(id="chat-bottom"):
+            bar = Static("", id="confirm-bar")  # reserved; revealed only while a confirm is pending
+            bar.can_focus = False
+            bar.display = False  # start hidden (harness loads no CSS)
+            bar.border_title = "Red Robin needs your call"
+            yield bar
+            yield Input(id="chat-input", placeholder=_PLACEHOLDER_IDLE)
 
     def append_line(self, text: Text) -> None:
         try:
@@ -56,11 +66,34 @@ class ChatPane(Container):
         sent = await self.app.send_operator_message(msg)  # type: ignore[attr-defined]
         # A question bumps the monotonic local counter unconditionally (harmless on a failed
         # send). A confirm answer consumes the pending it targeted ONLY on a confirmed send —
-        # otherwise a re-typed /y after reconnect must still be able to resolve it (#28 #2).
+        # otherwise a re-typed /y after reconnect must still be able to resolve it (#28 #2) —
+        # and drops a durable one-line trace of the decision into the chat (OD-1).
         if kind == "question":
             self._q_counter += 1
         elif sent and msg["question_id"] in self._pending:
-            self._pending.remove(msg["question_id"])
+            resolved = msg["question_id"]
+            self._pending.remove(resolved)
+            self._pending_prompts.pop(resolved, None)
+            self.append_line(format_resolution(resolved, msg["text"] == "yes"))
+        self._refresh_confirm_bar()
+
+    def _refresh_confirm_bar(self) -> None:
+        """Reveal/hide the prominent confirm bar + flip the input placeholder from the current
+        _pending. The bar reflects _pending[0] — the confirm a /y or /n resolves. Never-crash
+        (pre-mount safe: a query before mount is swallowed)."""
+        try:
+            bar = self.query_one("#confirm-bar", Static)
+            inp = self.query_one("#chat-input", Input)
+        except Exception:
+            return
+        if self._pending:
+            head = self._pending[0]
+            bar.update(format_confirm_bar(self._pending_prompts.get(head, head)))
+            bar.display = True
+            inp.placeholder = _PLACEHOLDER_CONFIRM
+        else:
+            bar.display = False
+            inp.placeholder = _PLACEHOLDER_IDLE
 
 
 def format_operator_echo(text: str) -> Text:
@@ -108,13 +141,30 @@ def format_recommendation(payload: dict[str, Any]) -> Text:
     return t
 
 
-def format_confirm(payload: dict[str, Any]) -> Text:
+def format_confirm_bar(question: str) -> Text:
+    """The prominent pending-confirm content, rendered inside #confirm-bar (which carries the
+    'Red Robin needs your call' border title). Distinct from a chat line: the question, then
+    the explicit /y /n affordance."""
     t = Text()
-    t.append("Red Robin", style=f"bold {_ACCENT}")
-    t.append(" · confirm", style=f"bold {_CONFIRM}")
-    t.append("  ")
-    t.append(str(payload.get("text") or ""))
-    t.append("   [reply /y or /n]", style=_MUTED)
+    t.append(question or "Confirm?", style=f"bold {_CONFIRM}")
+    t.append("     ")
+    t.append("/y", style="bold #3fb950")
+    t.append(" yes   ", style=_MUTED)
+    t.append("/n", style="bold #f85149")
+    t.append(" no", style=_MUTED)
+    return t
+
+
+def format_resolution(milestone_id: str, confirmed: bool) -> Text:
+    """A durable one-line trace of a resolved confirm in the chat log (OD-1). The resulting
+    milestone status shows in the Working-Memory panel; this records the operator's call."""
+    t = Text()
+    if confirmed:
+        t.append("✓ ", style="bold #3fb950")
+        t.append(f"{milestone_id} confirmed", style="#3fb950")
+    else:
+        t.append("✗ ", style="bold #f85149")
+        t.append(f"{milestone_id} declined", style="#f85149")
     return t
 
 
@@ -182,10 +232,12 @@ def _on_question(app: Any, payload: dict[str, Any]) -> None:
     pane = _chat(app)
     if pane is None:
         return
-    pane.append_line(format_confirm(payload))
     mid = _milestone_id(payload)
     if mid and mid not in pane._pending:
         pane._pending.append(mid)
+    if mid:
+        pane._pending_prompts[mid] = str(payload.get("text") or "")
+    pane._refresh_confirm_bar()  # reveal the prominent bar + flip the placeholder
 
 
 def register_chat(registry: Registry) -> None:
@@ -197,9 +249,10 @@ def register_chat(registry: Registry) -> None:
 __all__ = [
     "ChatPane",
     "format_answer",
-    "format_confirm",
+    "format_confirm_bar",
     "format_operator_echo",
     "format_recommendation",
+    "format_resolution",
     "is_confirm_question",
     "next_operator_message",
     "register_chat",
