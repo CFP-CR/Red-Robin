@@ -190,3 +190,46 @@ def test_parse_interpretation_semantic_milestone_id_unchanged():
 
 def test_reserved_prefix_constant_is_opq():
     assert OPERATOR_QUESTION_ID_PREFIX == "opq-"
+
+
+# ---- interactivity increment: a terminal/commit status ALWAYS asks (enforced in code) ----
+
+
+def test_terminal_status_forces_confirm_even_if_model_said_false():
+    it = parse_interpretation(
+        '{"milestone_id": "obj-1", "phase": "privilege_escalation", '
+        '"status": "COMPLETE", "needs_confirm": false, "prompt": ""}'
+    )
+    assert it is not None
+    assert it.needs_confirm is True  # forced — a close ALWAYS asks, model said false
+    assert it.prompt == "Mark obj-1 COMPLETE?"  # synthesized (model omitted the prompt)
+
+
+def test_terminal_status_preserves_model_prompt_when_given():
+    it = parse_interpretation(
+        '{"milestone_id": "obj-2", "status": "DONE", "needs_confirm": false, '
+        '"prompt": "Confirm obj-2 fully done?"}'
+    )
+    assert it is not None and it.needs_confirm is True
+    assert it.prompt == "Confirm obj-2 fully done?"  # model prompt preserved, not overwritten
+
+
+def test_terminal_status_is_case_insensitive():
+    it = parse_interpretation('{"milestone_id": "obj-3", "status": "complete"}')
+    assert it is not None and it.needs_confirm is True
+
+
+def test_soft_status_stays_auto_write():
+    it = parse_interpretation(
+        '{"milestone_id": "obj-4", "status": "in_progress", "progress_pct": 55, '
+        '"needs_confirm": false}'
+    )
+    assert it is not None
+    assert it.needs_confirm is False  # soft write — no confirm forced
+
+
+def test_terminal_status_without_milestone_id_stays_soft():
+    # a terminal status with no milestone_id cannot be forced (needs an id to track/resolve)
+    it = parse_interpretation('{"phase": "exfiltration", "status": "COMPLETE"}')
+    assert it is not None
+    assert it.milestone_id == "" and it.needs_confirm is False

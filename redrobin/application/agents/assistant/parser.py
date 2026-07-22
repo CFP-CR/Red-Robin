@@ -24,6 +24,11 @@ logger = logging.getLogger(__name__)
 
 _VALID_SEVERITIES = {s.value for s in Severity}
 
+# A terminal/commit status ALWAYS asks the operator before it is written — enforce-by-
+# construction, mirroring the #28 false-commit hardening (the model is unreliable at setting
+# needs_confirm for a close). Soft statuses (in_progress / progress bumps) stay auto-write.
+_COMMIT_STATUSES = {"COMPLETE", "COMPLETED", "DONE", "ACHIEVED", "CLOSED", "RESOLVED"}
+
 
 def _extract_json_object(text: str) -> str | None:
     """Return the first balanced, top-level ``{...}`` object in ``text``, or None.
@@ -181,16 +186,22 @@ def parse_interpretation(raw: str) -> Interpretation | None:
         progress = 0
     progress = max(0, min(100, progress))
     # A confirm is always ABOUT a specific objective/kill-chain id — without one it
-    # can't be tracked/resolved, so downgrade it to a soft auto-write (prevents an
-    # untrackable empty-id pending that a plain operator answer could collide with).
+    # can't be tracked/resolved, so an empty-id confirm downgrades to a soft auto-write
+    # (prevents an untrackable empty-id pending a plain operator answer could collide with).
+    status = str(data.get("status") or "").strip()
+    prompt = str(data.get("prompt") or "").strip()
     needs_confirm = bool(data.get("needs_confirm")) and bool(milestone_id)
+    if milestone_id and status.upper() in _COMMIT_STATUSES:
+        needs_confirm = True  # a close/commit ALWAYS asks — enforce, don't trust the model
+        if not prompt:
+            prompt = f"Mark {milestone_id} {status}?"  # synthesize if the model omitted it
     return Interpretation(
         phase=phase,
         milestone_id=milestone_id,
-        status=str(data.get("status") or "").strip(),
+        status=status,
         progress_pct=progress,
         needs_confirm=needs_confirm,
-        prompt=str(data.get("prompt") or "").strip(),
+        prompt=prompt,
     )
 
 
