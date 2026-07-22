@@ -284,7 +284,7 @@ _INTERPRET_SYSTEM_PROMPT = (
     "percentage or a completion the findings do not evidence.\n\n"
     "Return ONLY a JSON object: your reply MUST begin with { and end with } — no preamble, "
     "no trailing commentary, no code fence. If nothing materially changed, return "
-    '{"milestone_id": "", "phase": ""} (or null). Otherwise:\n'
+    '{"milestone_id": "", "phase": ""}. Otherwise:\n'
     '{"phase": "the current phase per the ladder above, or \\"\\" to leave it",\n'
     ' "milestone_id": "the objective/kill-chain id this is about, or \\"\\"",\n'
     ' "status": "the new status (e.g. in_progress, COMPLETE)",\n'
