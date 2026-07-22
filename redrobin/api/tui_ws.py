@@ -25,6 +25,22 @@ router = APIRouter()
 _TUI_ALLOWED = {"operator.question", "operator.answer"}
 
 
+async def _send(websocket: WebSocket, event: dict) -> bool:
+    """Push one event to the TUI. Returns False when the client is gone so the caller
+    stops the outbound loop cleanly. A disconnect — or a concurrent close that surfaces
+    as uvicorn's ASGI 'websocket.send after close' RuntimeError — must NEVER crash the
+    ASGI handler. A single unserializable event is logged and skipped (returns True) so
+    one bad frame can't tear the whole stream."""
+    try:
+        await websocket.send_json(event)
+        return True
+    except (WebSocketDisconnect, RuntimeError):
+        return False
+    except Exception:
+        logger.exception("tui_ws: dropped an unserializable outbound event")
+        return True
+
+
 async def _publish_operator_message(bus, msg) -> None:
     """Publish an operator-originated TUI message on the bus, if it is an allowlisted
     operator.* type, stamped source='operator' (so the assistant consumes it and the
@@ -55,7 +71,10 @@ async def tui_ws(websocket: WebSocket, token: str = Query(...)) -> None:
     try:
         queue = await bus.subscribe()
         snapshot_payload = await _build_initial_snapshot(websocket.app)
-        await websocket.send_json({"type": "working_memory_snapshot", "payload": snapshot_payload})
+        if not await _send(
+            websocket, {"type": "working_memory_snapshot", "payload": snapshot_payload}
+        ):
+            return  # client already gone — the outer finally unsubscribes
 
         async def _receive() -> None:
             # Concurrent inbound path: publish allowlisted operator.* messages the
@@ -78,10 +97,12 @@ async def tui_ws(websocket: WebSocket, token: str = Query(...)) -> None:
         recv_task.add_done_callback(lambda t: None if t.cancelled() else t.exception())
 
         try:
-            # Outbound loop — UNCHANGED from the send-only endpoint. `queue.get` is
-            # the only suspension point, so when the ASGI server cancels this handler
-            # on disconnect it unwinds cleanly through the fast `finally` below,
-            # exactly as before. Concurrency lives entirely in the background
+            # Outbound loop. Two suspension points now: `queue.get` (as before) and
+            # the `send_json` inside `_send`. A disconnect while an event is already
+            # queued lands the loop at `send_json` on a closed socket, which surfaces
+            # as WebSocketDisconnect or uvicorn's ASGI 'send after close' RuntimeError;
+            # `_send` absorbs both and returns False so we stop cleanly instead of
+            # crashing the ASGI handler. Concurrency lives entirely in the background
             # _receive task, which is cancelled *synchronously* (no await) on the way
             # out so it can never orphan onto a tearing-down loop nor trip anyio's
             # re-delivered-cancellation accounting (an awaited teardown would).
@@ -89,7 +110,8 @@ async def tui_ws(websocket: WebSocket, token: str = Query(...)) -> None:
                 event = await queue.get()
                 if event.get("_type") == "_close":
                     break
-                await websocket.send_json(event)
+                if not await _send(websocket, event):
+                    break  # client gone mid-send — stop cleanly (finally cancels _receive)
         finally:
             recv_task.cancel()
     except WebSocketDisconnect:
