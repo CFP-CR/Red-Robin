@@ -45,9 +45,9 @@ shell type "C:\Users\Public\RR-Smoke\notes_old.txt"
   dispatched; NO command was sent to the beacon (read-only by construction).
 
 ## Run — step 2: follow the hint
-> **Wait ~30 s after step 1's card before running step 2** — the assistant cooldown
+> **Wait ~30 s after step 1's advisory before running step 2** — the assistant cooldown
 > (`assistant_cooldown_sec`, default 30.0) is signal-not-noise and will *correctly*
-> suppress a second card fired too soon, so a fast step 2 with no Checkpoint-E card is
+> suppress a second advisory fired too soon, so a fast step 2 with no Checkpoint-E advisory is
 > the cooldown working, not a failure.
 
 ```
@@ -75,13 +75,13 @@ for the test set a short lull + rate-limit so the cadence is observable:
   state, then leave the beacon idle (no new commands) for > the lull. EXPECT: a
   *proactive* advisory appears in the Chat pane, labeled `Red Robin · heads-up`, with NO
   command having been run, carrying all 5 parts. (If the state is unchanged since
-  the last card, the novelty gate correctly stays silent — advance state first.)
+  the last advisory, the novelty gate correctly stays silent — advance state first.)
 - **[Task 4] Checkpoint I — Material change:** run a command whose output reveals a
-  new defence (e.g. an AV/EDR banner). EXPECT: either the reactive card (if reactive
-  spoke) or, if reactive stayed silent, a proactive watch-your-back card about the
+  new defence (e.g. an AV/EDR banner). EXPECT: either the reactive advisory (if reactive
+  spoke) or, if reactive stayed silent, a proactive watch-your-back advisory about the
   new defence — never both for the same state.
-- **[Task 4] Checkpoint J — Rate-limit / signal-not-noise:** after a proactive card,
-  confirm no second proactive card within `N` even across further idle. Advisory-only
+- **[Task 4] Checkpoint J — Rate-limit / signal-not-noise:** after a proactive advisory,
+  confirm no second proactive advisory within `N` even across further idle. Advisory-only
   throughout (nothing dispatched to the beacon).
 
 ## [Task 6 (#27)] Interpretation-write
