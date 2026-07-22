@@ -34,7 +34,10 @@ async def _send(websocket: WebSocket, event: dict) -> bool:
     try:
         await websocket.send_json(event)
         return True
-    except (WebSocketDisconnect, RuntimeError):
+    except (WebSocketDisconnect, RuntimeError) as exc:
+        # Client gone (disconnect, or the ASGI 'send after close' RuntimeError). A
+        # breadcrumb so an *unexpected* RuntimeError leaves a trace instead of vanishing.
+        logger.debug("tui_ws: outbound send stopped, client gone: %r", exc)
         return False
     except Exception:
         logger.exception("tui_ws: dropped an unserializable outbound event")
