@@ -25,23 +25,54 @@ logger = logging.getLogger(__name__)
 _VALID_SEVERITIES = {s.value for s in Severity}
 
 
-def _strip_fences(raw: str) -> str:
-    s = raw.strip()
-    if s.startswith("```"):
-        s = s.split("\n", 1)[1] if "\n" in s else ""
-        if s.rstrip().endswith("```"):
-            s = s.rstrip()[:-3]
-    return s.strip()
+def _extract_json_object(text: str) -> str | None:
+    """Return the first balanced, top-level ``{...}`` object in ``text``, or None.
+
+    Robust to a prose preamble/postamble or a code fence around the object (the
+    model occasionally wraps its JSON), and to braces INSIDE JSON string values
+    (a ``{`` in a "prompt" value must not miscount). Escapes (``\\"``/``\\\\``)
+    inside strings are honoured. A truncated object that never closes returns
+    None — genuinely unrecoverable. Pure; never raises."""
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escaped = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
 
 
 def parse_recommendation(raw: str, *, correlation_id: str | None) -> Recommendation | None:
-    text = _strip_fences(raw)
-    if not text:
+    candidate = _extract_json_object(raw)
+    if candidate is None:
+        logger.warning(
+            "assistant: no JSON object in recommendation output — staying silent; raw=%r", raw[:500]
+        )
         return None
     try:
-        data: Any = json.loads(text)
+        data: Any = json.loads(candidate)
     except json.JSONDecodeError:
-        logger.warning("assistant: unparseable recommendation JSON — staying silent")
+        logger.warning(
+            "assistant: unparseable recommendation JSON — staying silent; raw=%r", raw[:500]
+        )
         return None
     if not isinstance(data, dict):
         return None
@@ -99,13 +130,14 @@ def parse_answer(raw: str) -> ParsedAnswer | None:
     """Parse the conversational cycle's output into an answer (+ optional captured
     lesson). NEVER raises — a malformed answer means the assistant simply does not
     reply (degraded-None). An answer with no text is dropped."""
-    text = _strip_fences(raw)
-    if not text:
+    candidate = _extract_json_object(raw)
+    if candidate is None:
+        logger.warning("assistant: no JSON object in answer output — no reply; raw=%r", raw[:500])
         return None
     try:
-        data: Any = json.loads(text)
+        data: Any = json.loads(candidate)
     except json.JSONDecodeError:
-        logger.warning("assistant: unparseable answer JSON — staying silent")
+        logger.warning("assistant: unparseable answer JSON — no reply; raw=%r", raw[:500])
         return None
     if not isinstance(data, dict):
         return None
@@ -124,13 +156,16 @@ def parse_interpretation(raw: str) -> Interpretation | None:
     """Parse the interpretation cycle's output, or None (no material change / silent).
     NEVER raises. Requires at least one of phase/milestone_id (else there is nothing
     to write). progress_pct clamped 0..100."""
-    text = _strip_fences(raw)
-    if not text:
+    candidate = _extract_json_object(raw)
+    if candidate is None:
+        logger.warning(
+            "assistant: no JSON object in interpretation output — no write; raw=%r", raw[:500]
+        )
         return None
     try:
-        data: Any = json.loads(text)
+        data: Any = json.loads(candidate)
     except json.JSONDecodeError:
-        logger.warning("assistant: unparseable interpretation JSON — no write")
+        logger.warning("assistant: unparseable interpretation JSON — no write; raw=%r", raw[:500])
         return None
     if not isinstance(data, dict):
         return None

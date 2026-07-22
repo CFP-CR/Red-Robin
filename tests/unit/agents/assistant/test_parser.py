@@ -1,9 +1,66 @@
 from redrobin.application.agents.assistant.parser import (
+    _extract_json_object,
     parse_interpretation,
     parse_recommendation,
 )
 from redrobin.domain.assistant import OPERATOR_QUESTION_ID_PREFIX
 from redrobin.domain.events import Severity
+
+
+def test_extract_json_object_plain():
+    assert _extract_json_object('{"a": 1}') == '{"a": 1}'
+
+
+def test_extract_json_object_strips_prose_preamble_and_postamble():
+    assert _extract_json_object('Sure — here:\n{"a": 1}\nThat reflects recon.') == '{"a": 1}'
+
+
+def test_extract_json_object_inside_code_fence():
+    assert _extract_json_object('```json\n{"a": 1}\n```') == '{"a": 1}'
+
+
+def test_extract_json_object_ignores_braces_inside_strings():
+    s = '{"prompt": "mark obj {x} as done?"}'
+    assert _extract_json_object("noise " + s + " trailing") == s
+
+
+def test_extract_json_object_honours_escaped_quote_in_string():
+    s = '{"t": "a \\" b {c}"}'
+    assert _extract_json_object(s) == s
+
+
+def test_extract_json_object_truncated_returns_none():
+    assert _extract_json_object('{"a": 1, "b": ') is None  # never closes
+
+
+def test_extract_json_object_no_brace_returns_none():
+    assert _extract_json_object("no json here at all") is None
+
+
+def test_parse_recommendation_recovers_from_prose_preamble():
+    raw = (
+        "Sure, here is the recommendation:\n"
+        '{"suggested_action": "validate creds", "rationale": "quiet", '
+        '"opsec_risk": "INFO", "confidence": "high", "references": ["wm:x"]}'
+    )
+    rec = parse_recommendation(raw, correlation_id=None)
+    assert rec is not None and rec.suggested_action == "validate creds"
+
+
+def test_parse_recommendation_truncated_returns_none():
+    assert (
+        parse_recommendation('{"suggested_action": "x", "rationale":', correlation_id=None) is None
+    )
+
+
+def test_parse_interpretation_recovers_from_prose_preamble():
+    raw = (
+        "Based on the state:\n"
+        '{"phase": "recon", "milestone_id": "", "status": "", '
+        '"progress_pct": 0, "needs_confirm": false, "prompt": ""}'
+    )
+    it = parse_interpretation(raw)
+    assert it is not None and it.phase == "recon"
 
 
 def test_parses_full_recommendation():

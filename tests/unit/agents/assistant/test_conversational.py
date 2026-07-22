@@ -33,6 +33,14 @@ def test_parse_answer_correction_captures_lesson():
     assert pa.lesson["lesson"] == "prefer comsvcs minidump"
 
 
+def test_parse_answer_recovers_from_prose_preamble():
+    from redrobin.application.agents.assistant.parser import parse_answer
+
+    raw = 'Here you go: {"answer": "kerberoast then crack", "citations": ["kb:x"]}'
+    ans = parse_answer(raw)
+    assert ans is not None and ans.answer == "kerberoast then crack"
+
+
 def test_parse_answer_never_raises_on_garbage():
     assert parse_answer("not json") is None
     assert parse_answer('{"citations": 5}') is None  # no answer text

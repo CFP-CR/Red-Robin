@@ -36,7 +36,8 @@ _SYSTEM_PROMPT = (
     "You are given the operator's current engagement state (working memory) and the story so "
     "far. Use the kb_retrieve tool to ground tradecraft claims in the knowledge base; reason "
     "over what the tools and the state return, never from memory, and never invent a fact.\n\n"
-    "Return ONLY a JSON object, no prose, no markdown fences. To stay silent, return "
+    "Return ONLY a JSON object: your reply MUST begin with { and end with } — no preamble, "
+    "no trailing commentary, no code fence. To stay silent, return "
     '{"speak": false}. To recommend, return these five fields (ALL required):\n'
     '{"suggested_action": "the concrete next step — the WHAT (one imperative line)",\n'
     ' "rationale": "the tradecraft WHY, in 1-2 tight sentences (without this it is '
@@ -207,7 +208,8 @@ _ANSWER_SYSTEM_PROMPT = (
     "scope 'operator' if it is a general preference about how THIS operator works (persists across "
     "engagements), or 'engagement' if it is specific to THIS operation's situation (dies with the op). "
     "NEVER a blanket rule — always tie it to the context and the why.\n\n"
-    "Return ONLY a JSON object, no prose, no fences:\n"
+    "Return ONLY a JSON object: your reply MUST begin with { and end with } — no preamble, "
+    "no trailing commentary, no code fence:\n"
     '{"answer": "your grounded answer (or an acknowledgement of the correction)",\n'
     ' "citations": ["the grounding you used — kb/journal/lesson sources + wm facts"],\n'
     ' "lesson": null OR {"scope": "operator|engagement", "context": "when it applies", '
@@ -280,7 +282,8 @@ _INTERPRET_SYSTEM_PROMPT = (
     "miss. This nudge is low-stakes and reversible, so lean toward reflecting reality. "
     "'Never invent progress' still binds the OBJECTIVE status/progress_pct — do NOT claim a "
     "percentage or a completion the findings do not evidence.\n\n"
-    "Return ONLY JSON, no prose/fences. If nothing materially changed, return "
+    "Return ONLY a JSON object: your reply MUST begin with { and end with } — no preamble, "
+    "no trailing commentary, no code fence. If nothing materially changed, return "
     '{"milestone_id": "", "phase": ""} (or null). Otherwise:\n'
     '{"phase": "the current phase per the ladder above, or \\"\\" to leave it",\n'
     ' "milestone_id": "the objective/kill-chain id this is about, or \\"\\"",\n'
