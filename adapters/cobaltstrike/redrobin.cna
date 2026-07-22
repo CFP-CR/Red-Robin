@@ -252,10 +252,17 @@ sub redrobin_gate {
 # explicit envelope_errors / event_errors).
 sub redrobin_envelope {
     global('$REDROBIN_HTTP $REDROBIN_SESSION_ID');
-    local('$event_json');
+    local('$event_json $evt_id');
     $event_json = $1;
+    # Guard the ulid deref. If $REDROBIN_HTTP is null (init/handshake failed after a
+    # daemon restart without a clean .cna reload), `[$REDROBIN_HTTP ulid]` throws an
+    # uncaught NPE. Every emit sub calls this BEFORE its try/catch, so that NPE escapes
+    # the sub — and in the `set BEACON_OUTPUT` filter it aborts the hook before `return $2`,
+    # SUPPRESSING the operator's beacon output (commands task with no result). The capture
+    # path must NEVER be able to suppress operator output — fall back to a client-free id.
+    $evt_id = iff($REDROBIN_HTTP !is $null, "evt_" . [$REDROBIN_HTTP ulid], "evt_noclient");
     return '{"spec_version":"0.1.0",' .
-           '"id":"evt_' . [$REDROBIN_HTTP ulid] . '",' .
+           '"id":"' . $evt_id . '",' .
            '"ts":"' . [[java.time.Instant now] toString] . '",' .
            '"source":{"adapter":"cs-aggressor","version":"1.0.0","engagement_id":"unknown"' .
            iff(strlen($REDROBIN_SESSION_ID) > 0, ',"adapter_session_id":"' . $REDROBIN_SESSION_ID . '"', "") . '},' .
