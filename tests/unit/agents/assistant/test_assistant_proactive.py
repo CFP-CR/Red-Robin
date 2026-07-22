@@ -40,6 +40,18 @@ def _assistant(bus, clock, *, lull_sec=300.0, proactive_min_interval_sec=600.0, 
     )
 
 
+def _drain_recs(sub):
+    """Drain the bus queue and return only the advisor.recommendation events. The proactive
+    cycle now also emits orthogonal assistant.thinking start/stop frames, which these tests
+    ignore (they assert on the recommendation, not the working-signal)."""
+    recs = []
+    while not sub.empty():
+        evt = sub.get_nowait()
+        if evt.get("type") == "advisor.recommendation":
+            recs.append(evt)
+    return recs
+
+
 @pytest.mark.asyncio
 async def test_maybe_proactive_publishes_when_novel_and_rate_ok():
     bus = EventBus()
@@ -48,9 +60,9 @@ async def test_maybe_proactive_publishes_when_novel_and_rate_ok():
     a = _assistant(bus, lambda: t[0])
     a._wm_snapshot = {"defenses_observed": ["CrowdStrike"]}
     await a._maybe_proactive("test")
-    evt = sub.get_nowait()
-    assert evt["type"] == "advisor.recommendation"
-    assert evt["payload"]["correlation_id"] is None
+    recs = _drain_recs(sub)
+    assert len(recs) == 1
+    assert recs[0]["payload"]["correlation_id"] is None
 
 
 @pytest.mark.asyncio
@@ -61,16 +73,16 @@ async def test_proactive_rate_limited():
     a = _assistant(bus, lambda: t[0], proactive_min_interval_sec=600.0)
     a._wm_snapshot = {"defenses_observed": ["CrowdStrike"]}
     await a._maybe_proactive("first")
-    assert sub.get_nowait()["type"] == "advisor.recommendation"
+    assert len(_drain_recs(sub)) == 1
     # a change in state (novel) but within N -> still suppressed by the rate-limit
     a._wm_snapshot = {"defenses_observed": ["CrowdStrike", "Defender"]}
     t[0] = 1000.0 + 599.0
     await a._maybe_proactive("second")
-    assert sub.empty()
+    assert sub.empty()  # gated (rate-limit): returns before the thinking wrap -> emits nothing
     # past N -> allowed again
     t[0] = 1000.0 + 601.0
     await a._maybe_proactive("third")
-    assert sub.get_nowait()["type"] == "advisor.recommendation"
+    assert len(_drain_recs(sub)) == 1
 
 
 @pytest.mark.asyncio
@@ -81,11 +93,11 @@ async def test_proactive_silent_on_unchanged_state_novelty_gate():
     a = _assistant(bus, lambda: t[0])
     a._wm_snapshot = {"defenses_observed": ["CrowdStrike"]}
     await a._maybe_proactive("first")
-    assert sub.get_nowait()["type"] == "advisor.recommendation"
+    assert len(_drain_recs(sub)) == 1
     # unchanged state, well past the rate-limit -> the SAME gate's novelty stays silent
     t[0] = 1_000_000.0
     await a._maybe_proactive("again")
-    assert sub.empty()
+    assert sub.empty()  # gated (novelty): returns before the thinking wrap -> emits nothing
 
 
 @pytest.mark.asyncio

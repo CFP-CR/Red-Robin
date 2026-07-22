@@ -11,9 +11,10 @@ advisor.recommendation. Emits observability via the recommendation event + logs.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from datetime import datetime
 from typing import Any
 
@@ -178,16 +179,17 @@ class Assistant:
         except Exception:
             logger.exception("assistant: summary_reader failed; proceeding with empty L5")
             l5_summary = ""
-        rec = await run_cycle(
-            llm=self._llm,
-            tools=self._tools,
-            wm_snapshot=self._wm_snapshot,
-            l5_summary=l5_summary,
-            trigger_command=trigger_command,
-            correlation_id=trigger_key,
-            max_tokens=self._max_tokens,
-            wm_max_items=self._wm_max_items,
-        )
+        async with self._thinking():
+            rec = await run_cycle(
+                llm=self._llm,
+                tools=self._tools,
+                wm_snapshot=self._wm_snapshot,
+                l5_summary=l5_summary,
+                trigger_command=trigger_command,
+                correlation_id=trigger_key,
+                max_tokens=self._max_tokens,
+                wm_max_items=self._wm_max_items,
+            )
         if rec is None:
             return  # signal-not-noise: the model stayed silent, or the output was unusable
         self._trigger.record_spoken(correlation_id=trigger_key, state_signature=sig)
@@ -213,15 +215,16 @@ class Assistant:
         except Exception:
             logger.exception("assistant: summary_reader failed; proceeding with empty L5")
             l5_summary = ""
-        parsed = await run_answer_cycle(
-            llm=self._llm,
-            tools=self._tools,
-            wm_snapshot=self._wm_snapshot,
-            l5_summary=l5_summary,
-            question=question,
-            max_tokens=self._max_tokens,
-            wm_max_items=self._wm_max_items,
-        )
+        async with self._thinking():
+            parsed = await run_answer_cycle(
+                llm=self._llm,
+                tools=self._tools,
+                wm_snapshot=self._wm_snapshot,
+                l5_summary=l5_summary,
+                question=question,
+                max_tokens=self._max_tokens,
+                wm_max_items=self._wm_max_items,
+            )
         if parsed is None:
             return  # degraded / unparseable -> no reply
         engagement_id = (
@@ -263,14 +266,15 @@ class Assistant:
             except Exception:
                 logger.exception("assistant: summary_reader failed; empty L5")
                 l5 = ""
-            it = await run_interpretation_cycle(
-                llm=self._llm,
-                tools=self._tools,
-                wm_snapshot=self._wm_snapshot,
-                l5_summary=l5,
-                max_tokens=self._max_tokens,
-                wm_max_items=self._wm_max_items,
-            )
+            async with self._thinking():
+                it = await run_interpretation_cycle(
+                    llm=self._llm,
+                    tools=self._tools,
+                    wm_snapshot=self._wm_snapshot,
+                    l5_summary=l5,
+                    max_tokens=self._max_tokens,
+                    wm_max_items=self._wm_max_items,
+                )
             if it is None:
                 return
             # Don't re-publish a confirm for an id already pending (no duplicate operator.question).
@@ -312,6 +316,24 @@ class Assistant:
             evt["payload"].get("drop", False),
         )
 
+    async def _emit_thinking(self, state: str) -> None:
+        """Publish the transient working signal (state 'start' / 'stop'). NEVER-crash: a
+        thinking signal must never break a cycle, so a publish failure is logged + swallowed."""
+        try:
+            await self._bus.publish({"type": "assistant.thinking", "payload": {"state": state}})
+        except Exception:
+            logger.exception("assistant: thinking signal publish failed")
+
+    @contextlib.asynccontextmanager
+    async def _thinking(self) -> AsyncIterator[None]:
+        """Bracket an LLM-backed cycle with assistant.thinking start/stop. The stop is in a
+        finally, so a raising cycle still clears the indicator (the spinner never sticks)."""
+        await self._emit_thinking("start")
+        try:
+            yield
+        finally:
+            await self._emit_thinking("stop")
+
     def _lull_timeout(self) -> float | None:
         """Seconds until the next proactive lull check, or None when proactive is
         inactive (disabled / degraded / no beacon beat yet). DYNAMIC — computed
@@ -351,17 +373,18 @@ class Assistant:
         except Exception:
             logger.exception("assistant: summary_reader failed; proceeding with empty L5")
             l5_summary = ""
-        rec = await run_cycle(
-            llm=self._llm,
-            tools=self._tools,
-            wm_snapshot=self._wm_snapshot,
-            l5_summary=l5_summary,
-            trigger_command="",
-            correlation_id=None,
-            max_tokens=self._max_tokens,
-            wm_max_items=self._wm_max_items,
-            proactive=True,
-        )
+        async with self._thinking():
+            rec = await run_cycle(
+                llm=self._llm,
+                tools=self._tools,
+                wm_snapshot=self._wm_snapshot,
+                l5_summary=l5_summary,
+                trigger_command="",
+                correlation_id=None,
+                max_tokens=self._max_tokens,
+                wm_max_items=self._wm_max_items,
+                proactive=True,
+            )
         if rec is None:
             return  # signal-not-noise: nothing material
         self._trigger.record_spoken(correlation_id=None, state_signature=sig)
