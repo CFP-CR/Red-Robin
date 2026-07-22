@@ -13,6 +13,7 @@ from typing import Any
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical
+from textual.timer import Timer
 from textual.widgets import Input, RichLog, Static
 
 from redrobin.domain.assistant import OPERATOR_QUESTION_ID_PREFIX
@@ -26,6 +27,18 @@ _RISK_COLORS = {"INFO": "#3fb950", "WARN": "#e3b341", "DANGER": "#f85149", "ESCA
 _PLACEHOLDER_IDLE = "Ask the assistant…  (/y or /n to a confirm)"
 _PLACEHOLDER_CONFIRM = "▶ Confirm pending — reply /y or /n"
 
+_THINK_DELAY = 0.2  # show only after 200ms — avoid a flash on fast cycles (TUI best practice)
+_SPIN_FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+
+def _thinking_text(frame: int) -> Text:
+    """The transient working-indicator line: a braille spinner glyph + a generic label."""
+    glyph = _SPIN_FRAMES[frame % len(_SPIN_FRAMES)]
+    t = Text()
+    t.append(f"{glyph} ", style=_ACCENT)
+    t.append("Red Robin is thinking…", style=_MUTED)
+    return t
+
 
 class ChatPane(Container):
     """A scrollback (RichLog) + an Input. `border_title` set by app.compose."""
@@ -35,6 +48,10 @@ class ChatPane(Container):
         self._pending: list[str] = []
         self._pending_prompts: dict[str, str] = {}  # milestone_id -> its confirm question text
         self._q_counter = 0
+        self._thinking = 0  # active LLM-cycle count (start/stop are balanced, may nest)
+        self._think_timer: Timer | None = None  # the 200ms delayed-reveal handle
+        self._spin_timer: Timer | None = None  # the glyph animation interval
+        self._spin_i = 0
 
     def compose(self) -> ComposeResult:
         log = RichLog(
@@ -48,6 +65,10 @@ class ChatPane(Container):
             bar.display = False  # start hidden (harness loads no CSS)
             bar.border_title = "Red Robin needs your call"
             yield bar
+            status = Static("", id="thinking-status")  # reserved; revealed 200ms into a cycle
+            status.can_focus = False
+            status.display = False  # start hidden (harness loads no CSS) — mirrors the bar
+            yield status
             yield Input(id="chat-input", placeholder=_PLACEHOLDER_IDLE)
 
     def append_line(self, text: Text) -> None:
@@ -94,6 +115,66 @@ class ChatPane(Container):
         else:
             bar.display = False
             inp.placeholder = _PLACEHOLDER_IDLE
+
+    def start_thinking(self) -> None:
+        """A cycle began. Arm the 200ms delayed reveal; idempotent while already armed/shown
+        (nesting-safe — balanced with stop_thinking). Never-crash."""
+        self._thinking += 1
+        if self._thinking == 1 and self._think_timer is None:
+            try:
+                self._think_timer = self.set_timer(_THINK_DELAY, self._reveal_thinking)
+            except Exception:
+                pass
+
+    def stop_thinking(self) -> None:
+        """A cycle ended. When no cycle remains, cancel a still-pending reveal, hide the
+        spinner, and stop the animation. Idempotent (a stop with no start is a no-op)."""
+        if self._thinking > 0:
+            self._thinking -= 1
+        if self._thinking > 0:
+            return
+        self._cancel_timer("_think_timer")
+        self._cancel_timer("_spin_timer")
+        try:
+            self.query_one("#thinking-status", Static).display = False
+        except Exception:
+            pass
+
+    def _reveal_thinking(self) -> None:
+        """Fired 200ms after the first start. If a cycle is still running, reveal the spinner
+        and start the glyph animation; if it already finished, do nothing (no flash)."""
+        self._think_timer = None
+        if self._thinking <= 0:
+            return  # the cycle finished within the 200ms window — never reveal
+        try:
+            status = self.query_one("#thinking-status", Static)
+        except Exception:
+            return
+        self._spin_i = 0
+        status.update(_thinking_text(self._spin_i))
+        status.display = True
+        try:
+            self._spin_timer = self.set_interval(0.1, self._tick_thinking)
+        except Exception:
+            pass
+
+    def _tick_thinking(self) -> None:
+        """Advance the spinner glyph (display-only)."""
+        self._spin_i += 1
+        try:
+            self.query_one("#thinking-status", Static).update(_thinking_text(self._spin_i))
+        except Exception:
+            pass
+
+    def _cancel_timer(self, attr: str) -> None:
+        """Stop + clear a stored Timer handle (self._think_timer / self._spin_timer)."""
+        timer = getattr(self, attr, None)
+        if timer is not None:
+            try:
+                timer.stop()
+            except Exception:
+                pass
+            setattr(self, attr, None)
 
 
 def format_operator_echo(text: str) -> Text:
@@ -240,10 +321,22 @@ def _on_question(app: Any, payload: dict[str, Any]) -> None:
     pane._refresh_confirm_bar()  # reveal the prominent bar + flip the placeholder
 
 
+def _on_thinking(app: Any, payload: dict[str, Any]) -> None:
+    pane = _chat(app)
+    if pane is None:
+        return
+    state = str(payload.get("state") or "")
+    if state == "start":
+        pane.start_thinking()
+    elif state == "stop":
+        pane.stop_thinking()
+
+
 def register_chat(registry: Registry) -> None:
     registry.register("operator.answer")(_on_answer)
     registry.register("operator.question")(_on_question)
     registry.register("advisor.recommendation")(_on_recommendation)
+    registry.register("assistant.thinking")(_on_thinking)
 
 
 __all__ = [

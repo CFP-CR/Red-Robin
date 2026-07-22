@@ -9,6 +9,8 @@ from redrobin.tui.textual_ui.chat import (
     ChatPane,
     _PLACEHOLDER_CONFIRM,
     _PLACEHOLDER_IDLE,
+    _SPIN_FRAMES,
+    _thinking_text,
     format_answer,
     format_confirm_bar,
     format_operator_echo,
@@ -332,3 +334,81 @@ async def test_confirm_bar_reveals_on_question_and_hides_on_resolve():
         assert inp.placeholder == _PLACEHOLDER_IDLE
         # the echo ("/y") + the resolution trace both landed in the chat log
         assert len(pane.query_one("#chat-log", RichLog).lines) >= 2
+
+
+# ---- interactivity increment: the "thinking" spinner (assistant.thinking) ----
+
+
+def test_register_chat_registers_thinking():
+    reg = Registry()
+    register_chat(reg)
+    assert reg.has_handler("assistant.thinking")
+
+
+def test_thinking_text_has_label_and_spinner():
+    # the transient line leads with a braille spinner glyph + a generic label (pure renderer;
+    # asserted here because Textual 8.2.7's Static has no .renderable read-back)
+    t = _thinking_text(0).plain
+    assert "thinking" in t.lower()
+    assert t[0] in _SPIN_FRAMES  # leads with a spinner glyph
+
+
+@pytest.mark.asyncio
+async def test_on_thinking_start_arms_and_stop_cancels():
+    reg = Registry()
+    register_chat(reg)
+    async with _ChatHarness().run_test() as pilot:
+        pane = pilot.app.query_one("#events", ChatPane)
+        reg.dispatch(
+            target=pilot.app,
+            frame={"type": "assistant.thinking", "payload": {"state": "start"}},
+        )
+        assert pane._thinking == 1
+        reg.dispatch(
+            target=pilot.app,
+            frame={"type": "assistant.thinking", "payload": {"state": "stop"}},
+        )
+        assert pane._thinking == 0
+        assert pane._think_timer is None  # stop cancelled the pending 200ms reveal
+
+
+@pytest.mark.asyncio
+async def test_thinking_reveals_then_hides():
+    async with _ChatHarness().run_test() as pilot:
+        pane = pilot.app.query_one("#events", ChatPane)
+        status = pane.query_one("#thinking-status", Static)
+        assert status.display is False  # hidden at rest
+        pane._thinking = 1  # simulate a cycle in progress
+        pane._reveal_thinking()  # simulate the 200ms timer firing
+        assert status.display is True
+        assert pane._spin_timer is not None  # the glyph animation started on reveal
+        pane.stop_thinking()  # the cycle ended
+        assert status.display is False
+        assert pane._spin_timer is None  # the animation interval was stopped
+
+
+@pytest.mark.asyncio
+async def test_thinking_fast_cycle_no_flash():
+    # a cycle that finishes before the 200ms delay never reveals the spinner (no flash)
+    async with _ChatHarness().run_test() as pilot:
+        pane = pilot.app.query_one("#events", ChatPane)
+        pane.start_thinking()  # arms the 200ms timer
+        pane.stop_thinking()  # ends before 200ms -> cancels the timer, never reveals
+        assert pane.query_one("#thinking-status", Static).display is False
+        assert pane._think_timer is None
+
+
+@pytest.mark.asyncio
+async def test_thinking_is_display_only_never_steals_input_focus():
+    async with _ChatHarness().run_test() as pilot:
+        pane = pilot.app.query_one("#events", ChatPane)
+        inp = pane.query_one("#chat-input", Input)
+        inp.focus()
+        await pilot.pause()
+        pane._thinking = 1
+        pane._reveal_thinking()  # reveal the spinner
+        await pilot.pause()
+        assert pane.query_one("#thinking-status", Static).display is True
+        assert pane.query_one("#thinking-status", Static).can_focus is False
+        assert pilot.app.focused is inp  # focus never left the input — the spinner is display-only
+        pane.stop_thinking()  # tidy: stop the animation timer before teardown

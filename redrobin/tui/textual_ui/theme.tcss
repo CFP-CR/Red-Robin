@@ -58,6 +58,10 @@ Screen {
 }
 #chat-input { height: 3; border: round $panel-lighten-2; }
 
+/* Transient "thinking" indicator — a thin line above the input, revealed only while a cycle
+   runs (200ms-delayed + auto-erased in code). Display-only (no focus, no input delay). */
+#thinking-status { display: none; height: 1; color: $text-muted; padding: 0 1; }
+
 /* Below the 80x24 minimum: a centered hint replaces the dashboard (toggled in code). */
 #resize-hint {
     display: none;
