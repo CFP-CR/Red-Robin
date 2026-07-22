@@ -33,8 +33,10 @@ Screen {
     width: 1fr;
 }
 
+/* Chat is the primary surface now (unified assistant stream) — give it the room;
+   the flanking Sessions + Working-Memory panes are narrower (operator UX, 2026-07-21). */
 #sessions { width: 2fr; }
-#events { width: 3fr; }
+#events { width: 6fr; }
 #memory { width: 2fr; }
 
 /* #28 Chat pane (replaces the Verdicts/Events pane). The #events Container keeps
