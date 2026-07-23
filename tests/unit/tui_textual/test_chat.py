@@ -214,7 +214,7 @@ async def test_chat_log_wraps_no_horizontal_overflow():
         assert log.min_width == 0
 
 
-def test_format_recommendation_reactive_has_five_parts_and_advisory_tag():
+def test_format_recommendation_reactive_has_four_parts_and_advisory_tag():
     payload = {
         "suggested_action": "Validate svc_reports vs SQL01",
         "rationale": "a quiet bind beats a loud dump",
@@ -230,8 +230,11 @@ def test_format_recommendation_reactive_has_five_parts_and_advisory_tag():
     assert "quiet bind" in s  # WHY
     assert "WARN" in s  # OPSEC
     assert "unsure scope" in s  # confidence
-    assert "vault/mssql.md#chunk_0" in s  # refs
     assert "nothing dispatched" in s
+    # refs removed from the operator-facing output (2026-07-22): not rendered even when
+    # the payload carries references
+    assert "refs" not in s
+    assert "vault/mssql.md#chunk_0" not in s
 
 
 def test_format_recommendation_proactive_has_heads_up_tag():
@@ -246,7 +249,7 @@ def test_format_recommendation_proactive_has_heads_up_tag():
     s = format_recommendation(payload).plain
     assert "Red Robin" in s
     assert "heads-up" in s and "advisory" not in s
-    assert "(none)" in s  # empty refs render "(none)"
+    assert "refs" not in s  # refs no longer rendered (previously showed "(none)")
 
 
 @pytest.mark.asyncio

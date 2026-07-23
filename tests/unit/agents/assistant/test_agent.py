@@ -14,10 +14,11 @@ from redrobin.application.agents.assistant.tools import build_tool_registry
 from redrobin.domain.events import Severity
 
 
-def test_system_prompt_names_the_five_parts_and_the_thesis():
+def test_system_prompt_names_the_four_parts_and_the_thesis():
     p = build_system_prompt()
-    for field in ("suggested_action", "rationale", "opsec_risk", "confidence", "references"):
+    for field in ("suggested_action", "rationale", "opsec_risk", "confidence"):
         assert field in p
+    assert "references" not in p  # refs removed from the output contract (operator UX, 2026-07-22)
     assert "ADVISORY ONLY" in p
     assert "speak" in p  # the stay-silent sentinel is documented
 

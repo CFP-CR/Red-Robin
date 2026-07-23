@@ -38,15 +38,13 @@ _SYSTEM_PROMPT = (
     "over what the tools and the state return, never from memory, and never invent a fact.\n\n"
     "Return ONLY a JSON object: your reply MUST begin with { and end with } — no preamble, "
     "no trailing commentary, no code fence. To stay silent, return "
-    '{"speak": false}. To recommend, return these five fields (ALL required):\n'
+    '{"speak": false}. To recommend, return these four fields (ALL required):\n'
     '{"suggested_action": "the concrete next step — the WHAT (one imperative line)",\n'
     ' "rationale": "the tradecraft WHY, in 1-2 tight sentences (without this it is '
     'outsourcing, not advising — but do not restate the state back)",\n'
     ' "opsec_risk": "one of INFO|WARN|DANGER — the detection risk, grounded in '
     'defenses_observed, with a short reason",\n'
-    ' "confidence": "one line: how sure you are AND what you are explicitly NOT sure about",\n'
-    ' "references": ["the grounding you drew on — kb sources you retrieved plus the '
-    'working-memory facts / command output you used"]}'
+    ' "confidence": "one line: how sure you are AND what you are explicitly NOT sure about"}'
 )
 
 
@@ -211,7 +209,6 @@ _ANSWER_SYSTEM_PROMPT = (
     "Return ONLY a JSON object: your reply MUST begin with { and end with } — no preamble, "
     "no trailing commentary, no code fence:\n"
     '{"answer": "your grounded answer (or an acknowledgement of the correction)",\n'
-    ' "citations": ["the grounding you used — kb/journal/lesson sources + wm facts"],\n'
     ' "lesson": null OR {"scope": "operator|engagement", "context": "when it applies", '
     '"lesson": "what to do differently", "why": "the reason"}}'
 )

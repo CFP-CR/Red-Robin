@@ -188,22 +188,18 @@ def format_answer(payload: dict[str, Any]) -> Text:
     t = Text()
     t.append("Red Robin  ", style=f"bold {_ACCENT}")
     t.append(str(payload.get("text") or ""))
-    cites = payload.get("citations") or []
-    if cites:
-        t.append("\n  refs ", style=_MUTED)
-        t.append(", ".join(str(c) for c in cites), style=_MUTED)
     return t
 
 
 def format_recommendation(payload: dict[str, Any]) -> Text:
-    """The 5-part advisory as a chat message (one voice). The provenance tag is
+    """The 4-part advisory as a chat message (one voice). The provenance tag is
     driven by correlation_id: reactive (a command triggered it) carries
-    '<beacon>:<command>'; proactive (self-triggered) carries None -> 'heads-up'."""
+    '<beacon>:<command>'; proactive (self-triggered) carries None -> 'heads-up'.
+    Refs/grounding are intentionally not rendered (operator UX, 2026-07-22)."""
     action = str(payload.get("suggested_action") or "")
     rationale = str(payload.get("rationale") or "")
     risk = str(payload.get("opsec_risk") or "INFO")
     confidence = str(payload.get("confidence") or "")
-    references = payload.get("references") or []
     tag = "advisory" if payload.get("correlation_id") else "heads-up"
     t = Text()
     t.append("Red Robin", style=f"bold {_ACCENT}")
@@ -216,9 +212,7 @@ def format_recommendation(payload: dict[str, Any]) -> Text:
     t.append("opsec  ", style=_MUTED)
     t.append(f"{risk}\n", style=f"bold {_RISK_COLORS.get(risk, 'white')}")
     t.append("conf   ", style=_MUTED)
-    t.append(f"{confidence}\n")
-    t.append("refs   ", style=_MUTED)
-    t.append(", ".join(str(r) for r in references) if references else "(none)")
+    t.append(f"{confidence}")
     return t
 
 
