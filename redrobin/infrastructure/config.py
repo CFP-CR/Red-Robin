@@ -80,6 +80,27 @@ class Settings(BaseSettings):
         default="[Red Robin]", alias="REDROBIN_ENRICHMENT_SELF_ANNOTATION_PREFIX"
     )
 
+    # AI assistant (reactive grounded recommendation — Task 2)
+    # Off by default: the feature is built incrementally (reactive mode is 1 of 3
+    # trigger modes; proactive/conversational land in later tasks). Dark-launched
+    # so a merge to the shared integration branch stays inert until an operator
+    # opts in with REDROBIN_ASSISTANT_ENABLED=1. Flip the default to True once the
+    # whole assistant ships and its whole-feature smoke/review sign off.
+    assistant_enabled: bool = Field(default=False, alias="REDROBIN_ASSISTANT_ENABLED")
+    assistant_model: str = Field(default="claude-haiku-4-5", alias="REDROBIN_ASSISTANT_MODEL")
+    assistant_cooldown_sec: float = Field(default=30.0, alias="REDROBIN_ASSISTANT_COOLDOWN_SEC")
+    assistant_max_tokens: int = Field(default=2048, alias="REDROBIN_ASSISTANT_MAX_TOKENS")
+    # Context-rot cap (spec §6.B refinement 2): most-recent items kept per working-
+    # memory category in the pushed context so long engagements don't re-send an
+    # ever-growing resident set every cycle.
+    assistant_wm_max_items: int = Field(default=20, alias="REDROBIN_ASSISTANT_WM_MAX_ITEMS")
+    # Proactive mode (Task 4 §6.A): X = lull before a self-triggered check;
+    # N = min interval between proactive utterances (rate-limit). Tunable, not hardcoded.
+    assistant_lull_sec: float = Field(default=300.0, alias="REDROBIN_ASSISTANT_LULL_SEC")
+    assistant_proactive_min_interval_sec: float = Field(
+        default=600.0, alias="REDROBIN_ASSISTANT_PROACTIVE_MIN_INTERVAL_SEC"
+    )
+
     # Operator policy
     allow_degraded_layer_b: bool = Field(default=False, alias="REDROBIN_ALLOW_DEGRADED")
 
@@ -118,6 +139,8 @@ class Settings(BaseSettings):
         "enrichment_min_output_chars",
         "enrichment_chunk_max_chars",
         "enrichment_max_concurrency",
+        "assistant_max_tokens",
+        "assistant_wm_max_items",
     )
     @classmethod
     def _positive_int(cls, v: int) -> int:
@@ -125,7 +148,13 @@ class Settings(BaseSettings):
             raise ValueError(f"must be >= 1, got {v}")
         return v
 
-    @field_validator("promoter_interval_sec", "l5_interval_sec")
+    @field_validator(
+        "promoter_interval_sec",
+        "l5_interval_sec",
+        "assistant_cooldown_sec",
+        "assistant_lull_sec",
+        "assistant_proactive_min_interval_sec",
+    )
     @classmethod
     def _positive_float(cls, v: float) -> float:
         if v <= 0:

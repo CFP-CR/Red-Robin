@@ -31,6 +31,7 @@ from redrobin.api.auth import require_bearer
 from redrobin.api.events_router import router as events_router
 from redrobin.api.lifespan_helpers import (
     start_adapters,
+    start_assistant,
     start_dedup,
     start_engagement,
     start_enricher,
@@ -94,6 +95,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )  # must run AFTER start_engagement; reads app.state.engagement to pick the per-engagement keys file
     _, close_wm = await start_working_memory(app, settings)
     _, close_enricher = await start_enricher(app, settings)
+    _, close_assistant = await start_assistant(app, settings)
     _, _close_pipeline = await start_pipeline(app, settings)  # no-op close
     _, close_adapters = await start_adapters(app, settings)
     _, close_promoter = await start_lesson_promoter(app, settings)
@@ -192,6 +194,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await close_wm()
         except Exception:
             logger.exception("close_wm failed")
+        # Wait for the assistant to drain after the bus sentinel. It started
+        # AFTER the enricher, so in reverse-of-startup order it closes first.
+        try:
+            await close_assistant()
+        except Exception:
+            logger.exception("close_assistant failed")
         # Wait for the enricher to drain after the bus sentinel (like the reducer).
         try:
             await close_enricher()

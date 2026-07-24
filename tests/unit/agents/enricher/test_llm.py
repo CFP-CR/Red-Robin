@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from redrobin.application.enrichment.llm import EnricherLLM, build_enricher_llm
+from redrobin.application.agents.enricher.llm import EnricherLLM, build_enricher_llm
 from redrobin.infrastructure.llm.anthropic_client import (
     AnthropicEnricherClient,
     _build_enricher_user_message,

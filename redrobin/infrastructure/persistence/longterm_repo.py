@@ -15,7 +15,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from redrobin.domain.memory import PromotedLesson
+from redrobin.domain.memory import Lesson, PromotedLesson
 
 
 _SCHEMA_SQL = """
@@ -36,6 +36,17 @@ CREATE TABLE IF NOT EXISTS promoted_lessons (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_promoted_lessons_command ON promoted_lessons (command);
+
+CREATE TABLE IF NOT EXISTS operator_lessons (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scope VARCHAR(16) NOT NULL,
+    context TEXT NOT NULL,
+    lesson TEXT NOT NULL,
+    why TEXT NOT NULL,
+    engagement_id VARCHAR(128),
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_operator_lessons_scope ON operator_lessons (scope);
 """
 
 
@@ -149,6 +160,58 @@ class LongtermRepo:
                 summary=row["summary"],
                 occurrence_count=row["occurrence_count"],
                 created_at=_parse_iso(row["created_at"]),
+            )
+            for row in rows
+        ]
+
+    def add_operator_lesson(self, lesson: Lesson) -> Lesson:
+        """Insert a context-scoped operator-correction lesson (append-only; each
+        correction is its own record — no dedup, unlike promoted lessons)."""
+        ts = lesson.created_at or datetime.now()
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "INSERT INTO operator_lessons (scope, context, lesson, why, "
+                "engagement_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    lesson.scope,
+                    lesson.context,
+                    lesson.lesson,
+                    lesson.why,
+                    lesson.engagement_id,
+                    _iso(ts),
+                ),
+            )
+            return Lesson(
+                scope=lesson.scope,
+                context=lesson.context,
+                lesson=lesson.lesson,
+                why=lesson.why,
+                engagement_id=lesson.engagement_id,
+                created_at=ts,
+                id=cursor.lastrowid,
+            )
+
+    def list_operator_lessons(self, *, engagement_id: str | None) -> list[Lesson]:
+        """Read back the lessons applicable to ``engagement_id``: every
+        ``operator``-scoped lesson (cross-engagement) plus the ``engagement``-scoped
+        ones for THIS engagement only (quarantine — spec §6.D)."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, scope, context, lesson, why, engagement_id, created_at "
+                "FROM operator_lessons "
+                "WHERE scope = 'operator' OR (scope = 'engagement' AND engagement_id = ?) "
+                "ORDER BY id",
+                (engagement_id,),
+            ).fetchall()
+        return [
+            Lesson(
+                scope=row["scope"],
+                context=row["context"],
+                lesson=row["lesson"],
+                why=row["why"],
+                engagement_id=row["engagement_id"],
+                created_at=_parse_iso(row["created_at"]),
+                id=row["id"],
             )
             for row in rows
         ]

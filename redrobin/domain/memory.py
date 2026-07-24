@@ -112,6 +112,20 @@ class Objective:
 
 
 @dataclass
+class PendingMilestone:
+    """A close/commit interpretation the assistant proposed and is awaiting the
+    operator's binary confirm (spec §6.C). Persisted in WM so continuity survives
+    a restart — the assistant holds NO live pending state. Read back by id on the
+    operator's answer; rendered by the confirm affordance (deferred UI, #28)."""
+
+    milestone_id: str
+    phase: str
+    status: str
+    progress_pct: int
+    prompt: str
+
+
+@dataclass
 class WorkingMemory:
     engagement_id: str
     client: str = ""
@@ -128,6 +142,7 @@ class WorkingMemory:
     credentials: list[Credential] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
     sessions: list[Session] = field(default_factory=list)
+    pending_milestones: list[PendingMilestone] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -165,6 +180,26 @@ class PromotedLesson:
     summary: str
     occurrence_count: int
     created_at: datetime
+
+
+@dataclass(frozen=True)
+class Lesson:
+    """L1 operator-correction lesson (spec §6.D) — a context-scoped, NEVER-blanket
+    record captured when the operator corrects the assistant. Distinct from
+    ``PromotedLesson`` (the verdict-aggregation record keyed by command/verdict):
+    this is the operator-correction lesson-source (§10). ``scope`` is
+    ``"operator"`` (persists cross-engagement — cumulative) or ``"engagement"``
+    (quarantined — read back only for its own engagement, so a honeypot fact never
+    contaminates the next client). Provenance (``engagement_id``, ``created_at``)
+    is system-attached at capture, never model-supplied."""
+
+    scope: str  # "operator" | "engagement"
+    context: str  # the situation it applies in
+    lesson: str  # what to do differently
+    why: str  # the reason
+    engagement_id: str | None  # provenance + the quarantine key
+    created_at: datetime
+    id: int | None = None  # None until persisted
 
 
 @dataclass(frozen=True)

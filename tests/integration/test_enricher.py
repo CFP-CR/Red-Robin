@@ -7,7 +7,7 @@ import asyncio
 
 import pytest
 
-from redrobin.application.enrichment.enricher import WorkingMemoryEnricher
+from redrobin.application.agents.enricher.enricher import WorkingMemoryEnricher
 from redrobin.application.event_bus import EventBus
 
 

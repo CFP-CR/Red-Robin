@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 
-from redrobin.application.summarizer import L5LLM
+from redrobin.application.agents.summarizer import L5LLM
 from redrobin.infrastructure.persistence.context_summary_repo import (
     ContextSummaryRepo,
 )

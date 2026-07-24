@@ -48,6 +48,9 @@ def test_handle_raw_ignores_unknown_type():
 @pytest.mark.asyncio
 async def test_ws_loop_reports_connecting_then_connected(monkeypatch):
     class _FakeWS:
+        async def send(self, data):  # the app stores this as the _ws_send handle
+            pass
+
         def __aiter__(self):
             return self
 
@@ -60,7 +63,7 @@ async def test_ws_loop_reports_connecting_then_connected(monkeypatch):
     monkeypatch.setattr(ws_worker, "connect", _fake_connect)
     states: list[str] = []
     await ws_worker.ws_loop(
-        target=object(),
+        target=_Target(),  # ws_loop does setattr(target, "_ws_send", ...) → needs __dict__
         url="ws://x/v1/tui",
         token=None,
         registry=Registry(),

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from redrobin.application.enrichment.trigger import should_enrich
+from redrobin.application.agents.enricher.trigger import should_enrich
 
 DENY = ["ls", "pwd", "sleep", "cd"]
 

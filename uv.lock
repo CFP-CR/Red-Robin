@@ -2362,7 +2362,7 @@ requires-dist = [
     { name = "aiofiles", specifier = ">=23.0" },
     { name = "aiosqlite", specifier = ">=0.20" },
     { name = "alembic", specifier = ">=1.13" },
-    { name = "anthropic", specifier = ">=0.60.0" },
+    { name = "anthropic", specifier = ">=0.100.0" },
     { name = "fastapi", specifier = ">=0.110" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "import-linter", marker = "extra == 'dev'", specifier = ">=2.11" },

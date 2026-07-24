@@ -12,7 +12,7 @@ Event dispatch table (canonical wire types from ``redrobin/domain/events.py``):
   ``WorkingMemoryRepo.apply_deltas`` (single writer; provenance system-supplied).
 
 ``beacon.command_output`` is consumed by the LLM enricher
-(``redrobin/application/enrichment/enricher.py``), a separate bus consumer that
+(``redrobin/application/agents/enricher/enricher.py``), a separate bus consumer that
 publishes ``working_memory.deltas`` — the reducer no longer parses it.
 
 All other event types are silently ignored. Repo helpers are synchronous JSON
@@ -124,6 +124,9 @@ class WorkingMemoryReducer:
         elif etype == "working_memory.deltas":
             self._on_enrichment_deltas(payload)
             return True
+        elif etype == "engagement.milestone":
+            self._on_milestone(payload)
+            return True
         # else: silently ignore — the bus is fan-out, not all events are for us.
         return False
 
@@ -189,6 +192,22 @@ class WorkingMemoryReducer:
             payload, source_beacon_id=str(src) if src is not None else None
         )
         self._repo.apply_deltas(deltas)
+
+    def _on_milestone(self, payload: dict[str, Any]) -> None:
+        """Interpretation write (spec §6.C) — the assistant proposes, the reducer
+        (single writer) applies. Never crashes the reducer."""
+        try:
+            self._repo.apply_milestone(
+                phase=str(payload.get("phase") or ""),
+                milestone_id=str(payload.get("milestone_id") or ""),
+                status=str(payload.get("status") or ""),
+                progress_pct=int(payload.get("progress_pct") or 0),
+                pending=bool(payload.get("pending")),
+                drop=bool(payload.get("drop")),
+                prompt=str(payload.get("prompt") or ""),
+            )
+        except Exception:
+            logger.exception("reducer: engagement.milestone apply failed")
 
 
 __all__ = ["WorkingMemoryReducer"]

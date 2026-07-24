@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from redrobin.application.enrichment.parser import DeltaParseError, parse_deltas
+from redrobin.application.agents.enricher.parser import DeltaParseError, parse_deltas
 
 
 def test_parses_plain_json_and_attaches_provenance():

@@ -26,6 +26,7 @@ from redrobin.domain.memory import (
     Finding,
     Host,
     Objective,
+    PendingMilestone,
     Session,
     ToolUsage,
     WorkingMemory,
@@ -131,6 +132,49 @@ class WorkingMemoryRepo:
                 wm.defenses_observed.append(defense)
         self.save(wm)
 
+    def apply_milestone(
+        self,
+        *,
+        phase: str,
+        milestone_id: str,
+        status: str,
+        progress_pct: int,
+        pending: bool = False,
+        drop: bool = False,
+        prompt: str = "",
+    ) -> None:
+        """Apply an engagement.milestone (spec §6.C). ``pending`` records a proposal
+        without applying it; ``drop`` removes a pending proposal (a rejected confirm);
+        otherwise COMMIT: set current_phase, the objective's status/progress_pct (by
+        id), kill_chain_status, and consume any matching pending. Single-writer."""
+        wm = self.load()
+        wm.pending_milestones = [p for p in wm.pending_milestones if p.milestone_id != milestone_id]
+        if drop:
+            self.save(wm)
+            return
+        if pending:
+            wm.pending_milestones.append(
+                PendingMilestone(
+                    milestone_id=milestone_id,
+                    phase=phase,
+                    status=status,
+                    progress_pct=progress_pct,
+                    prompt=prompt,
+                )
+            )
+            self.save(wm)
+            return
+        # commit
+        if phase:
+            wm.current_phase = phase
+        for obj in wm.objectives:
+            if obj.id == milestone_id:
+                obj.status = status
+                obj.progress_pct = progress_pct
+        if milestone_id:
+            wm.kill_chain_status[milestone_id] = status
+        self.save(wm)
+
     @staticmethod
     def _known_usernames(wm: WorkingMemory, deltas: WorkingMemoryDeltas) -> set[str]:
         """Bare-upper usernames known in live WM + this incoming batch — used to
@@ -204,4 +248,5 @@ class WorkingMemoryRepo:
             credentials=[Credential(**c) for c in data.get("credentials", [])],
             findings=[Finding(**f) for f in data.get("findings", [])],
             sessions=[Session(**s) for s in data.get("sessions", [])],
+            pending_milestones=[PendingMilestone(**p) for p in data.get("pending_milestones", [])],
         )

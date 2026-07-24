@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from redrobin.application.enrichment.sanitize import strip_self_annotations
+from redrobin.application.agents.enricher.sanitize import strip_self_annotations
 
 PREFIX = "[Red Robin]"
 

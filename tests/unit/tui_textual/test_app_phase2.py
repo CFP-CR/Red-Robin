@@ -1,7 +1,7 @@
 import pytest
 
 from redrobin.tui.textual_ui.app import REGISTRY, RedRobinApp
-from redrobin.tui.textual_ui.panels import EventsLog, MemoryPanel, SessionsTable
+from redrobin.tui.textual_ui.panels import MemoryPanel, SessionsTable
 
 
 @pytest.mark.asyncio
@@ -56,13 +56,8 @@ async def test_verdict_frames_render_and_layer_b_corrects_in_place():
                 },
             },
         )
-        # Corrected in place → still one event, now PASS.
+        # Corrected in place → still one event, now PASS. The verdict STREAM display
+        # was superseded by the Chat pane (#28); the app.events reactive (which feeds
+        # the topbar count) still applies Layer-B corrections in place.
         assert len(app.events) == 1
         assert app.events[0]["verdict"] == "PASS"
-        # The log reflects the correction in place: PASS shown, the old ESCALATE
-        # replaced (not duplicated). Visual line count is width-dependent now that
-        # the log wraps to the pane, so assert on rendered text, not line count.
-        log = app.query_one("#events-log", EventsLog)
-        rendered = " ".join(strip.text for strip in log.lines)
-        assert "PASS" in rendered
-        assert "ESCALATE" not in rendered
