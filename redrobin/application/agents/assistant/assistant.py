@@ -49,6 +49,7 @@ class Assistant:
         tools: list[AgentTool],
         trigger: TriggerGate,
         summary_reader: Callable[[], str],
+        snapshot_reader: Callable[[], dict[str, Any]] | None = None,
         enabled: bool = True,
         max_tokens: int = 2048,
         wm_max_items: int = 20,
@@ -63,6 +64,7 @@ class Assistant:
         self._tools = tools
         self._trigger = trigger
         self._summary_reader = summary_reader
+        self._snapshot_reader = snapshot_reader
         self._enabled = enabled
         self._max_tokens = max_tokens
         self._wm_max_items = wm_max_items
@@ -79,8 +81,24 @@ class Assistant:
         self._material_pending = False  # a new defence awaits the post-reactive backstop
         self._last_interp_sig: str | None = None  # interpretation novelty gate (signal-not-noise)
 
+    def _seed_snapshot(self) -> None:
+        """Hydrate the L2 snapshot from the persisted working memory at boot (#30), so the
+        assistant is NOT blind to existing engagement state (objectives/creds/phase) until
+        the first mutating bus event. Never-crash: a failed read leaves the snapshot empty
+        (the pre-#30 behavior). Any later working_memory_snapshot/deltas event supersedes it."""
+        if self._snapshot_reader is None:
+            return
+        try:
+            seed = self._snapshot_reader()
+        except Exception:
+            logger.exception("assistant: initial WM snapshot seed failed")
+            return
+        if isinstance(seed, dict):
+            self._wm_snapshot = seed
+
     async def run(self) -> None:
         sub = await self._bus.subscribe()
+        self._seed_snapshot()  # #30: hydrate L2 from the persisted WM before the loop starts
         if self.on_started is not None:
             try:
                 self.on_started()

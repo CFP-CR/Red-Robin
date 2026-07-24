@@ -58,6 +58,7 @@ from redrobin.application.verdict_pipeline_factory import (
 from redrobin.application.working_memory_lifecycle import WorkingMemory, WorkingMemoryRepo
 from redrobin.application.working_memory_reducer import WorkingMemoryReducer
 from redrobin.application.working_memory_seed import apply_engagement_scope
+from redrobin.domain.memory import working_memory_to_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -569,6 +570,19 @@ async def start_assistant(app: FastAPI, settings: Settings) -> tuple[Assistant, 
             return ""
         return rows[0].text if rows else ""
 
+    def _read_wm_snapshot() -> dict[str, Any]:
+        # #30: seed the assistant's L2 from the persisted WM at boot so it is NOT blind to
+        # existing engagement state until the first mutating event. Reads app.state each call
+        # (mirrors _read_summary) and never raises — an empty dict is the safe fallback.
+        try:
+            repo = getattr(app.state, "working_memory_repo", None)
+            if repo is None or not repo.exists():
+                return {}
+            return working_memory_to_snapshot(repo.load())
+        except Exception:
+            logger.exception("assistant: failed reading initial WM snapshot")
+            return {}
+
     # Only load the KB index + warm the journal when the assistant is actually
     # enabled — otherwise a boot with a real VOYAGE_API_KEY would load the whole
     # kb-index and embed the entire events.jsonl backlog for a turned-off feature
@@ -589,6 +603,7 @@ async def start_assistant(app: FastAPI, settings: Settings) -> tuple[Assistant, 
         ),
         trigger=TriggerGate(cooldown_sec=settings.assistant_cooldown_sec),
         summary_reader=_read_summary,
+        snapshot_reader=_read_wm_snapshot,
         enabled=settings.assistant_enabled,
         max_tokens=settings.assistant_max_tokens,
         wm_max_items=settings.assistant_wm_max_items,
