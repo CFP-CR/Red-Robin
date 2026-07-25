@@ -102,8 +102,30 @@ elif etype == "beacon.command_input":
 - **`dedup_keys.py`** — drop `opsec.verdict` from `_CORRELATED_TYPES` (leaving `beacon.command_input`/`beacon.command_output`).
 - **`lifespan_helpers.py` + `app.py`** — remove `start_rules`, `start_pipeline`, `start_lesson_promoter` and their close hooks. Shutdown loses two steps.
 - **`boot_validation.py`** — `ANTHROPIC_API_KEY` is still required, but for the **assistant / enricher / summarizer**, not "for Layer B". Message and rationale updated; the requirement itself is unchanged.
-- **TUI** — the topbar verdict counts (`apply_verdict`, `verdict_counts`, the `opsec.verdict` frame handler) go; the Chat pane, Sessions, and Working Memory are untouched. The dead `EventsLog`/`format_verdict` kept as a test harness in #28 go with them.
+- **TUI** — see §5.5; it is the one operator-visible change.
 - **Docs** — `CLAUDE.md` (the gate is no longer "the first feature and the capture hook"), `CONTRIBUTING.md` ("Adding a rule" section), `.claude/rules/wire-protocol.md` (`opsec.verdict` row), `docs/architecture-design.md` (a status note: the gate was removed, L3 is now command-sourced), and the smoke runbook (checkpoints that exercise the gate).
+
+### §5.5 Changed — the TUI (the only operator-visible change)
+
+The gate's TUI surface is larger than it looks, because #28 already made most of it vestigial:
+
+| Deleted | Where |
+|---|---|
+| The four topbar counters (`BLOCK` / `WARN` / `PASS` / `ESCALATE`) | `panels.py: verdict_counts`, `TopBar.update_status` |
+| `format_verdict` (dead since #28 — retained only as a test harness), `apply_verdict`, `VERDICT_COLORS` | `panels.py` |
+| **The entire `events` reactive** and its `watch_events` — since #28 replaced the Verdicts pane with the Chat pane, `app.events` exists *only* to feed those counters | `app.py` |
+| The `opsec.verdict` frame handler | `app.py:213` |
+| The `$verdict-block` / `$verdict-warn` / `$verdict-pass` / `$verdict-escalate` tokens | `theme.tcss` |
+
+**Operator decision (2026-07-25): the freed topbar space stays empty.** The header becomes `Red Robin · <engagement> · ● connected`. Putting a new widget there (phase, objective progress, an assistant-state indicator) would be UX design smuggled inside a deletion — it gets its own small effort if it's ever wanted. The counters were actionable *because* something had been blocked; with nothing blocking, counting is decoration.
+
+Untouched: the Chat pane, Sessions, Working Memory, the Inspector, the help overlay, and the command palette.
+
+**⚠️ Implementation trap — `WARN` and `ESCALATE` belong to TWO vocabularies:**
+- `VerdictAction` = PASS / WARN / BLOCK / ESCALATE → **the gate's**, deleted.
+- `Severity` = INFO / WARN / DANGER / ESCALATE → **the assistant's** (every advisory's `opsec` field), **kept**.
+
+`chat.py` has its own `_RISK_COLORS` keyed on the *Severity* values. A grep-and-delete pass over `"WARN"` or `"ESCALATE"` would break advisory rendering. Delete by symbol and by module, never by string match.
 
 ## §6 Explicit non-goals
 
@@ -139,7 +161,8 @@ Step 3 after step 2 keeps each commit's tests coherent: the fields disappear onl
 - **Deletion is verified by absence:** the gate's 18 test files are removed with their subjects; a grep-level check that no `opsec.verdict`, `VerdictAction`, `Layer A`, `Layer B`, or `verdict_pipeline` reference survives outside historical docs.
 - **New unit test** — the reducer records one Episode per `beacon.command_input`, with the command and correlation_id carried through, and mutates no working memory.
 - **New unit test** — the L5 `_format` renders a command-only episode list.
-- **Regression (must stay green untouched):** the enricher tests, the reducer's deltas/beacon.initial/milestone branches, every assistant test, the chat-memory tests, and the TUI tests other than the verdict counts.
+- **Regression (must stay green untouched):** the enricher tests, the reducer's deltas/beacon.initial/milestone branches, every assistant test, the chat-memory tests, and the TUI tests other than the verdict counts. **In particular the advisory-rendering tests** (`format_recommendation` over each `Severity`) — they are the guard against the §5.5 `WARN`/`ESCALATE` vocabulary trap.
+- **New Pilot test** — the topbar renders `Red Robin · <engagement> · ● connected` with no counter section, and the app exposes no `events` reactive.
 - **Degraded-boot test** — with no `ANTHROPIC_API_KEY`, publishing a `beacon.command_input` still records an Episode (proves the L5 input no longer depends on an LLM).
 - **Live smoke** — the only acceptance for the `.cna` change (§8).
 
