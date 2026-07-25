@@ -293,7 +293,13 @@ git commit -m "refactor(gate): delete the verdict HTTP endpoint and the adapter 
 
 ---
 
-### Task 3: Delete the verdict pipeline, its factory, and the LessonPromoter
+### Tasks 3 + 4 (MERGED during execution): Delete the verdict pipeline, Layer A/B, the rule pack, and the LessonPromoter
+
+> **Merged 2026-07-25 by controller ruling.** Splitting these was a plan defect: `start_pipeline` is the **sole owner** of rules hot-reload (`rules_loader.start_hot_reload(...)` at `lifespan_helpers.py:370` is its only caller in the repo), and the Sigma rules exist only to feed Layer A. Deleting the pipeline alone therefore invents an interim state that needs scaffolding to survive — and the scaffolding would be deleted one task later anyway. The two sections below are executed as **one task, one commit**.
+>
+> **Also forced by the same discovery — `readyz` must be REDEFINED, not relocated.** `GET /v1/readyz` (`app.py:248-253`) currently returns ready iff `rules_loader is not None and loader.hot_reload_active` — "the daemon is ready" literally means "the Sigma rule watchdog is running", a gate concept masquerading as a health check. Its definition dies with the gate under any sequencing. Replace it with **lifespan-startup completion**: set a flag on `app.state` at the end of the lifespan startup, and return ready iff it is set. The endpoint keeps its `{"status": "ready"|"not_ready"}` contract. The three `test_lifespan_boot.py` tests are updated to the new semantics — a redefinition, not a weakening.
+
+#### Part A — the pipeline, its factory, and the LessonPromoter
 
 **Files:**
 - Delete: `redrobin/application/verdict_pipeline.py` · `redrobin/application/verdict_pipeline_factory.py` · `redrobin/application/lesson_promoter.py`
@@ -399,7 +405,7 @@ git commit -m "refactor(gate): delete the verdict pipeline, its factory, and the
 
 ---
 
-### Task 4: Delete Layer A/B, their satellites, and the rule data
+#### Part B — Layer A/B, their satellites, and the rule data
 
 **Files:**
 - Delete (application): `layer_a_engine.py` · `layer_b_engine.py` · `redactor.py` · `scope_enforcer.py` · `rules_lifecycle.py`
