@@ -53,7 +53,7 @@ facts = Table(
 )
 
 
-# Slice 10 — raw OPSEC verdict episodes feeding the LessonPromoter.
+# Slice 10 — raw episodes (one per issued command), the L3 audit trail.
 # Lives in the same database file as ``lessons`` (per-engagement episodic store).
 episodes = Table(
     "episodes",

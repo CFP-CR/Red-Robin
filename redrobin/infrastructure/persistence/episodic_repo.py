@@ -6,14 +6,13 @@ connection opened lazily per call. Provisions the ``lessons`` and
 append episodes without an event-loop hop per event.
 
 ``record(...)``/``list_episodes_for_engagement(...)`` capture every
-``opsec.verdict`` event into the raw episode log. The ``LessonPromoter``
-aggregates these into structured ``PromotedLesson`` records stored in
-:class:`LongtermRepo`.
+``beacon.command_input`` event into the raw episode log, which the L5
+summariser then compresses into rolling context for the assistant.
 
 Phase 1's async SQLAlchemy API (``add``/``list_for_engagement``/
 ``mark_promoted``) was removed in Slice 9 — the production reducer →
-promoter → summarizer → Layer B flow only ever used the sync API, and no
-production caller referenced the async branch.
+summariser flow only ever used the sync API, and no production caller
+referenced the async branch.
 """
 
 from __future__ import annotations

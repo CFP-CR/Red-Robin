@@ -4,7 +4,7 @@ Slice 6 of Phase 2: reads the per-engagement ROE file from
 ``~/.redrobin/engagements/<slug>/engagement.yaml`` (root configurable via
 ``EngagementLoader(engagements_root=...)``) and returns an immutable
 :class:`Engagement` dataclass the lifespan uses to build the verdict
-pipeline's :class:`~redrobin.application.scope_enforcer.ScopeEnforcer`.
+working-memory scope projection (``apply_engagement_scope``).
 
 Schema (v0):
   slug: <str>

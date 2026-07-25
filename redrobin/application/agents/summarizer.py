@@ -2,12 +2,12 @@
 
 Closes Phase 2 gap #18 (L5 sliding-window summary never created).
 
-Periodically reads recent ``Episode`` rows from :class:`EpisodicRepo`,
-compresses them into a 3-5 sentence summary via an LLM, and appends the
-result to :class:`ContextSummaryRepo`. The latest summary is consumed by
-:class:`~redrobin.application.layer_b_engine.LayerBEngine` and forwarded to
-the LLM as a separate cached system block so long engagements stay coherent
-after the most recent verdicts have rolled off the in-memory window.
+Periodically reads recent ``Episode`` rows from :class:`EpisodicRepo` (one
+per ``beacon.command_input``), compresses them into a 3-5 sentence summary
+via an LLM, and appends the result to :class:`ContextSummaryRepo`. The latest
+summary is read by the assistant and carried in its push-context so long
+engagements stay coherent after the most recent activity has rolled off the
+in-memory window.
 
 The summariser tracks the last summarised ``Episode.id`` in-process so a
 second pass with no new episodes is a no-op. Window boundaries are crossed

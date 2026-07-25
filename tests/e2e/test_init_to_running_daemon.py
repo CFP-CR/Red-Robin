@@ -59,27 +59,19 @@ def operator_setup(tmp_path, monkeypatch):
 def test_init_to_running_daemon_e2e(operator_setup, capfd):
     """Smoke: the init layout boots successfully through the lifespan.
 
-    Confirms every Slice-8 helper ran (event bus, rules loader, working
-    memory, engagement, pipeline, adapters, promoter, summariser) and
-    that the structured Slice-7 banner reached stderr.
+    Confirms every Slice-8 helper ran (event bus, engagement, working memory,
+    enricher, assistant, adapters, summariser) and that the structured Slice-7
+    banner reached stderr.
     """
     root = operator_setup
     app = create_app()
     with TestClient(app) as client:
         # Lifespan ran — app.state should be fully populated by every
         # ``start_*`` helper in :mod:`redrobin.api.lifespan_helpers`.
-        assert app.state.rules_loader is not None
         assert app.state.event_bus is not None
-        assert app.state.verdict_pipeline is not None
         assert app.state.working_memory_repo is not None
-        assert app.state.scope is not None
-
-        # The sample lazagne rule that init drops on disk MUST be in the
-        # loaded snapshot — otherwise we lost the rules-loader → init wiring.
-        rules = app.state.rules_loader.list_rules()
-        assert any(r.id == "rule-sample-lazagne" for r in rules), (
-            f"init's sample-lazagne.yaml rule not loaded: rules={[r.id for r in rules]}"
-        )
+        assert app.state.episodic_repo is not None
+        assert app.state.ready is True
 
         # Engagement loaded from the init-produced engagement.yaml — the
         # slug AND name both come from the template's ``slug``/``name``

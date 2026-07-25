@@ -18,12 +18,12 @@ import pytest
 
 from redrobin.api.lifespan_helpers import (
     start_adapters,
+    start_assistant,
+    start_dedup,
     start_engagement,
+    start_enricher,
     start_event_bus,
     start_l5_summarizer,
-    start_lesson_promoter,
-    start_pipeline,
-    start_rules,
     start_working_memory,
 )
 
@@ -44,12 +44,12 @@ def test_each_helper_is_importable():
     """If any helper doesn't exist, this test catches it immediately."""
     for fn in (
         start_event_bus,
-        start_rules,
-        start_working_memory,
         start_engagement,
-        start_pipeline,
+        start_dedup,
+        start_working_memory,
+        start_enricher,
+        start_assistant,
         start_adapters,
-        start_lesson_promoter,
         start_l5_summarizer,
     ):
         assert callable(fn)
@@ -83,14 +83,12 @@ async def test_lifespan_still_works_end_to_end(tmp_path: Path, monkeypatch):
 
     app = create_app()
     async with app.router.lifespan_context(app):
-        assert app.state.rules_loader is not None
         assert app.state.event_bus is not None
-        assert app.state.verdict_pipeline is not None
         assert app.state.working_memory_repo is not None
         assert app.state.episodic_repo is not None
         assert app.state.longterm_repo is not None
         assert app.state.summary_repo is not None
         assert hasattr(app.state, "cs_adapters")
-        assert hasattr(app.state, "promoter_task")
         assert hasattr(app.state, "summarizer_task")
         assert hasattr(app.state, "reducer_task")
+        assert hasattr(app.state, "enricher_task")

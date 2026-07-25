@@ -62,15 +62,6 @@ def test_init_sets_strict_perms_on_dotenv(tmp_path):
     assert mode == 0o600
 
 
-def test_init_creates_sample_rule(tmp_path):
-    target = tmp_path / "rr"
-    run_init(
-        root=target, anthropic_key="k", voyage_key="k", engagement_slug="op", interactive=False
-    )
-    rules = list((target / "rules" / "shared").rglob("*.yaml"))
-    assert len(rules) >= 1
-
-
 def test_init_interactive_refuses_non_tty(tmp_path, monkeypatch, capsys):
     """Audit finding #7: getpass falls back to plain echo on non-TTY (Git Bash, CI).
     run_init(interactive=True) must refuse and return 2 with an ERROR pointing to

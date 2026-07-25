@@ -2,17 +2,16 @@
 
 The lifespan handler is a thin orchestrator over the ``_start_*`` helpers
 in :mod:`redrobin.api.lifespan_helpers`. Each helper owns a single
-startup concern (event bus, rules loader, working memory + reducer,
-engagement scope, verdict pipeline, CS adapters, lesson promoter, L5
-summariser) and returns a close hook. The orchestrator calls them in
-order at startup and tears them down in the original well-tested order
-on shutdown.
+startup concern (event bus, engagement, dedup keys, working memory +
+reducer, enricher, assistant, CS adapters, L5 summariser) and returns a
+close hook. The orchestrator calls them in order at startup and tears
+them down in the original well-tested order on shutdown.
 
 Slice 8 (v0.1.x hardening) was a pure refactor: the body was split out
 of this file without changing any resource creation or shutdown
 sequencing. Slice 10 reordered shutdown so background tasks drain
-BEFORE adapters close (fixes spurious "httpx client closed" errors
-when verdicts dispatched an ALLOW path right before Ctrl+C).
+BEFORE adapters close (fixes spurious "httpx client closed" errors when
+a fire-and-forget dispatch landed right before Ctrl+C).
 """
 
 from __future__ import annotations
@@ -37,9 +36,6 @@ from redrobin.api.lifespan_helpers import (
     start_enricher,
     start_event_bus,
     start_l5_summarizer,
-    start_lesson_promoter,
-    start_pipeline,
-    start_rules,
     start_working_memory,
 )
 from redrobin.api.tui_ws import router as tui_ws_router
@@ -60,9 +56,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     validate_for_boot(settings)
 
     # Phase 2 condition 4 — daemon-wide tracker for fire-and-forget asyncio
-    # tasks (e.g. verdict_pipeline ESCALATE Layer B), which used to leak on
-    # shutdown. The tracker is initialised before any router or pipeline runs
-    # so every callsite can rely on it via ``app.state.background_task_factory``.
+    # tasks, which used to leak on shutdown. The tracker is initialised before
+    # any router runs so every callsite can rely on it via
+    # ``app.state.background_task_factory``.
     background_tasks: set[asyncio.Task[Any]] = set()
     app.state.background_tasks = background_tasks
 
@@ -83,7 +79,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # shutdown so background tasks drain before adapters close — see the
     # ``finally`` block below for the current contract.
     _, close_bus = await start_event_bus(app, settings)
-    _, stop_rules = await start_rules(app, settings)
     await start_engagement(
         app, settings
     )  # no close hook — must run before working_memory so the reducer captures the resolved engagement_id
@@ -93,24 +88,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _, close_wm = await start_working_memory(app, settings)
     _, close_enricher = await start_enricher(app, settings)
     _, close_assistant = await start_assistant(app, settings)
-    _, _close_pipeline = await start_pipeline(app, settings)  # no-op close
     _, close_adapters = await start_adapters(app, settings)
-    _, close_promoter = await start_lesson_promoter(app, settings)
     _, close_summarizer = await start_l5_summarizer(app, settings)
 
     logger.info(
-        "daemon lifespan startup complete: rules_dir=%s rules=%d adapters=%d "
-        "promoter_interval=%.1fs l5_interval=%.1fs",
-        settings.rules_dir,
-        len(app.state.initial_rules),
+        "daemon lifespan startup complete: adapters=%d l5_interval=%.1fs",
         len(app.state.cs_adapters),
-        settings.promoter_interval_sec,
         settings.l5_interval_sec,
     )
 
     # Slice 7 (v0.1.x hardening): structured startup banner. Surfaces the
-    # resolved config (engagement, rules, adapters, secret key set/missing,
-    # L5/promoter tuning) at boot so operators can diagnose "why is it doing
+    # resolved config (engagement, adapters, secret key set/missing, L5
+    # tuning) at boot so operators can diagnose "why is it doing
     # X" without diving into logs. Emitted to stderr so the daemon's stdout
     # remains available for structured JSON output. Secret VALUES never
     # appear — only the literal strings ``set`` / ``MISSING (degraded)``.
@@ -120,7 +109,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         _version = "0.0.0+unknown"
     _banner = format_banner(
         settings=settings,
-        rules_count=len(app.state.rules_loader.list_rules()),
         engagement_name=(app.state.engagement.name if app.state.engagement is not None else None),
         version=_version,
         adapter_names=list(app.state.cs_adapters.keys()),
@@ -128,9 +116,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
     print(_banner, file=sys.stderr, flush=True)
 
+    # Readiness. Every ``start_*`` helper above has returned, so the daemon is
+    # fully wired: bus, engagement, working memory + reducer, enricher,
+    # assistant, adapters, summariser. This flag IS the definition of "ready" —
+    # it replaces the pre-flight gate's definition (the Sigma hot-reload
+    # watchdog being alive), which died with the gate.
+    app.state.ready = True
+
     try:
         yield
     finally:
+        # Stop reporting ready the moment teardown begins — the close hooks
+        # below dismantle the very subsystems readiness asserts are up.
+        app.state.ready = False
         # Slice 10 (v0.1.x hardening): reorder so background tasks drain
         # BEFORE adapters close. The pre-Slice-10 order closed adapters
         # first, which meant a fire-and-forget dispatch scheduled just before
@@ -141,8 +139,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Each close hook is wrapped individually so one bad close doesn't
         # prevent the rest from running — graceful shutdown is best-effort.
         #
-        # 1. Drain tracked fire-and-forget tasks (e.g. pipeline ESCALATE
-        #    Layer B). The 5s timeout balances
+        # 1. Drain tracked fire-and-forget tasks. The 5s timeout balances
         #    "give an in-flight LLM call time to finish" against "don't hang
         #    a CTRL+C shutdown". Stragglers are cancelled and then awaited
         #    briefly so their CancelledError handlers can run before the
@@ -166,14 +163,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await close_adapters()
         except Exception:
             logger.exception("close_adapters failed")
-        # 3. Cancel the promoter + summariser loops. Both run
-        #    independently of the bus and reducer; cancelling them before
-        #    ``bus.close()`` avoids a tail promotion/summarisation racing
-        #    the shutdown.
-        try:
-            await close_promoter()
-        except Exception:
-            logger.exception("close_promoter failed")
+        # 3. Cancel the summariser loop. It runs independently of the bus and
+        #    reducer; cancelling it before ``bus.close()`` avoids a tail
+        #    summarisation racing the shutdown.
         try:
             await close_summarizer()
         except Exception:
@@ -208,11 +200,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await close_dedup()
         except Exception:
             logger.exception("close_dedup failed")
-        # 6. Stop the rules-loader hot-reload watchdog last.
-        try:
-            await stop_rules()
-        except Exception:
-            logger.exception("stop_rules failed")
         logger.info("daemon lifespan shutdown complete")
 
 
@@ -247,8 +234,14 @@ def create_app() -> FastAPI:
 
     @app.get("/v1/readyz")
     async def readyz(request: Request) -> dict[str, str]:
-        loader = getattr(request.app.state, "rules_loader", None)
-        if loader is not None and loader.hot_reload_active:
+        """Readiness probe: has the lifespan startup sequence completed?
+
+        ``app.state.ready`` is set at the end of lifespan startup and cleared
+        the moment shutdown begins, so this reports ``not_ready`` both before
+        boot finishes and during teardown. ``getattr`` covers the app-built-
+        but-lifespan-never-entered case, where the attribute is absent.
+        """
+        if getattr(request.app.state, "ready", False):
             return {"status": "ready"}
         return {"status": "not_ready"}
 

@@ -78,7 +78,7 @@ def build_kb_service() -> KBService | None:
     """Build the shared KB retrieval backend (Voyage embeddings + persisted numpy
     VectorStore at ~/.redrobin/shared/kb-index). Returns None when VOYAGE_API_KEY
     is missing (degraded — the assistant still runs; kb_retrieve reports it's
-    unavailable). Mirrors verdict_pipeline_factory.build_default_dependencies."""
+    unavailable)."""
     try:
         from redrobin.infrastructure.filesystem import redrobin_root
         from redrobin.infrastructure.llm.voyage_client import VoyageClient

@@ -49,10 +49,10 @@ def test_malformed_yaml_falls_back_to_wildcard_scope(isolated_root):
         # .active_engagement); that's acceptable — the contract is "don't
         # crash", not "scrub state".
         assert app.state.engagement is None, (
-            "malformed YAML must yield engagement=None (wildcard scope), not propagate a crash"
+            "malformed YAML must yield engagement=None, not propagate a crash"
         )
-        # Wildcard scope is in_scope=['*'], out_of_scope=[]
-        assert app.state.scope.in_scope == ["*"]
+        # Daemon is still fully booted and serving.
+        assert app.state.ready is True
 
 
 def test_unreadable_yaml_falls_back_to_wildcard_scope(isolated_root):
@@ -68,4 +68,4 @@ def test_unreadable_yaml_falls_back_to_wildcard_scope(isolated_root):
     app = create_app()
     with TestClient(app) as _client:
         assert app.state.engagement is None
-        assert app.state.scope.in_scope == ["*"]
+        assert app.state.ready is True

@@ -2,11 +2,12 @@
 
 Single-mode store backed by a filesystem ``Path`` and a sync ``sqlite3``
 connection. Persists structured ``PromotedLesson`` records keyed by
-``(command, verdict)`` so future LLM judgments can retrieve them from L1.
+``(command, verdict)``, plus the free-form ``Lesson`` rows the assistant's
+``capture_lesson`` tool writes, so both can be retrieved from L1 later.
 
 Phase 1's async SQLAlchemy API (``add``/``list_all`` over the ``facts``
-table) was removed in Slice 9 — production never used it; the lesson
-promoter and Layer B retrieval only call the sync API below.
+table) was removed in Slice 9 — production never used it; every surviving
+caller uses the sync API below.
 """
 
 from __future__ import annotations

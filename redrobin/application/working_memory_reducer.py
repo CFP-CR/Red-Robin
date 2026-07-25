@@ -65,8 +65,8 @@ class WorkingMemoryReducer:
         self._repo = repo
         self._engagement_id = engagement_id
         # Slice 10: optional Episodic store. When provided, every
-        # ``opsec.verdict`` event is appended as an Episode so the
-        # ``LessonPromoter`` has a full audit trail to aggregate over.
+        # ``beacon.command_input`` event is appended as an Episode so the L5
+        # summariser has a full audit trail to compress.
         self._episodic = episodic_repo
         # Optional callback invoked once the reducer has subscribed and is ready
         # to consume events. Tests use this to avoid sleep-based races; production

@@ -7,11 +7,10 @@
   L4 Tradecraft:   technique → bypass → detection graph — SQLite (deferred to v0.2 in v0.1)
   L5 Context:      sliding-window ContextSummary — in-memory + summary.txt
 
-Slice 12 removed the never-used ``Lesson`` (free-form L3 episodic record) and
-``Fact`` (free-form L1 long-term record) dataclasses. The promotion path
-described in spec §4 always emits structured ``PromotedLesson`` rows in v0.1;
-free-form variants will return in v0.2 if/when the LessonPromoter grows a
-free-text branch.
+Slice 12 removed the never-used ``Fact`` (free-form L1 long-term record)
+dataclass. ``PromotedLesson`` remains the structured L1 row shape; the
+automatic promoter that once produced it was retired with the pre-flight
+gate, and the assistant's ``capture_lesson`` tool now writes L1 directly.
 """
 
 from __future__ import annotations
@@ -147,12 +146,11 @@ class WorkingMemory:
 
 @dataclass(frozen=True)
 class Episode:
-    """Raw OPSEC verdict episode — one row per ``opsec.verdict`` event.
+    """Raw episode — one row per ``beacon.command_input`` event.
 
-    Episodes are the audit trail the ``LessonPromoter`` aggregates over: when
-    the same ``(command, verdict)`` pair recurs at or above threshold and the
-    verdict is BLOCK or WARN, a single ``PromotedLesson`` is upserted into
-    the long-term store so future LLM judgments can retrieve it from L1.
+    Episodes are the L3 audit trail of what the operator actually ran. The L5
+    summariser compresses them into rolling context so long engagements stay
+    coherent after recent activity rolls off the in-memory window.
     """
 
     id: int | None  # None until persisted
@@ -169,9 +167,9 @@ class PromotedLesson:
     """L1 long-term record synthesised from recurring episodes.
 
     Structured pattern record keyed by ``(command, verdict)`` and surfaced
-    cross-engagement for future judgments. Produced by ``LessonPromoter``
-    when ``EpisodicRepo`` shows a verdict pattern recurring at or above the
-    configured ``REDROBIN_PROMOTER_MIN_OCCURRENCES`` threshold.
+    cross-engagement. The automatic promoter that once produced these was
+    retired with the pre-flight gate; the shape is retained because
+    :class:`LongtermRepo` still reads and writes existing rows.
     """
 
     id: int | None  # None until persisted

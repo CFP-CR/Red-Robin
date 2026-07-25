@@ -90,7 +90,7 @@ async def test_app_state_has_settings(monkeypatch, tmp_path):
         assert app.state.settings.root == tmp_path
         # Existing app.state attributes still work
         assert app.state.event_bus is not None
-        assert app.state.rules_loader is not None
+        assert app.state.working_memory_repo is not None
 
 
 def test_filesystem_root_reads_from_settings(monkeypatch, tmp_path):
