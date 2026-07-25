@@ -9,9 +9,13 @@ Deletes the synchronous pre-flight gate — the feature Red Robin was born as �
 
 ## §1 Why
 
-**The product moved.** The gate intercepts every beacon command (Layer A Sigma → Layer B LLM judge → a verdict of PASS/WARN/BLOCK/ESCALATE) to permit, warn, or block it. The value today is the **copilot that advises**, not a checker that **stops** the operator. The 2026-07-22 live smoke made this concrete: the gate BLOCKed the operator's own `mimikatz sekurlsa` and left them waiting on a decision they had already made. An advisory assistant that observes everything and speaks in the chat is strictly more useful than a gate that interrupts.
+**The product moved.** The daemon judges every beacon command (Layer A Sigma → Layer B LLM judge → a verdict of PASS/WARN/BLOCK/ESCALATE). The value today is the **copilot that advises**, not a checker that rules on the operator's commands.
 
-**What it costs to keep.** ~1400 lines across eight application modules, two API surfaces, a Sigma rule pack with hot-reload, and the riskiest code in the `.cna` (the `alias` overrides that intercept operator commands). Every one of those is a failure surface on the operator's critical path — the path where a bug means a command doesn't run.
+**And the gate is already toothless — verified in the shipped `.cna` (2026-07-25).** Its five hooks are `set BEACON_OUTPUT`, `on beacon_input`, `on beacon_initial`, `on heartbeat_5s`, `on script_unload`. There is **no `alias` override anywhere**, and `on beacon_input` *only* emits `beacon.command_input` — it never calls the gate. The `redrobin_gate` and `redrobin_query_quick` subs are **dead code: defined, never called**. The only thing a verdict does at the C2 boundary is `heartbeat_5s` printing `[Red Robin] Layer B <verdict>: <reason>` into the beacon console.
+
+This reframes the 2026-07-22 smoke: the operator's `mimikatz sekurlsa` was **never technically blocked**. A `BLOCK` message appeared, the operator read it as a block and stopped. That is a **UX block, not an enforcement one** — which strengthens the case for deletion rather than weakening it: ~1400 lines of judgment whose only real effect is a console message that induces the operator to block themselves, with no way to act on it.
+
+**What it costs to keep.** ~1400 lines across eight application modules, two API surfaces, a Sigma rule pack with hot-reload, and ~90 lines of dead `.cna` code — plus the conceptual weight of a two-tier verdict protocol that every reader of this codebase has to learn before understanding what Red Robin actually does.
 
 ## §2 The one non-obvious dependency
 
@@ -58,7 +62,7 @@ This is a deletion, so the pillars are served by subtraction, not by new abstrac
 
 **Domain:** `opsec.py` entirely (`Verdict` + `VerdictAction`) · `rules.py` entirely (`Rule`, `RuleSeverity`, `EventContext`) · the `OpsecVerdictEvent` type in `events.py` and its `Envelope` severity-serialization branch · `PromotedLesson` · `Episode.verdict` and `Episode.reason`. **`events.Severity` is KEPT** — see the trap in §5.5.
 
-**`.cna`:** `redrobin_gate` · `redrobin_query_quick` · every `alias` override that routes an operator command through the gate · the `events_consumed: ["opsec.verdict"]` handshake declaration · the verdict WebSocket consumer
+**`.cna`** (verified against the shipped file — **there are no `alias` overrides to remove**): the dead `redrobin_gate` and `redrobin_query_quick` subs · the `heartbeat_5s` branch that prints `[Red Robin] Layer B …` verdicts into the beacon console (and the `/v1/adapters/events` polling that feeds it) · the `events_consumed: ["opsec.verdict"]` handshake declaration. **`on beacon_input`, `on beacon_initial`, and `set BEACON_OUTPUT` are NOT touched** — they are the capture path.
 
 **Tests:** the 18 gate test files listed in §8.
 
@@ -172,7 +176,8 @@ Step 3 after step 2 keeps each commit's tests coherent: the fields disappear onl
 
 ## §10 Risks
 
-- **The `.cna` is not CI-testable.** Removing the `alias` overrides is the highest-risk edit in the change: a mistake there breaks the operator's command path — the exact failure the deletion is meant to prevent. Mitigation: the `.cna` is its own task, landed last before docs, and validated by the operator smoke.
+- **The `.cna` is not CI-testable** — but the edit is far smaller than it first appeared. Since `on beacon_input` never calls the gate and no `alias` exists, this is **deleting dead code plus one console-message branch**, not surgery on the operator's command path. The capture hooks are untouched. Mitigation remains: the `.cna` is its own task, landed last before docs, and validated by the operator smoke.
+- **Losing the console message.** Today a WARN/BLOCK verdict prints in the beacon console — the operator's only in-CS signal from Red Robin. After this change the beacon console is silent and everything comes through the TUI chat. That is the intent (one voice, one surface), but it *is* a behavioral change for an operator who works mostly in the CS window, and worth confirming during the smoke.
 - **L5 quality shifts.** Summaries stop mentioning verdict reasons and start narrating commands. Expected and intended, but the operator should eyeball the first few summaries after the change.
 - **Losing the deterministic layer.** Layer A caught known-bad patterns without an LLM; post-change, if the assistant is disabled or degraded, nothing comments on a dangerous command. This is the accepted trade — the operator asked for advisory-only — and it is worth stating plainly rather than discovering later.
 - **`docs/architecture-design.md` becomes substantially historical.** It describes the gate as the product's core. The spec updates it with a status note rather than rewriting it; a full rewrite is its own effort.
