@@ -1,12 +1,11 @@
-"""Slice 14 E2E: redrobin init → daemon boot → verdict round-trip.
+"""Slice 14 E2E: redrobin init → daemon boot.
 
 Exercises the full operator journey through the new ``redrobin init``
 entry point introduced in Slice 5: the init helper writes the on-disk
 layout (``rules/shared``, ``engagements/<slug>/engagement.yaml``,
 ``.env``, sample lazagne rule), the FastAPI lifespan picks it up
-through :class:`Settings`, every startup helper runs end-to-end, the
-verdict route blocks the sample rule, and the startup banner reflects
-the resolved engagement.
+through :class:`Settings`, every startup helper runs end-to-end, and
+the startup banner reflects the resolved engagement.
 
 Migrates the prior Phase-2 manual env-var bootstrap to the new
 init-driven flow — there is now one canonical way to set up a fresh
@@ -103,39 +102,3 @@ def test_init_to_running_daemon_e2e(operator_setup, capfd):
         resp = client.get("/v1/healthz")
         assert resp.status_code == 200
         assert resp.json() == {"status": "ok"}
-
-
-def test_init_to_verdict_e2e(operator_setup):
-    """The sample lazagne rule blocks ``lazagne`` at the verdict endpoint.
-
-    End-to-end path:
-        run_init writes sample-lazagne.yaml
-            → RulesLoader picks it up at lifespan startup
-            → LayerAEngine evaluates it
-            → POST /v1/verdict/quick returns BLOCK with rule_id
-
-    The sample rule has ``severity: DANGER`` (mapped to BLOCK in
-    :data:`SEVERITY_TO_ACTION`) and ``match.command: lazagne``, so a
-    submission whose command field is exactly ``lazagne`` MUST be blocked.
-    """
-    from redrobin.infrastructure.transport.bearer import get_or_create_token
-
-    app = create_app()
-    with TestClient(app) as client:
-        token = get_or_create_token()
-        resp = client.post(
-            "/v1/verdict/quick",
-            json={
-                "source_event_id": "c-e2e-1",
-                "bid": "B-1",
-                "command": "lazagne",
-                "raw": "lazagne all",
-            },
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        assert resp.status_code == 200, resp.text
-        body = resp.json()
-        # severity HIGH → DANGER → BLOCK per SEVERITY_TO_ACTION; this is the
-        # whole point of the sample rule (and confirms init+pipeline wiring).
-        assert body["action"] == "BLOCK", body
-        assert body["rule_id"] == "rule-sample-lazagne"

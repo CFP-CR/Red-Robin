@@ -1,4 +1,4 @@
-"""Parametrized validation of the 11 v0.1 event type schemas + their fixtures."""
+"""Parametrized validation of the 10 v0.1 event type schemas + their fixtures."""
 
 import json
 from pathlib import Path
@@ -19,7 +19,6 @@ EVENT_TYPES = [
     "beacon_command_output",
     "host_observation",
     "credential_observed",
-    "opsec_verdict",
     "operator_question",
     "operator_answer",
     "engagement_milestone",

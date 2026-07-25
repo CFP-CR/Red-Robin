@@ -43,8 +43,6 @@ from redrobin.api.lifespan_helpers import (
     start_working_memory,
 )
 from redrobin.api.tui_ws import router as tui_ws_router
-from redrobin.api.adapter_events_ws import router as adapter_events_ws_router
-from redrobin.api.verdicts_router import router as verdicts_router
 from redrobin.application.config import Settings, validate_for_boot
 from redrobin.application.startup_banner import format_banner
 
@@ -62,10 +60,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     validate_for_boot(settings)
 
     # Phase 2 condition 4 — daemon-wide tracker for fire-and-forget asyncio
-    # tasks. Two production callsites (verdicts_router PASS-dispatch and
-    # verdict_pipeline ESCALATE Layer B) used to leak tasks on shutdown.
-    # The tracker is initialised before any router or pipeline runs so
-    # every callsite can rely on it via ``app.state.background_task_factory``.
+    # tasks (e.g. verdict_pipeline ESCALATE Layer B), which used to leak on
+    # shutdown. The tracker is initialised before any router or pipeline runs
+    # so every callsite can rely on it via ``app.state.background_task_factory``.
     background_tasks: set[asyncio.Task[Any]] = set()
     app.state.background_tasks = background_tasks
 
@@ -136,17 +133,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         # Slice 10 (v0.1.x hardening): reorder so background tasks drain
         # BEFORE adapters close. The pre-Slice-10 order closed adapters
-        # first, which meant a fire-and-forget ``_dispatch_to_cs_adapter()``
-        # scheduled by the verdict route just before shutdown hit a closed
-        # httpx client and surfaced spurious errors in the logs. Now
-        # in-flight dispatches finish (or get cancelled cleanly) while the
-        # CS REST clients are still alive.
+        # first, which meant a fire-and-forget dispatch scheduled just before
+        # shutdown hit a closed httpx client and surfaced spurious errors in
+        # the logs. Now in-flight tasks finish (or get cancelled cleanly)
+        # while the CS REST clients are still alive.
         #
         # Each close hook is wrapped individually so one bad close doesn't
         # prevent the rest from running — graceful shutdown is best-effort.
         #
-        # 1. Drain tracked fire-and-forget tasks (verdicts_router PASS
-        #    dispatch + pipeline ESCALATE Layer B). The 5s timeout balances
+        # 1. Drain tracked fire-and-forget tasks (e.g. pipeline ESCALATE
+        #    Layer B). The 5s timeout balances
         #    "give an in-flight LLM call time to finish" against "don't hang
         #    a CTRL+C shutdown". Stragglers are cancelled and then awaited
         #    briefly so their CancelledError handlers can run before the
@@ -223,10 +219,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     app = FastAPI(title="Red Robin Daemon", version="0.1.0", lifespan=lifespan)
     app.include_router(adapters_router)
-    app.include_router(verdicts_router)
     app.include_router(events_router)
     app.include_router(tui_ws_router)
-    app.include_router(adapter_events_ws_router)
 
     @app.get("/v1/ping")
     async def ping() -> dict[str, bool]:

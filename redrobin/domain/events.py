@@ -88,16 +88,6 @@ class CredentialObservedEvent:
 
 
 @dataclass(frozen=True)
-class OpsecVerdictEvent:
-    source_event_id: str
-    severity: Severity
-    reason: str
-    rule_id: str | None = None
-    suggestions: list[str] = field(default_factory=list)
-    type: Literal["opsec.verdict"] = "opsec.verdict"
-
-
-@dataclass(frozen=True)
 class OperatorQuestionEvent:
     text: str
     context_refs: list[str] = field(default_factory=list)
@@ -133,7 +123,6 @@ EventPayload = Union[
     BeaconCommandOutputEvent,
     HostObservationEvent,
     CredentialObservedEvent,
-    OpsecVerdictEvent,
     OperatorQuestionEvent,
     OperatorAnswerEvent,
     EngagementMilestoneEvent,
@@ -153,9 +142,6 @@ class Envelope:
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["ts"] = self.ts.isoformat()
-        # Serialize Severity enum to string when present (OpsecVerdictEvent)
-        if isinstance(self.event, OpsecVerdictEvent):
-            d["event"]["severity"] = self.event.severity.value
         # Drop None for optional adapter_session_id
         if self.source.adapter_session_id is None:
             d["source"].pop("adapter_session_id", None)
@@ -171,7 +157,4 @@ class Envelope:
             and self.event.correlation_id is None
         ):
             d["event"].pop("correlation_id", None)
-        # Drop None for optional rule_id on verdict events
-        if isinstance(self.event, OpsecVerdictEvent) and self.event.rule_id is None:
-            d["event"].pop("rule_id", None)
         return d
