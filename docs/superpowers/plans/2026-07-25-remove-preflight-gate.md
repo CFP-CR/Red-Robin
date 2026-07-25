@@ -18,7 +18,9 @@ Every task's requirements implicitly include this section. Values copied from th
   - `uv run mypy redrobin/domain redrobin/application`
   - `uv run lint-imports --config importlinter.cfg` → `Contracts: 4 kept, 0 broken.` (run it plainly — do NOT pipe stdout to `/dev/null` on Windows; rich's cp1252 encode raises a spurious `UnicodeEncodeError`)
   - `REDROBIN_ALLOW_DEGRADED=1 uv run pytest tests/ -q`
-- **The suite SHRINKS in this plan.** That is expected: 18 gate test files are deleted with their subjects. Record the count in each task's report. **Never weaken or skip a surviving test to make a deletion pass** — if a surviving test fails, something still depends on what you deleted, and that is a finding to report.
+- **The suite SHRINKS in this plan.** That is expected: 21 gate test files are deleted with their subjects. Record the count in each task's report. **Never weaken or skip a surviving test to make a deletion pass** — if a surviving test fails, something still depends on what you deleted, and that is a finding to report.
+- **`tests/` has FOUR directories, not two:** `tests/unit/`, `tests/integration/`, **`tests/e2e/`**, and `tests/` root helpers. `pytest tests/` runs all of them, so an e2e journey test that exercises the gate will go red in the middle of a deletion task unless that task removes it. Three e2e files are gate-owned and get deleted (Task 4); two more assert gate details and get edited (Tasks 4 and 6). **Do not forget `tests/e2e/`.**
+- **The wire protocol has its own surface under `protocol/`:** JSON Schemas in `protocol/schemas/v0.1/events/` and conformance fixtures in `protocol/fixtures/v0.1/{valid,invalid}/`, walked by `tests/unit/test_event_schemas.py`. `opsec.verdict` has all three, and they go with the event type (Task 2). `validate_event` returns `"no schema registered for event type …"` for an unknown type, so a deleted schema correctly rejects a stale `opsec.verdict` POST rather than crashing.
 - **⚠️ THREE overlapping severity vocabularies — only two go. Delete by symbol and by module, NEVER by string match:**
   | Enum | Values | Home | Fate |
   |---|---|---|---|
@@ -231,7 +233,8 @@ git commit -m "feat(memory): record L3 episodes from beacon.command_input"
 
 **Files:**
 - Delete: `redrobin/api/verdicts_router.py` · `redrobin/api/adapter_events_ws.py`
-- Modify: `redrobin/api/app.py` (drop both router registrations + their imports)
+- Delete (wire protocol surface): `protocol/schemas/v0.1/events/opsec_verdict.schema.json` · `protocol/fixtures/v0.1/valid/opsec_verdict.json` · `protocol/fixtures/v0.1/invalid/opsec_verdict.json`
+- Modify: `redrobin/api/app.py` (drop both router registrations + their imports) · `redrobin/domain/events.py` (delete the `OpsecVerdictEvent` class and its `Envelope` severity-serialization branch) · `tests/unit/test_event_schemas.py` (drop the `"opsec_verdict"` entry from its type list)
 - Delete: `tests/integration/test_verdict_endpoint.py` · `tests/integration/test_verdict_emission.py` · `tests/integration/test_adapter_events_ws.py` · `tests/integration/test_adapter_perms.py`
 
 **Interfaces:**
@@ -251,7 +254,11 @@ Expected: matches only in `redrobin/api/app.py`, the two module files themselves
 git rm redrobin/api/verdicts_router.py redrobin/api/adapter_events_ws.py
 git rm tests/integration/test_verdict_endpoint.py tests/integration/test_verdict_emission.py
 git rm tests/integration/test_adapter_events_ws.py tests/integration/test_adapter_perms.py
+git rm protocol/schemas/v0.1/events/opsec_verdict.schema.json
+git rm protocol/fixtures/v0.1/valid/opsec_verdict.json protocol/fixtures/v0.1/invalid/opsec_verdict.json
 ```
+
+Then drop `"opsec_verdict"` from the event-type list in `tests/unit/test_event_schemas.py` (it walks the schema + fixture set, so leaving the name in with the files gone turns that test red), and delete the `OpsecVerdictEvent` class from `redrobin/domain/events.py` along with the `Envelope.to_dict` branch that serializes its `Severity` field. **Keep the `Severity` enum itself** — the assistant needs it.
 
 - [ ] **Step 3: Remove their registrations from `create_app`**
 
@@ -283,8 +290,8 @@ git commit -m "refactor(gate): delete the verdict HTTP endpoint and the adapter 
 
 **Files:**
 - Delete: `redrobin/application/verdict_pipeline.py` · `redrobin/application/verdict_pipeline_factory.py` · `redrobin/application/lesson_promoter.py`
-- Modify: `redrobin/api/lifespan_helpers.py` (delete `start_pipeline` and `start_lesson_promoter` and their imports) · `redrobin/api/app.py` (drop both from the startup sequence and the shutdown block)
-- Delete: `tests/unit/test_verdict_pipeline.py` · `tests/integration/test_verdict_pipeline_layer_b_beacon_id.py` · `tests/integration/test_verdict_pipeline_layer_b_command.py` · `tests/integration/test_lesson_promotion.py`
+- Modify: `redrobin/api/lifespan_helpers.py` (delete `start_pipeline` and `start_lesson_promoter` and their imports) · `redrobin/api/app.py` (drop both from the startup sequence and the shutdown block) · `redrobin/application/agents/assistant/tools.py` (line ~81 — a comment reads *"Mirrors verdict_pipeline_factory.build_default_dependencies"*; the referent is being deleted, so drop that sentence)
+- Delete: `tests/unit/test_verdict_pipeline.py` · `tests/integration/test_verdict_pipeline_layer_b_beacon_id.py` · `tests/integration/test_verdict_pipeline_layer_b_command.py` · `tests/integration/test_lesson_promotion.py` · **`tests/e2e/test_retroactive_journey.py`** (the whole journey is Layer B's retroactive verdict correction — 28 gate references)
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
@@ -300,6 +307,7 @@ git rm redrobin/application/lesson_promoter.py
 git rm tests/unit/test_verdict_pipeline.py tests/integration/test_lesson_promotion.py
 git rm tests/integration/test_verdict_pipeline_layer_b_beacon_id.py
 git rm tests/integration/test_verdict_pipeline_layer_b_command.py
+git rm tests/e2e/test_retroactive_journey.py
 ```
 
 - [ ] **Step 2: Delete the two lifespan helpers**
@@ -392,7 +400,9 @@ git commit -m "refactor(gate): delete the verdict pipeline, its factory, and the
 - Delete (infrastructure): `redrobin/infrastructure/rules_loader.py`
 - Delete (product data): every YAML under `rules/`
 - Modify: `redrobin/api/lifespan_helpers.py` (delete `start_rules`; drop the `RulesLoader` / `ScopeEnforcer` imports) · `redrobin/api/app.py` (drop `start_rules` from startup and `stop_rules` from shutdown; fix the startup log) · `redrobin/infrastructure/boot_validation.py` (re-word the ANTHROPIC requirement) · `redrobin/cli_helpers/init_cmd.py` (drop the rule-seeding comment/behavior that references `RuleSeverity`)
-- Delete (tests): `tests/unit/test_layer_a_engine.py` · `test_layer_b_engine.py` · `test_layer_b_engine_prompt.py` · `test_domain_rules.py` · `test_rules_loader.py` · `test_scope_enforcer.py` · `tests/integration/test_bootstrap_rules.py` · `test_layer_b_engagement_context.py` · `test_redaction.py` · `test_sigma_extended.py` · `test_engagement_scope.py` · `test_engagement_empty_scope_warn.py`
+- Delete (tests): `tests/unit/test_layer_a_engine.py` · `test_layer_b_engine.py` · `test_layer_b_engine_prompt.py` · `test_domain_rules.py` · `test_rules_loader.py` · `test_scope_enforcer.py` · `tests/integration/test_bootstrap_rules.py` · `test_layer_b_engagement_context.py` · `test_redaction.py` · `test_sigma_extended.py` · `test_engagement_scope.py` · `test_engagement_empty_scope_warn.py` · **`tests/e2e/test_sigma_real_rule_fires.py`** (a real SigmaHQ rule through `/v1/verdict/quick` — 52 gate references) · **`tests/e2e/test_hot_reload_journey.py`** (the rules hot-reload journey — 30 references)
+- Modify (tests): **`tests/e2e/test_init_to_running_daemon.py`** — it asserts the rule-seeding/`rules_dir` part of `redrobin init` (21 gate references). Keep the init→daemon journey; delete only the assertions about seeded rules and the rules directory. **`tests/e2e/test_events_to_memory_journey.py`** and **`tests/e2e/test_memory_journey.py`** each carry a single gate reference — check and update it (they are L3/memory journeys, so if either drives episodes through `opsec.verdict` it must drive them through `beacon.command_input` instead, matching Task 1)
+- Modify: `redrobin/application/agents/summarizer.py` — its module docstring says episodes come from `LayerBEngine`; re-word to `beacon.command_input` (the referent is deleted in this task)
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
@@ -420,6 +430,7 @@ git rm tests/unit/test_rules_loader.py tests/unit/test_scope_enforcer.py
 git rm tests/integration/test_bootstrap_rules.py tests/integration/test_layer_b_engagement_context.py
 git rm tests/integration/test_redaction.py tests/integration/test_sigma_extended.py
 git rm tests/integration/test_engagement_scope.py tests/integration/test_engagement_empty_scope_warn.py
+git rm tests/e2e/test_sigma_real_rule_fires.py tests/e2e/test_hot_reload_journey.py
 ```
 
 - [ ] **Step 3: Delete `start_rules` and the ScopeEnforcer construction**
@@ -699,7 +710,7 @@ git commit -m "refactor(memory): narrow Episode to command activity and prune th
 
 **Files:**
 - Modify: `redrobin/tui/textual_ui/panels.py` (delete `format_verdict`, `apply_verdict`, `verdict_counts`, `VERDICT_COLORS`, `_MAX_EVENTS`; narrow `format_topbar` and `TopBar.update_status`) · `redrobin/tui/textual_ui/app.py` (delete the `events` reactive, `watch_events`, the `opsec.verdict` handler, and the counts argument) · `redrobin/tui/textual_ui/theme.tcss` (delete the four `$verdict-*` tokens)
-- Test: `tests/unit/tui_textual/test_panels.py` (update) · `tests/unit/tui_textual/test_app.py` (update) — plus a new topbar test
+- Test: `tests/unit/tui_textual/test_panels.py` (update) · `tests/unit/tui_textual/test_app.py` (update) · **`tests/e2e/test_tui_daemon_journey.py`** (update — it has 14 gate references, almost certainly asserting the topbar's verdict counters and/or driving an `opsec.verdict` frame; keep the journey, drop those assertions) — plus a new topbar test
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
@@ -962,9 +973,11 @@ Expected: all green; `Contracts: 4 kept, 0 broken.` Record the final test count 
 - [ ] **Step 2: Absence audit**
 
 ```bash
-git grep -n "VerdictAction\|RuleSeverity\|LayerAEngine\|LayerBEngine\|verdict_pipeline\|LessonPromoter\|opsec.verdict\|ScopeEnforcer\|RulesLoader\|Redactor" -- redrobin/ tests/ adapters/
+git grep -n "VerdictAction\|RuleSeverity\|LayerAEngine\|LayerBEngine\|verdict_pipeline\|LessonPromoter\|opsec.verdict\|opsec_verdict\|ScopeEnforcer\|RulesLoader\|Redactor" -- redrobin/ tests/ adapters/ protocol/
 ```
 Expected: **no matches at all.** Any hit is dead code or a missed dependency.
+
+Note this audit covers **`protocol/` too**, and it catches *comments*, not just imports — two docstrings referenced deleted symbols before this plan (`summarizer.py`'s `LayerBEngine`, `tools.py`'s `verdict_pipeline_factory`) and are fixed in Tasks 4 and 3 respectively. If either survives, this step fails.
 
 ```bash
 git grep -n "from redrobin.domain.events import Severity" -- redrobin/
