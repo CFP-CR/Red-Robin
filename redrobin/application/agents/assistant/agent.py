@@ -64,13 +64,14 @@ def build_push_context(
     wm_snapshot: dict[str, Any],
     l5_summary: str,
     trigger_command: str,
+    chat_history: str = "",
     wm_max_items: int = _DEFAULT_WM_MAX_ITEMS,
     proactive: bool = False,
 ) -> str:
     """Assemble the small, token-bounded PUSH working-set: L2 (current working
-    memory) + L5 (story so far) + the trigger framing. Reactive framing names the
-    command just run; proactive framing (``proactive=True``) asks for a
-    watch-your-back scan of the accumulated state (no command was run). The L2
+    memory) + L5 (story so far) + the chat thread + the trigger framing. Reactive
+    framing names the command just run; proactive framing (``proactive=True``) asks
+    for a watch-your-back scan of the accumulated state (no command was run). The L2
     snapshot is capped to the most-recent ``wm_max_items`` per category
     (context-rot guard, spec §6.B refinement 2). Non-mutating."""
     capped = cap_wm_snapshot(wm_snapshot, wm_max_items)
@@ -81,6 +82,9 @@ def build_push_context(
         "",
         "# Story so far (L5)",
         l5_summary or "(no summary yet)",
+        "",
+        "# Conversation so far",
+        chat_history or "(no conversation yet)",
         "",
     ]
     if proactive:
@@ -169,6 +173,7 @@ async def run_cycle(
     l5_summary: str,
     trigger_command: str,
     correlation_id: str | None,
+    chat_history: str = "",
     max_tokens: int = 2048,
     wm_max_items: int = _DEFAULT_WM_MAX_ITEMS,
     proactive: bool = False,
@@ -182,6 +187,7 @@ async def run_cycle(
             wm_snapshot=wm_snapshot,
             l5_summary=l5_summary,
             trigger_command=trigger_command,
+            chat_history=chat_history,
             wm_max_items=wm_max_items,
             proactive=proactive,
         ),
@@ -219,11 +225,13 @@ def build_answer_context(
     wm_snapshot: dict[str, Any],
     l5_summary: str,
     question: str,
+    chat_history: str = "",
     wm_max_items: int = _DEFAULT_WM_MAX_ITEMS,
 ) -> str:
     """Assemble the conversational PUSH context: L2 (current working memory) + L5
-    (story so far) + the operator's question. The L2 snapshot is capped to the
-    most-recent ``wm_max_items`` per category (context-rot guard). Non-mutating."""
+    (story so far) + the chat thread + the operator's question. The L2 snapshot is
+    capped to the most-recent ``wm_max_items`` per category (context-rot guard).
+    Non-mutating."""
     capped = cap_wm_snapshot(wm_snapshot, wm_max_items)
     return "\n".join(
         [
@@ -232,6 +240,9 @@ def build_answer_context(
             "",
             "# Story so far (L5)",
             l5_summary or "(no summary yet)",
+            "",
+            "# Conversation so far",
+            chat_history or "(no conversation yet)",
             "",
             "# The operator says",
             question or "(empty)",
@@ -248,6 +259,7 @@ async def run_answer_cycle(
     wm_snapshot: dict[str, Any],
     l5_summary: str,
     question: str,
+    chat_history: str = "",
     max_tokens: int = 2048,
     wm_max_items: int = _DEFAULT_WM_MAX_ITEMS,
 ) -> ParsedAnswer | None:
@@ -259,6 +271,7 @@ async def run_answer_cycle(
             wm_snapshot=wm_snapshot,
             l5_summary=l5_summary,
             question=question,
+            chat_history=chat_history,
             wm_max_items=wm_max_items,
         ),
         tools=tools,
