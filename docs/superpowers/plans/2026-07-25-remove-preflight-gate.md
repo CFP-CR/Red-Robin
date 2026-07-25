@@ -234,8 +234,14 @@ git commit -m "feat(memory): record L3 episodes from beacon.command_input"
 **Files:**
 - Delete: `redrobin/api/verdicts_router.py` · `redrobin/api/adapter_events_ws.py`
 - Delete (wire protocol surface): `protocol/schemas/v0.1/events/opsec_verdict.schema.json` · `protocol/fixtures/v0.1/valid/opsec_verdict.json` · `protocol/fixtures/v0.1/invalid/opsec_verdict.json`
-- Modify: `redrobin/api/app.py` (drop both router registrations + their imports) · `redrobin/domain/events.py` (delete the `OpsecVerdictEvent` class and its `Envelope` severity-serialization branch) · `tests/unit/test_event_schemas.py` (drop the `"opsec_verdict"` entry from its type list)
-- Delete: `tests/integration/test_verdict_endpoint.py` · `tests/integration/test_verdict_emission.py` · `tests/integration/test_adapter_events_ws.py` · `tests/integration/test_adapter_perms.py`
+- Modify: `redrobin/api/app.py` (drop both router registrations + their imports) · `redrobin/domain/events.py` (delete the `OpsecVerdictEvent` class and its `Envelope` severity-serialization branch — **keep the `Severity` enum**) · `tests/unit/test_event_schemas.py` (drop the `"opsec_verdict"` entry) · `protocol/schemas/v0.1/envelope.schema.json` (drop `"opsec.verdict"` from its event-type enum, ~line 49) · `tests/unit/test_domain_events.py` (drop the `OpsecVerdictEvent` import and the test that uses it — **keep `test_opsec_verdict_severity_enum`'s `Severity` assertions**, which is why this file is EDITED, not deleted)
+- Delete: `tests/integration/test_verdict_endpoint.py` · `tests/integration/test_verdict_emission.py` · `tests/integration/test_adapter_events_ws.py` · **`tests/e2e/test_sigma_real_rule_fires.py`** · **`tests/e2e/test_hot_reload_journey.py`** (both moved here from Task 4 — every test in them drives the route, so they cannot outlive it)
+- **Surgically remove the gate tests from these MIXED files** (each also holds surviving coverage — delete the individual test functions that POST to the route, nothing else): `tests/integration/test_e2e_path1.py` (4 route calls / 5 tests) · `tests/integration/test_cs_adapter_dispatch.py` (2 / 8) · `tests/integration/test_background_task_tracker.py` (1 / 4) · `tests/e2e/test_init_to_running_daemon.py` (2 / 2) · `tests/e2e/test_tui_daemon_journey.py` (2 / 1)
+- **DO NOT DELETE `tests/integration/test_adapter_perms.py`.** It is *"Slice 4: adapter credential file permissions"* — it covers `cs_adapter_loader` credential-file permissions and password redaction for a module that survives. It was listed here by mistake (name collision with `test_adapter_events_ws.py`); deleting it would drop real security coverage.
+
+**Root cause this task corrects (found empirically during the first attempt):** the plan's top-down deletion order tracks the *import* graph, but tests reach the gate over **HTTP**. Every test that POSTs `/v1/verdict/quick` breaks the moment the route is deleted, regardless of imports — so **the route must be deleted together with all eight of its callers, wherever they live**. Tasks 4 and 6 still handle those same files' *non-route* gate coupling (Sigma rules, `rules_dir` assertions, topbar counters).
+
+**Note (product behavior):** deleting `verdicts_router.py` also removes the PASS→CS console-command dispatch (Slice 9). That is intended — nothing dispatches to the C2 anymore.
 
 **Interfaces:**
 - Consumes: nothing from Task 1.
@@ -253,7 +259,8 @@ Expected: matches only in `redrobin/api/app.py`, the two module files themselves
 ```bash
 git rm redrobin/api/verdicts_router.py redrobin/api/adapter_events_ws.py
 git rm tests/integration/test_verdict_endpoint.py tests/integration/test_verdict_emission.py
-git rm tests/integration/test_adapter_events_ws.py tests/integration/test_adapter_perms.py
+git rm tests/integration/test_adapter_events_ws.py
+git rm tests/e2e/test_sigma_real_rule_fires.py tests/e2e/test_hot_reload_journey.py
 git rm protocol/schemas/v0.1/events/opsec_verdict.schema.json
 git rm protocol/fixtures/v0.1/valid/opsec_verdict.json protocol/fixtures/v0.1/invalid/opsec_verdict.json
 ```
