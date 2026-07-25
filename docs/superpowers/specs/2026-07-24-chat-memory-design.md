@@ -14,7 +14,22 @@ Two gaps, one root cause: **the conversation is nowhere.**
 - **No conversational memory.** `build_answer_context` (`agents/assistant/agent.py`) assembles **L2** (working-memory snapshot) + **L5** (story so far) + **the current question** — and nothing else. Every question is answered in isolation, so a follow-up like *"hacé el paso 1"* after *"what's my path to DA?"* has no referent. The assistant also cannot know what it already advised, so it can re-suggest something the operator already rejected.
 - **No persistence.** The chat lives only in the TUI's `RichLog` scrollback (client-side, ephemeral). Restarting the TUI clears it (known #28 limitation); nothing on the daemon side records what was said. The conversation is therefore invisible to any other tooling and lost to the engagement record.
 
-Distinct from what already exists: **L5** summarizes *beacon activity*, and **Lessons** capture *durable corrections*. Neither is the session thread. The chat is a **new, third layer** — mirroring Claude Code's separation of *transcript* (the conversation) from *CLAUDE.md* (persistent instructions) and *MEMORY.md* (auto-learned facts).
+### §1.1 Where the chat sits relative to the memory layers
+
+The canonical 5-layer memory system (`docs/architecture-design.md` §Componente 3) and what the assistant is actually wired to today — verified against the code, 2026-07-24:
+
+| Layer | Storage | Assistant access |
+|---|---|---|
+| **L1 Long-term** | `shared/longterm.db` (+ kb-index) | ✅ PULL — `kb_retrieve` + `get_lessons` |
+| **L2 Working Memory** | `engagements/<slug>/working_memory.json` | ✅ PUSH — in every cycle's context (hydrated at boot since #30) |
+| **L3 Episodic** | `engagements/<slug>/episodic.db` | ⚠️ indirect — the L5 summarizer reads episodes; `LessonPromoter` promotes L3→L1. Never read directly. |
+| **L4 Tradecraft Graph** | `shared/tradecraft.db` | ❌ **not built** (deferred to v0.2 per the arch doc). No graph, repo, or queries exist. |
+| **L5 Context Management** | `engagements/<slug>/summary.txt` | ✅ PUSH — `l5_summary` via `summary_reader` |
+| *(Operational Journal — outside the 5)* | `engagements/<slug>/events.jsonl` | ✅ PULL — `search_journal` |
+
+**The chat is none of these.** L2 is *state*, L5 summarizes *beacon activity*, L3/L1 hold *durable lessons*, the Journal is the *verbatim command transcript*. None of them records the operator↔assistant dialogue. The chat is therefore a **new, distinct layer** — mirroring Claude Code's separation of the *transcript* (the conversation) from *CLAUDE.md* (persistent instructions) and *MEMORY.md* (auto-learned facts).
+
+This spec does **not** touch L1–L5; it adds a sibling. L4's absence is a pre-existing gap, out of scope here.
 
 ## §2 Goal
 
@@ -202,6 +217,65 @@ Microsecond-precision timestamps make ties effectively impossible; Python's stab
 - No turn text appears in any log line.
 - Both Settings are honoured.
 - **5 CI gates green.** Acceptance is **deterministic** (unit + integration) per `development-workflow.md` §5 — no live surface changes, so no operator smoke is required. A live check is nonetheless *useful* (ask a follow-up question and see it answered in context); it is not the gate.
+
+## §7.1 Expected result (concrete examples)
+
+**1. Following a reference in the thread** — the case that motivated the feature.
+
+```
+You        what's my path to DA?
+Red Robin  Kerberoast svc_sql, crack offline, then use the hash on SQL01.
+You        hacé el paso 1
+```
+*Today:* "Paso 1 of what? I have no prior conversation context."
+*After:* it resolves "paso 1" to the `svc_sql` kerberoast and answers the how.
+
+**2. Surviving a daemon restart** — observed repeatedly during the 2026-07-22/23 smoke.
+
+```
+You        no uses mimikatz, es muy ruidoso
+[daemon restart]
+You        cómo dumpeo creds?
+```
+*Today:* the thread is gone; it may propose mimikatz again.
+*After:* the reader reads from disk, so the earlier pushback is still in context.
+
+**3. The anti-dilution guarantee** (§6).
+
+```
+turn 1      You   what's my path to DA?
+turns 3-22        (20 advisories fired by beacon commands)
+turn 23     You   dale, seguí con eso
+```
+With a naive "last 20 turns", turn 1 is evicted and "eso" has no referent. With the two windows, turn 1 is still present (dialogue has its own quota).
+
+**4. On disk — inspectable** (`~/.redrobin/engagements/<slug>/chat_history.jsonl`):
+
+```json
+{"ts":"2026-07-24T05:31:12.441Z","role":"operator","kind":"question","text":"what's my path to DA?"}
+{"ts":"2026-07-24T05:31:20.118Z","role":"assistant","kind":"answer","text":"Kerberoast svc_sql…"}
+{"ts":"2026-07-24T05:33:02.905Z","role":"assistant","kind":"advisory","text":"Validate svc_reports…","correlation_id":"B-7:type db_backup.config"}
+```
+
+Readable by any tooling (and by an agent assisting the operator), and it doubles as the engagement's conversation record for the debrief.
+
+**5. What the model receives** — one new section beside L2/L5:
+
+```
+# Conversation so far
+[operator] what's my path to DA?
+[assistant] Kerberoast svc_sql, then crack offline…
+[assistant · advisory] Validate svc_reports against SQL01
+why    a quiet bind beats a loud dump
+opsec  WARN
+conf   high cred, unsure scope
+```
+
+### Calibration — what is and isn't guaranteed
+
+The DoD's guarantees are **deterministic**: the selected turns reach the prompt, the file persists across restarts, the windows hold, nothing crashes, no turn text is logged. Whether the model *exploits* that context well (not repeating itself, following the referent) is **LLM behavior** — far more likely with the thread present, but not a binary guarantee. The tests therefore assert *"the history reached the prompt"*, never *"the answer was good"*.
+
+**Unchanged by this feature:** the TUI scrollback still clears on TUI restart (replay is a follow-up this spec enables but does not implement); the gate, enricher, and wire protocol are untouched.
 
 ## §8 Test strategy
 
