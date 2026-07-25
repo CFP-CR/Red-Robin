@@ -64,13 +64,14 @@ def build_push_context(
     wm_snapshot: dict[str, Any],
     l5_summary: str,
     trigger_command: str,
+    chat_history: str = "",
     wm_max_items: int = _DEFAULT_WM_MAX_ITEMS,
     proactive: bool = False,
 ) -> str:
     """Assemble the small, token-bounded PUSH working-set: L2 (current working
-    memory) + L5 (story so far) + the trigger framing. Reactive framing names the
-    command just run; proactive framing (``proactive=True``) asks for a
-    watch-your-back scan of the accumulated state (no command was run). The L2
+    memory) + L5 (story so far) + the chat thread + the trigger framing. Reactive
+    framing names the command just run; proactive framing (``proactive=True``) asks
+    for a watch-your-back scan of the accumulated state (no command was run). The L2
     snapshot is capped to the most-recent ``wm_max_items`` per category
     (context-rot guard, spec §6.B refinement 2). Non-mutating."""
     capped = cap_wm_snapshot(wm_snapshot, wm_max_items)
@@ -81,6 +82,9 @@ def build_push_context(
         "",
         "# Story so far (L5)",
         l5_summary or "(no summary yet)",
+        "",
+        "# Conversation so far",
+        chat_history or "(no conversation yet)",
         "",
     ]
     if proactive:
@@ -169,6 +173,7 @@ async def run_cycle(
     l5_summary: str,
     trigger_command: str,
     correlation_id: str | None,
+    chat_history: str = "",
     max_tokens: int = 2048,
     wm_max_items: int = _DEFAULT_WM_MAX_ITEMS,
     proactive: bool = False,
@@ -182,6 +187,7 @@ async def run_cycle(
             wm_snapshot=wm_snapshot,
             l5_summary=l5_summary,
             trigger_command=trigger_command,
+            chat_history=chat_history,
             wm_max_items=wm_max_items,
             proactive=proactive,
         ),
@@ -219,11 +225,21 @@ def build_answer_context(
     wm_snapshot: dict[str, Any],
     l5_summary: str,
     question: str,
+    chat_history: str = "",
     wm_max_items: int = _DEFAULT_WM_MAX_ITEMS,
 ) -> str:
     """Assemble the conversational PUSH context: L2 (current working memory) + L5
-    (story so far) + the operator's question. The L2 snapshot is capped to the
-    most-recent ``wm_max_items`` per category (context-rot guard). Non-mutating."""
+    (story so far) + the chat thread + the operator's question. The L2 snapshot is
+    capped to the most-recent ``wm_max_items`` per category (context-rot guard).
+    Non-mutating.
+
+    ACCEPTED redundancy: the ChatRecorder subscribes to the bus BEFORE the Assistant and
+    its append is synchronous, so the operator's CURRENT question is essentially always
+    already in the transcript when this reads it — it therefore appears twice, once in the
+    thread and once under "The operator says". That is token noise the model handles
+    fine. Do NOT "fix" it by reordering the subscriptions: that would race the recorder
+    against the answer cycle and risk losing turns, which is a far worse cure.
+    """
     capped = cap_wm_snapshot(wm_snapshot, wm_max_items)
     return "\n".join(
         [
@@ -233,6 +249,11 @@ def build_answer_context(
             "# Story so far (L5)",
             l5_summary or "(no summary yet)",
             "",
+            "# Conversation so far",
+            chat_history or "(no conversation yet)",
+            "",
+            # The current question, restated for prominence (see the docstring's note on
+            # the deliberate duplication with the thread above).
             "# The operator says",
             question or "(empty)",
             "",
@@ -248,6 +269,7 @@ async def run_answer_cycle(
     wm_snapshot: dict[str, Any],
     l5_summary: str,
     question: str,
+    chat_history: str = "",
     max_tokens: int = 2048,
     wm_max_items: int = _DEFAULT_WM_MAX_ITEMS,
 ) -> ParsedAnswer | None:
@@ -259,6 +281,7 @@ async def run_answer_cycle(
             wm_snapshot=wm_snapshot,
             l5_summary=l5_summary,
             question=question,
+            chat_history=chat_history,
             wm_max_items=wm_max_items,
         ),
         tools=tools,

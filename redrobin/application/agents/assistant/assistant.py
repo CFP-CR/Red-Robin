@@ -50,6 +50,7 @@ class Assistant:
         trigger: TriggerGate,
         summary_reader: Callable[[], str],
         snapshot_reader: Callable[[], dict[str, Any]] | None = None,
+        history_reader: Callable[[], str] | None = None,
         enabled: bool = True,
         max_tokens: int = 2048,
         wm_max_items: int = 20,
@@ -65,6 +66,7 @@ class Assistant:
         self._trigger = trigger
         self._summary_reader = summary_reader
         self._snapshot_reader = snapshot_reader
+        self._history_reader = history_reader
         self._enabled = enabled
         self._max_tokens = max_tokens
         self._wm_max_items = wm_max_items
@@ -95,6 +97,19 @@ class Assistant:
             return
         if isinstance(seed, dict):
             self._wm_snapshot = seed
+
+    def _read_history(self) -> str:
+        """The chat slice for this cycle (empty when the feature is unwired).
+
+        Never raises: a failing reader degrades to no conversation context rather than
+        breaking the cycle — the same contract as summary_reader."""
+        if self._history_reader is None:
+            return ""
+        try:
+            return self._history_reader()
+        except Exception:
+            logger.exception("assistant: history_reader failed; proceeding without chat history")
+            return ""
 
     async def run(self) -> None:
         sub = await self._bus.subscribe()
@@ -205,6 +220,7 @@ class Assistant:
                 l5_summary=l5_summary,
                 trigger_command=trigger_command,
                 correlation_id=trigger_key,
+                chat_history=self._read_history(),
                 max_tokens=self._max_tokens,
                 wm_max_items=self._wm_max_items,
             )
@@ -240,6 +256,7 @@ class Assistant:
                 wm_snapshot=self._wm_snapshot,
                 l5_summary=l5_summary,
                 question=question,
+                chat_history=self._read_history(),
                 max_tokens=self._max_tokens,
                 wm_max_items=self._wm_max_items,
             )
@@ -399,6 +416,7 @@ class Assistant:
                 l5_summary=l5_summary,
                 trigger_command="",
                 correlation_id=None,
+                chat_history=self._read_history(),
                 max_tokens=self._max_tokens,
                 wm_max_items=self._wm_max_items,
                 proactive=True,

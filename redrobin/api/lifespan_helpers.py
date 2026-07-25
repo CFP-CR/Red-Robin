@@ -38,6 +38,9 @@ from redrobin.application.agents.assistant.tools import (
 from redrobin.application.agents.assistant.triggers import TriggerGate
 from redrobin.application.agents.enricher.enricher import WorkingMemoryEnricher
 from redrobin.application.agents.enricher.llm import build_enricher_llm
+from redrobin.application.chat import ChatHistoryRepo
+from redrobin.application.chat.history import build_history_reader
+from redrobin.application.chat.recorder import ChatRecorder
 from redrobin.application.engagement_loader import Engagement, EngagementLoader
 from redrobin.application.engagement_service import EngagementService
 from redrobin.application.event_bus import EventBus
@@ -592,6 +595,31 @@ async def start_assistant(app: FastAPI, settings: Settings) -> tuple[Assistant, 
     lesson_store = getattr(
         app.state, "longterm_repo", None
     )  # set by start_working_memory, runs earlier
+
+    # Chat transcript (spec 2026-07-24). Gated on assistant_enabled like kb/journal: with
+    # the assistant off there is no stream to record. The path reuses the engagement
+    # directory start_working_memory already resolved (it also handles the degraded
+    # no-engagement fallback), so the resolution logic is not duplicated here.
+    history_reader: Callable[[], str] | None = None
+    chat_task: asyncio.Task[None] | None = None
+    if settings.assistant_enabled:
+        wm_repo = getattr(app.state, "working_memory_repo", None)
+        if wm_repo is not None:
+            chat_repo = ChatHistoryRepo(wm_repo.path.parent / "chat_history.jsonl")
+            app.state.chat_history_repo = chat_repo
+            history_reader = build_history_reader(
+                chat_repo,
+                dialogue_max=settings.assistant_chat_dialogue_turns,
+                volunteered_max=settings.assistant_chat_advisory_turns,
+            )
+            chat_recorder = ChatRecorder(bus=app.state.event_bus, repo=chat_repo)
+            chat_started = asyncio.Event()
+            chat_recorder.on_started = chat_started.set
+            chat_task = asyncio.create_task(chat_recorder.run(), name="chat-recorder")
+            await chat_started.wait()
+            app.state.chat_recorder = chat_recorder
+            app.state.chat_recorder_task = chat_task
+
     assistant = Assistant(
         bus=app.state.event_bus,
         llm=build_agent_llm(model=settings.assistant_model),
@@ -604,6 +632,7 @@ async def start_assistant(app: FastAPI, settings: Settings) -> tuple[Assistant, 
         trigger=TriggerGate(cooldown_sec=settings.assistant_cooldown_sec),
         summary_reader=_read_summary,
         snapshot_reader=_read_wm_snapshot,
+        history_reader=history_reader,
         enabled=settings.assistant_enabled,
         max_tokens=settings.assistant_max_tokens,
         wm_max_items=settings.assistant_wm_max_items,
@@ -620,10 +649,23 @@ async def start_assistant(app: FastAPI, settings: Settings) -> tuple[Assistant, 
     app.state.assistant_task = assistant_task
 
     async def close() -> None:
-        try:
-            await asyncio.wait_for(assistant_task, timeout=2.0)
-        except asyncio.TimeoutError:
-            assistant_task.cancel()
+        # Both tasks exit on the bus ``_close`` sentinel, which app.py broadcasts BEFORE
+        # calling this hook, so normally both are already draining and this returns at
+        # once. They are awaited CONCURRENTLY under a SINGLE timeout so that a wedged
+        # task bounds the shutdown stall at 2 s total, not 2 s per task.
+        pending_tasks = [t for t in (assistant_task, chat_task) if t is not None]
+        done, pending = await asyncio.wait(pending_tasks, timeout=2.0)
+        # ``asyncio.wait`` does NOT retrieve exceptions from the done set (unlike the
+        # ``wait_for`` this replaced, which re-raised into app.py's "close_assistant
+        # failed" log). ``Assistant.run`` guards per-event exceptions, so a crash at the
+        # LOOP level surfaces here and nowhere else — retrieve it explicitly.
+        for task in done:
+            if not task.cancelled() and task.exception() is not None:
+                logger.error(
+                    "assistant/chat task ended with an exception", exc_info=task.exception()
+                )
+        for task in pending:
+            task.cancel()
 
     return assistant, close
 
