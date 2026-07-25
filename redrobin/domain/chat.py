@@ -21,7 +21,8 @@ class ChatTurn:
     ``ts`` is an ISO-8601 UTC timestamp with microsecond precision (so ordering ties are
     practically impossible). Ordering is a lexicographic sort of that string, which is
     chronological ONLY while every ts carries the same UTC offset — guaranteed by the
-    single-writer invariant (``ChatRecorder`` always stamps ``datetime.now(timezone.utc)``).
+    single-writer invariant (``ChatRecorder`` normalises its clock with
+    ``.astimezone(timezone.utc)`` before stamping, whatever clock it was given).
     ``role`` is ``"operator"`` or ``"assistant"``;
     ``kind`` is one of the five values in the two frozensets below.
     ``correlation_id`` carries the reactive trigger handle (``"<beacon>:<command>"``)

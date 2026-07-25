@@ -130,7 +130,9 @@ async def test_cycle_survives_a_raising_history_reader():
 
 
 @pytest.mark.asyncio
-async def test_no_history_reader_keeps_prior_behaviour():
+async def test_no_history_reader_emits_the_placeholder():
+    # NOT "prior behaviour": before this feature the prompt had no conversation section at
+    # all. With no reader wired the section is still emitted, carrying the placeholder.
     bus = EventBus()
     llm = _CapturingLLM()
     a = _assistant(bus, llm, history_reader=None)

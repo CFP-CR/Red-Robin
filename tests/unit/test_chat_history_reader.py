@@ -1,8 +1,14 @@
 from __future__ import annotations
 
-from redrobin.application.chat.history import build_history_reader, render_turns
+import json
+import logging
+
+from redrobin.application.chat.history import _MAX_TURN_CHARS, build_history_reader, render_turns
 from redrobin.domain.chat import ChatTurn
-from redrobin.infrastructure.persistence.chat_history_repo import ChatHistoryRepo
+from redrobin.infrastructure.persistence.chat_history_repo import (
+    _MAX_TAIL_LINES,
+    ChatHistoryRepo,
+)
 
 
 def _turn(n: int, kind: str, role: str, text: str) -> ChatTurn:
@@ -26,6 +32,21 @@ def test_render_labels_roles_and_marks_volunteered_kinds():
 
 def test_render_empty_is_empty_string():
     assert render_turns([]) == ""
+
+
+def test_render_truncates_a_long_turn_and_leaves_a_short_one_alone():
+    # The selector bounds turn COUNT only; one turn can be an 8 KB answer or an arbitrary
+    # paste, so the byte size of the injected slice has to be bounded per turn too.
+    long_text = "A" * (_MAX_TURN_CHARS + 500)
+    out = render_turns([_turn(1, "question", "operator", long_text)])
+    assert "…[truncated]" in out
+    assert out.count("A") == _MAX_TURN_CHARS
+    assert len(out) < len(long_text)
+
+    short = "B" * _MAX_TURN_CHARS  # exactly at the cap — untouched
+    out = render_turns([_turn(2, "answer", "assistant", short)])
+    assert out == f"[assistant] {short}"
+    assert "…[truncated]" not in out
 
 
 def test_reader_returns_rendered_selection(tmp_path):
@@ -56,6 +77,43 @@ def test_reader_applies_the_two_windows(tmp_path):
 def test_reader_returns_empty_string_when_there_is_no_history(tmp_path):
     repo = ChatHistoryRepo(tmp_path / "chat_history.jsonl")
     assert build_history_reader(repo, dialogue_max=10, volunteered_max=5)() == ""
+
+
+def test_reader_logs_a_debug_line_when_the_tail_is_saturated(tmp_path, caplog):
+    # The read cap bounds the SELECTION too: a tail made entirely of volunteered turns
+    # starves the dialogue quota even though dialogue exists earlier in the file. Rare, but
+    # silent — so it must at least be diagnosable. Written directly (no per-turn append) to
+    # keep the test cheap.
+    path = tmp_path / "chat_history.jsonl"
+    lines = [
+        json.dumps(
+            {
+                "ts": "2026-07-24T05:00:00.000000+00:00",
+                "role": "operator",
+                "kind": "question",
+                "text": "SECRET-PASSWORD",
+            }
+        )
+    ]
+    lines += [
+        json.dumps(
+            {
+                "ts": f"2026-07-24T06:00:00.{n:06d}+00:00",
+                "role": "assistant",
+                "kind": "advisory",
+                "text": f"adv{n}",
+            }
+        )
+        for n in range(_MAX_TAIL_LINES)
+    ]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    read = build_history_reader(ChatHistoryRepo(path), dialogue_max=10, volunteered_max=2)
+    with caplog.at_level(logging.DEBUG):
+        out = read()
+    assert "SECRET-PASSWORD" not in out  # the old question fell outside the read window
+    assert "tail cap hit" in caplog.text
+    assert "SECRET-PASSWORD" not in caplog.text  # counts only — never a turn's text
 
 
 def test_reader_returns_empty_string_when_the_repo_raises(tmp_path):

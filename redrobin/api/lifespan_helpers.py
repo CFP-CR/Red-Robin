@@ -654,7 +654,16 @@ async def start_assistant(app: FastAPI, settings: Settings) -> tuple[Assistant, 
         # once. They are awaited CONCURRENTLY under a SINGLE timeout so that a wedged
         # task bounds the shutdown stall at 2 s total, not 2 s per task.
         pending_tasks = [t for t in (assistant_task, chat_task) if t is not None]
-        _, pending = await asyncio.wait(pending_tasks, timeout=2.0)
+        done, pending = await asyncio.wait(pending_tasks, timeout=2.0)
+        # ``asyncio.wait`` does NOT retrieve exceptions from the done set (unlike the
+        # ``wait_for`` this replaced, which re-raised into app.py's "close_assistant
+        # failed" log). ``Assistant.run`` guards per-event exceptions, so a crash at the
+        # LOOP level surfaces here and nowhere else — retrieve it explicitly.
+        for task in done:
+            if not task.cancelled() and task.exception() is not None:
+                logger.error(
+                    "assistant/chat task ended with an exception", exc_info=task.exception()
+                )
         for task in pending:
             task.cancel()
 

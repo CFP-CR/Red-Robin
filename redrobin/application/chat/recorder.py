@@ -53,7 +53,9 @@ def turn_for(event_type: str, payload: dict[str, Any], *, ts: str) -> ChatTurn |
     can never disagree. Pure; never raises.
     """
     from_operator = payload.get("source") == "operator"
-    text = str(payload.get("text") or "")
+    # Stripped at extraction: a whitespace-only message is not a turn, and letting one
+    # through would burn a slot of the dialogue quota on nothing.
+    text = str(payload.get("text") or "").strip()
 
     if event_type == "operator.question":
         if from_operator:
@@ -69,9 +71,12 @@ def turn_for(event_type: str, payload: dict[str, Any], *, ts: str) -> ChatTurn |
         return ChatTurn(ts=ts, role=role, kind="answer", text=text)
 
     if event_type == "advisor.recommendation":
-        body = advisory_text(payload)
-        if not body.strip():
+        # Guard on the ACTION, not the composed body: with an empty suggested_action the
+        # body can still be non-empty (rationale/opsec/conf compose into "why  x"), which
+        # would record an advisory that advises nothing.
+        if not str(payload.get("suggested_action") or "").strip():
             return None
+        body = advisory_text(payload)
         correlation_id = payload.get("correlation_id")
         return ChatTurn(
             ts=ts,
@@ -124,7 +129,13 @@ class ChatRecorder:
             turn = turn_for(
                 str(evt.get("type") or ""),
                 payload if isinstance(payload, dict) else {},
-                ts=self._now().isoformat(),
+                # Normalised to UTC so the ORDERING CONTRACT is structural: ts is sorted
+                # lexicographically, which is only chronological while every stamp carries
+                # the same offset. The default clock is already UTC; this keeps a future
+                # injected clock (naive or offset-carrying) from breaking the sort. Note a
+                # naive datetime is assumed to be LOCAL time here — astimezone's documented
+                # behaviour, and still a uniform +00:00 offset on the wire.
+                ts=self._now().astimezone(timezone.utc).isoformat(),
             )
             if turn is None:
                 return

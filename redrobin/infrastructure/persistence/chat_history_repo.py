@@ -22,9 +22,17 @@ from redrobin.domain.chat import ChatTurn
 
 logger = logging.getLogger(__name__)
 
-# Memory safety valve for a pathologically long log. The two context windows the
-# selector applies are far smaller, so this only bounds the read, never the selection.
-_MAX_TAIL_LINES = 500
+# Memory safety valve for a pathologically long log: the read is O(max_lines), never
+# O(file) (~400 KB worst case at this value).
+#
+# It bounds the READ, and through it the selection: the selector only ever sees these last
+# lines, so a tail SATURATED with one kind starves the other window's quota — e.g. 2000
+# consecutive advisories leave zero dialogue turns to select even though dialogue exists
+# earlier in the file, silently degrading to pre-feature behaviour. The cap therefore sits
+# far above both quotas (10 + 5 by default) so that needs a genuinely pathological tail;
+# ``build_history_reader`` logs a debug line if it ever happens. One file per engagement
+# spans daemon restarts, so this is a real (if unlikely) shape, not a theoretical one.
+_MAX_TAIL_LINES = 2000
 
 
 def _parse_line(raw: str) -> ChatTurn | None:
@@ -70,10 +78,16 @@ class ChatHistoryRepo:
         return self.path.exists()
 
     def append(self, turn: ChatTurn) -> None:
-        """Append one turn as a single JSON line. Creates the parent dir if needed."""
+        """Append one turn as a single JSON line. Creates the parent dir if needed.
+
+        ``errors="replace"`` matches the read path: a lone surrogate in a turn's text (a
+        mangled decode upstream) would otherwise raise ``UnicodeEncodeError``, which the
+        recorder's never-crash guard absorbs — so the loop would survive but the turn would
+        be silently LOST. A substituted character is strictly better than a dropped turn.
+        """
         self.path.parent.mkdir(parents=True, exist_ok=True)
         line = json.dumps(asdict(turn), ensure_ascii=False)
-        with self.path.open("a", encoding="utf-8") as fh:
+        with self.path.open("a", encoding="utf-8", errors="replace") as fh:
             fh.write(line + "\n")
 
     def tail(self, max_lines: int = _MAX_TAIL_LINES) -> list[ChatTurn]:

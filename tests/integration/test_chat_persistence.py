@@ -25,6 +25,28 @@ def test_settings_chat_knobs_read_from_env(monkeypatch):
     assert s.assistant_chat_advisory_turns == 1
 
 
+def test_settings_chat_knobs_accept_zero_but_reject_negative(monkeypatch):
+    # 0 legitimately disables a window (the selector selects nothing from that group);
+    # a negative window is nonsense and must not boot.
+    monkeypatch.setenv("REDROBIN_ASSISTANT_CHAT_DIALOGUE_TURNS", "0")
+    monkeypatch.setenv("REDROBIN_ASSISTANT_CHAT_ADVISORY_TURNS", "0")
+    s = Settings()
+    assert (s.assistant_chat_dialogue_turns, s.assistant_chat_advisory_turns) == (0, 0)
+
+    # pydantic reports the ENV ALIAS, which is what the operator actually set.
+    monkeypatch.setenv("REDROBIN_ASSISTANT_CHAT_DIALOGUE_TURNS", "-1")
+    with pytest.raises(Exception) as exc:
+        Settings()
+    assert "REDROBIN_ASSISTANT_CHAT_DIALOGUE_TURNS" in str(exc.value)
+    assert "greater than or equal to 0" in str(exc.value)
+
+    monkeypatch.setenv("REDROBIN_ASSISTANT_CHAT_DIALOGUE_TURNS", "10")
+    monkeypatch.setenv("REDROBIN_ASSISTANT_CHAT_ADVISORY_TURNS", "-5")
+    with pytest.raises(Exception) as exc:
+        Settings()
+    assert "REDROBIN_ASSISTANT_CHAT_ADVISORY_TURNS" in str(exc.value)
+
+
 @pytest.mark.asyncio
 async def test_bus_events_become_a_readable_conversation(tmp_path):
     # End-to-end over a real EventBus + a real repo: the recorder persists the stream and

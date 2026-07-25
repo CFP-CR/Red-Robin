@@ -89,7 +89,7 @@ The kind→window grouping is a **domain decision**, expressed as two named froz
 ### §5.2 `redrobin/infrastructure/persistence/chat_history_repo.py`
 
 ```python
-_MAX_TAIL_LINES = 500  # module constant, not a Setting — a memory safety valve
+_MAX_TAIL_LINES = 2000  # module constant, not a Setting — a memory safety valve
 
 class ChatHistoryRepo:
     def __init__(self, path: Path) -> None
@@ -99,8 +99,10 @@ class ChatHistoryRepo:
 ```
 
 - **`append`** — opens in `"a"` mode, writes `json.dumps(asdict(turn), ensure_ascii=False) + "\n"`. Creates parent dirs if absent. **Single-writer:** only `ChatRecorder` calls it (the same invariant the project already holds for working memory, where the reducer is the sole writer).
-- **`tail`** — streams the file with `deque(fh, maxlen=max_lines)` → **O(max_lines) memory**, independent of file size. Reads with `encoding="utf-8", errors="replace"`. Returns turns in file order (oldest → newest).
+- **`tail`** — streams the file with `deque(fh, maxlen=max_lines)` → **O(max_lines) memory**, independent of file size (~400 KB worst case at 2000). Reads with `encoding="utf-8", errors="replace"`. Returns turns in file order (oldest → newest).
 - **Malformed line** (truncated JSON from an interrupted append, or a missing field) → skipped with a debug log; the rest still parses. **Missing file** → `[]`. Neither raises.
+
+**The read cap bounds the selection too** (corrected 2026-07-25 after review). `select_context_turns` only ever sees the last `_MAX_TAIL_LINES` lines, so a tail **saturated with one kind** starves the other window's quota: `_MAX_TAIL_LINES` consecutive advisories leave zero dialogue turns to select even though dialogue exists earlier in the file — silently degrading to pre-feature behaviour, the exact regression the two-window rule exists to prevent. Because one file spans an entire multi-day engagement across daemon restarts, this is a real (if unlikely) shape, not a theoretical one. Mitigated, not eliminated: the cap sits far above both quotas (10 + 5), and `build_history_reader` emits a `logger.debug` when the read hits the cap with fewer dialogue turns selected than `dialogue_max`, so a real occurrence is diagnosable. (A true fix — a kind-aware backward scan — is deferred; it is not warranted at this scale.)
 
 Placement rationale: file I/O belongs in `infrastructure/` (matching the five existing repos). The one counter-precedent, `JournalService`, reads `events.jsonl` directly from the application layer — but that is a *foreign* log written by the events router, whereas the chat log is one we both own and write, which is exactly what a repo encapsulates. It also loads the whole file via `read_text()`, the unbounded pattern this design deliberately avoids.
 
@@ -126,7 +128,9 @@ The advisory/heads-up discriminator is **the same rule the TUI already renders w
 - `confirm` → the confirm question text.
 - `advisory` / `heads_up` → the advisory's parts joined into a compact block (action, why, opsec, conf). The application layer **cannot** reuse the TUI renderer (contract 3), so a small pure module-level helper composes it — deliberately mirroring the operator-facing shape, minus refs (removed 2026-07-24).
 
-Timestamps come from an **injected clock** (`now: Callable[[], datetime] = datetime.now`), matching `capture_lesson(now=…)`, so tests are deterministic.
+Timestamps come from an **injected clock**, matching `capture_lesson(now=…)`, so tests are deterministic.
+
+> **Deviation as built (an improvement, kept — 2026-07-25):** the default clock is **UTC-aware** (`datetime.now(timezone.utc)`), not the bare `datetime.now` this spec sketched, and the recorder normalises whatever clock it is given with `.astimezone(timezone.utc)` before stamping. The ordering contract is a *lexicographic* sort of `ts` (§6), which is chronological only while every stamp carries the same offset — a naive-local default would have written stamps that sort wrongly against the UTC ones already on disk. Normalising makes the invariant structural rather than a convention a future caller can break.
 
 Never-crash: an `append` failure is logged and swallowed — the loop survives (a full disk must not kill the chat, let alone the assistant). **The turn's `text` is never logged** on failure: it can contain credentials the operator pasted. Log the path and the exception only.
 
@@ -153,6 +157,8 @@ opsec  WARN
 conf   high cred, unsure scope
 ```
 
+**Per-turn size cap** (added 2026-07-25 after review): `_MAX_TURN_CHARS = 800`, a module constant like `_MAX_TAIL_LINES`. The two windows bound the turn **count**, not bytes — and one turn is not small: an assistant `answer` runs up to `assistant_max_tokens` (2048 ≈ 8 KB) and an operator `question` can be an arbitrary paste (operators paste beacon output to ask *"what is this?"*). Without a per-turn cap the injected slice was byte-**unbounded** on every reactive cycle, i.e. on every beacon command. `render_turns` therefore clips each turn to `text[:_MAX_TURN_CHARS] + " …[truncated]"`. This is the same context-rot guard the project already applies to L2 via `cap_wm_snapshot` / `assistant_wm_max_items`.
+
 ### §5.5 Context injection (`agents/assistant/agent.py`)
 
 `build_push_context` and `build_answer_context` each gain `chat_history: str = ""`, emitting a section beside L2/L5:
@@ -164,7 +170,9 @@ conf   high cred, unsure scope
 
 The default `""` keeps every existing caller and test valid.
 
-`Assistant` gains `history_reader: Callable[[], str] | None = None` (default None ⇒ current behavior), read inside the **existing** `try/except` that already guards `summary_reader`, so a failing reader degrades to `""` instead of breaking a cycle.
+`Assistant` gains `history_reader: Callable[[], str] | None = None` (default None ⇒ current behavior); a failing reader degrades to `""` instead of breaking a cycle.
+
+> **Deviation as built (an improvement, kept — 2026-07-25):** rather than reusing the existing `summary_reader` `try/except` at each call site, `Assistant` got a dedicated `_read_history()` helper (None-check + `try/except` + `logger.exception`) that the three cycles call. The spec's version would have duplicated the same guard at three call sites — or worse, coupled the two readers so a chat failure took the L5 summary down with it. One helper, one contract, three callers.
 
 **Which cycles receive it:**
 
@@ -203,9 +211,11 @@ Instead, each group gets a **guaranteed quota**:
 2. Take the last `volunteered_max` turns whose `kind ∈ VOLUNTEERED_KINDS`.
 3. Concatenate and **stable-sort by `ts`** → one chronological list (so *"I advised X → you declined"* reads correctly).
 
-Beacon chatter can no longer evict the conversation thread. Note this is **selection**, not per-kind formatting: rendering stays uniform (`turn.text` for every kind), which is what keeps it simple.
+Beacon chatter can no longer evict the conversation thread — **as long as both kinds are inside the read window** (see §5.2: the `_MAX_TAIL_LINES` read cap is upstream of this selection and a saturated tail can still starve a quota).
 
-Microsecond-precision timestamps make ties effectively impossible; Python's stable sort makes any tie deterministic regardless.
+Note this is **selection**, not per-kind formatting: rendering stays uniform for every kind — `turn.text`, clipped at `_MAX_TURN_CHARS` (§5.4) — which is what keeps it simple.
+
+Microsecond-precision timestamps make ties effectively impossible; Python's stable sort makes any tie deterministic regardless. Ordering is a *lexicographic* sort of the ISO string, so it is chronological only while every stamp carries the same UTC offset — which the recorder guarantees by normalising its clock (§5.3).
 
 ## §7 Definition of Done
 
@@ -297,8 +307,8 @@ The DoD's guarantees are **deterministic**: the selected turns reach the prompt,
 
 ## §10 Risks
 
-- **Thread dilution by beacon chatter** — resolved structurally by the two-window rule (§6), and covered by a dedicated test.
-- **Context growth** — bounded by the two caps; the injected slice has a fixed maximum size regardless of engagement length.
+- **Thread dilution by beacon chatter** — resolved structurally by the two-window rule (§6), and covered by a dedicated test. **Residual (corrected 2026-07-25):** the rule operates on the last `_MAX_TAIL_LINES` lines only, so a tail saturated with one kind can still starve the other window — mitigated by a cap far above the quotas plus a debug log, not eliminated (§5.2).
+- **Context growth** — bounded by the two turn-count caps **and** a per-turn character cap (`_MAX_TURN_CHARS`, §5.4). The injected slice's maximum size is therefore `(dialogue_max + volunteered_max) × _MAX_TURN_CHARS` — fixed regardless of engagement length. *Corrected 2026-07-25:* as first built the caps bounded turn count only, so a single pasted question or a max-length answer made the slice byte-unbounded; the per-turn clip is what makes this claim true.
 - **Secrets on disk.** The chat can contain credentials the operator pasted or discussed. This is **not a new exposure class**: `events.jsonl` in the same directory already stores raw beacon output (credentials included), and the directory is archived/deleted with the engagement. `application/redactor.py` exists if redaction is ever wanted; building it now would be scope creep. Mitigated in the one place we control: turn text is never written to logs.
 - **Interrupted append** could leave a partial last line; the malformed-line skip contains it to that single turn.
 - **Distinct-layer confusion** — chat vs L5 vs Lessons could blur over time. Mitigated by naming and by this spec's §1: chat = the session thread, L5 = beacon story, Lessons = durable corrections.

@@ -231,7 +231,15 @@ def build_answer_context(
     """Assemble the conversational PUSH context: L2 (current working memory) + L5
     (story so far) + the chat thread + the operator's question. The L2 snapshot is
     capped to the most-recent ``wm_max_items`` per category (context-rot guard).
-    Non-mutating."""
+    Non-mutating.
+
+    ACCEPTED redundancy: the ChatRecorder subscribes to the bus BEFORE the Assistant and
+    its append is synchronous, so the operator's CURRENT question is essentially always
+    already in the transcript when this reads it — it therefore appears twice, once in the
+    thread and once under "The operator says". That is token noise the model handles
+    fine. Do NOT "fix" it by reordering the subscriptions: that would race the recorder
+    against the answer cycle and risk losing turns, which is a far worse cure.
+    """
     capped = cap_wm_snapshot(wm_snapshot, wm_max_items)
     return "\n".join(
         [
@@ -244,6 +252,8 @@ def build_answer_context(
             "# Conversation so far",
             chat_history or "(no conversation yet)",
             "",
+            # The current question, restated for prominence (see the docstring's note on
+            # the deliberate duplication with the thread above).
             "# The operator says",
             question or "(empty)",
             "",
