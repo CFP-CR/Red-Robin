@@ -865,7 +865,12 @@ def test_reader_applies_the_two_windows(tmp_path):
     read = build_history_reader(repo, dialogue_max=10, volunteered_max=2)
     out = read()
     assert "old question" in out  # dialogue quota protected it
-    assert out.count("adv") == 2  # only the last 2 advisories
+    # count advisory LINES, not the substring: a rendered "[assistant · advisory] adv10"
+    # contains "adv" twice, so count("adv") would be 4 for a correct 2-turn selection —
+    # and would pass at 1 surviving advisory, green-lighting an off-by-one.
+    assert out.count("] adv") == 2  # only the last 2 advisories
+    assert "adv11" in out  # ...and they are the most recent ones
+    assert "adv9" not in out
 
 
 def test_reader_returns_empty_string_when_there_is_no_history(tmp_path):
