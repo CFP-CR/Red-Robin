@@ -94,6 +94,14 @@ class Settings(BaseSettings):
     # memory category in the pushed context so long engagements don't re-send an
     # ever-growing resident set every cycle.
     assistant_wm_max_items: int = Field(default=20, alias="REDROBIN_ASSISTANT_WM_MAX_ITEMS")
+    # Chat-history context windows (spec 2026-07-24): each kind group gets its own quota
+    # so a burst of beacon-driven advisories can never evict the dialogue thread.
+    assistant_chat_dialogue_turns: int = Field(
+        default=10, alias="REDROBIN_ASSISTANT_CHAT_DIALOGUE_TURNS"
+    )
+    assistant_chat_advisory_turns: int = Field(
+        default=5, alias="REDROBIN_ASSISTANT_CHAT_ADVISORY_TURNS"
+    )
     # Proactive mode (Task 4 §6.A): X = lull before a self-triggered check;
     # N = min interval between proactive utterances (rate-limit). Tunable, not hardcoded.
     assistant_lull_sec: float = Field(default=300.0, alias="REDROBIN_ASSISTANT_LULL_SEC")
