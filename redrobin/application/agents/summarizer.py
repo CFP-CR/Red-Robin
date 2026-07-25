@@ -53,10 +53,11 @@ class L5LLM(Protocol):
 
 
 _DEFAULT_PROMPT_HEADER = (
-    "Compress the following Red Robin episode log into a 3-5 sentence "
-    "operational summary. Emphasise recurring (command, verdict) patterns, "
-    "blocked tradecraft, and any escalation signals. Stay factual; do not "
-    "speculate about engagement intent.\n\n"
+    "Compress the following Red Robin command log into a 3-5 sentence "
+    "operational summary. Emphasise the sequence of activity: recurring "
+    "commands, the tradecraft and tooling in use, and how the operator moved "
+    "between hosts and objectives. Stay factual; do not speculate about "
+    "engagement intent.\n\n"
 )
 
 
@@ -129,10 +130,7 @@ class L5Summarizer:
 
     @staticmethod
     def _format(episodes: list[Episode]) -> str:
-        lines = [
-            f"- {e.created_at.isoformat()} [{e.verdict}] {e.command} :: {e.reason}".rstrip(" ::")
-            for e in episodes
-        ]
+        lines = [f"- {e.created_at.isoformat()} {e.command}" for e in episodes]
         return _DEFAULT_PROMPT_HEADER + "\n".join(lines)
 
 

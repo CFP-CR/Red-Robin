@@ -36,22 +36,24 @@ def isolated_root(tmp_path, monkeypatch):
     yield tmp_path
 
 
-def _publish_verdict(
-    client, app, *, beacon_id: str, correlation_id: str, command: str, verdict: str
-):
-    """Publish a Layer A opsec.verdict event onto the bus via the TestClient portal."""
+def _publish_command(client, app, *, bid: str, correlation_id: str, command: str):
+    """Publish a beacon.command_input event onto the bus via the TestClient portal.
+
+    This is the event that produces an L3 episode. It used to be ``opsec.verdict``
+    (the pre-flight gate fired on every command, so its verdict stream doubled as a
+    command stream); the gate is gone and ``beacon.command_input`` is the real source.
+    The isolation contract under test is unchanged — only the driving event is.
+    """
     client.portal.call(
         app.state.event_bus.publish,
         {
-            "type": "opsec.verdict",
+            "type": "beacon.command_input",
             "payload": {
                 "correlation_id": correlation_id,
-                "beacon_id": beacon_id,
+                "bid": bid,
+                "operator": "op",
                 "command": command,
-                "verdict": verdict,
-                "reason": f"test verdict for {command}",
-                "rule_id": None,
-                "source": "layer_a",
+                "raw": command,
             },
         },
     )
@@ -82,7 +84,7 @@ def _count_episodes(db_path: Path, *, engagement_id: str | None = None) -> int:
 
 
 def test_episode_written_to_active_engagement_db(isolated_root):
-    """After `engagement use X`, verdicts land in engagements/X/episodic.db tagged X."""
+    """After `engagement use X`, commands land in engagements/X/episodic.db tagged X."""
     svc = EngagementService(root=isolated_root)
     svc.new("eng-a")
     svc.use("eng-a")
@@ -95,13 +97,12 @@ def test_episode_written_to_active_engagement_db(isolated_root):
         )
         assert app.state.engagement_id == "eng-a"
 
-        _publish_verdict(
+        _publish_command(
             client,
             app,
-            beacon_id="bid_1",
+            bid="bid_1",
             correlation_id="c_1",
             command="mimikatz",
-            verdict="BLOCK",
         )
         # Allow the reducer's async loop one tick to process the event
         import time
@@ -133,13 +134,12 @@ def test_two_engagements_do_not_cross_contaminate(isolated_root):
     svc.use("eng-a")
     app = create_app()
     with TestClient(app) as client:
-        _publish_verdict(
+        _publish_command(
             client,
             app,
-            beacon_id="bid_a",
+            bid="bid_a",
             correlation_id="c_a",
             command="mimikatz",
-            verdict="BLOCK",
         )
         import time
 
@@ -149,13 +149,12 @@ def test_two_engagements_do_not_cross_contaminate(isolated_root):
     svc.use("eng-b")
     app = create_app()
     with TestClient(app) as client:
-        _publish_verdict(
+        _publish_command(
             client,
             app,
-            beacon_id="bid_b",
+            bid="bid_b",
             correlation_id="c_b",
             command="hashdump",
-            verdict="BLOCK",
         )
         import time
 
@@ -185,9 +184,7 @@ def test_degraded_mode_no_engagement_falls_back_to_root(isolated_root):
     with TestClient(app) as client:
         assert app.state.engagement is None, "no engagement should be active"
 
-        _publish_verdict(
-            client, app, beacon_id="bid_x", correlation_id="c_x", command="ls", verdict="PASS"
-        )
+        _publish_command(client, app, bid="bid_x", correlation_id="c_x", command="ls")
         import time
 
         time.sleep(0.5)

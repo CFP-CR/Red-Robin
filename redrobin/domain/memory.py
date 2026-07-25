@@ -3,7 +3,7 @@
 5 memory layers:
   L1 Long-term:    PromotedLesson (durable, cross-engagement, structured)
   L2 Working:      WorkingMemory (hosts, defenses, tools, kill_chain) — per-engagement JSON
-  L3 Episodic:     Episode (raw verdict log, per-engagement) — SQLite
+  L3 Episodic:     Episode (raw command-activity log, per-engagement) — SQLite
   L4 Tradecraft:   technique → bypass → detection graph — SQLite (deferred to v0.2 in v0.1)
   L5 Context:      sliding-window ContextSummary — in-memory + summary.txt
 
@@ -67,15 +67,15 @@ class Credential:
 class Finding:
     """Observation produced by the enrichment/reducer path.
 
-    ``kind`` is a short stable identifier (e.g., ``kerberos_ticket_observed``,
-    ``opsec_block``). ``summary`` is a human-readable one-liner. In the deltas
-    merge (``WorkingMemoryRepo.apply_deltas``) findings are deduped by
+    ``kind`` is a short stable identifier (e.g., ``kerberos_ticket_observed``).
+    ``summary`` is a human-readable one-liner. In the deltas merge
+    (``WorkingMemoryRepo.apply_deltas``) findings are deduped by
     ``(kind, summary, source_beacon_id)`` so re-emission / overlapping chunks
-    do not pile up duplicates. ``append_finding`` is kept for the BLOCK-verdict
-    audit stream (``_on_verdict`` writes through it; no dedup — every BLOCK
-    matters); ``apply_deltas`` is the dedup'd path for enrichment-derived
-    findings (since Plan B2 retired the regex producer, that is the only other
-    write path).
+    do not pile up duplicates; since Plan B2 retired the regex producer, the
+    enrichment path is the only writer. The un-dedup'd
+    ``WorkingMemoryRepo.append_finding`` lost its last caller when the pre-flight
+    gate's BLOCK-finding path was removed — it is retained as a tested repo API,
+    pending triage.
     """
 
     kind: str
@@ -146,19 +146,17 @@ class WorkingMemory:
 
 @dataclass(frozen=True)
 class Episode:
-    """Raw episode — one row per ``beacon.command_input`` event.
+    """One command the operator ran — the raw activity log L5 narrates from.
 
-    Episodes are the L3 audit trail of what the operator actually ran. The L5
-    summariser compresses them into rolling context so long engagements stay
-    coherent after recent activity rolls off the in-memory window.
+    Sourced from ``beacon.command_input`` by the reducer. Before the pre-flight gate was
+    removed this was one row per ``opsec.verdict``; the gate fired on every command, so the
+    verdict stream was a de-facto command stream. The command stream is the real one.
     """
 
     id: int | None  # None until persisted
     engagement_id: str
     correlation_id: str
     command: str
-    verdict: str  # ALLOW | WARN | BLOCK | UNKNOWN
-    reason: str
     created_at: datetime
 
 
@@ -206,8 +204,8 @@ class ContextSummary:
 
     Produced periodically by ``L5Summarizer`` once enough new episodes have
     accumulated (``window_size``). Persisted in :class:`ContextSummaryRepo`
-    and surfaced as a cached system block in Layer B's prompt so long
-    engagements stay coherent after the most recent verdicts roll off the
+    and surfaced as a cached system block in the assistant's prompt so long
+    engagements stay coherent after the most recent commands roll off the
     in-memory window.
     """
 

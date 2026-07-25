@@ -62,8 +62,6 @@ episodes = Table(
     Column("engagement_id", String(128), nullable=False, index=True),
     Column("correlation_id", String(128), nullable=False),
     Column("command", Text, nullable=False),
-    Column("verdict", String(16), nullable=False),  # ALLOW|WARN|BLOCK|UNKNOWN
-    Column("reason", Text, nullable=False, default=""),
     Column("created_at", DateTime, nullable=False),
 )
 

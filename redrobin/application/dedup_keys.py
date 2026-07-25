@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 # Event types that carry a correlation_id and that we dedup with the
 # (bid, correlation_id, type) composite key.
-_CORRELATED_TYPES = frozenset({"beacon.command_input", "beacon.command_output", "opsec.verdict"})
+_CORRELATED_TYPES = frozenset({"beacon.command_input", "beacon.command_output"})
 
 
 def derive_key(event: dict[str, Any]) -> str | None:
@@ -37,7 +37,7 @@ def derive_key(event: dict[str, Any]) -> str | None:
     pass-through (event types we choose not to dedup).
 
     Key shape: ``"<bid>|<correlation_id>|<event_type>"`` for command events
-    (``beacon.command_input``/``beacon.command_output``/``opsec.verdict``).
+    (``beacon.command_input``/``beacon.command_output``).
     ``beacon.initial`` is pass-through (``None``) — idempotent at the reducer,
     so deduping it would break the ``.cna`` backfill's session re-seed.
     """
@@ -45,7 +45,9 @@ def derive_key(event: dict[str, Any]) -> str | None:
     if not isinstance(event_type, str):
         return None
 
-    # opsec.verdict uses `beacon_id`; the beacon.* events use `bid`.
+    # The surviving correlated events all use `bid`. The `beacon_id` fallback is
+    # retained deliberately: it costs nothing and keeps derive_key tolerant of any
+    # producer that still attaches identity under the older field name.
     bid_raw = event.get("bid") or event.get("beacon_id")
     if not bid_raw:
         return None

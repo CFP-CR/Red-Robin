@@ -1,7 +1,7 @@
 """Slice 13 integration: L5 sliding-window summary.
 
 Closes Phase 2 gap #18 — Phase 1 spec called for an L5 sliding-window summary
-that compresses recent verdicts so long engagements stay coherent after the
+that compresses recent commands so long engagements stay coherent after the
 most recent rows roll off the in-memory window. Phase 1 shipped neither the
 persistence row, the summarizer task, nor the prompt injection.
 
@@ -59,8 +59,6 @@ async def test_summarizer_emits_summary_after_window(tmp_path: Path) -> None:
             engagement_id="eng-test",
             correlation_id=f"c-{i}",
             command=f"cmd-{i}",
-            verdict="ALLOW",
-            reason="",
         )
 
     emitted = await summarizer.run_once()
@@ -92,8 +90,6 @@ async def test_summarizer_skip_when_below_window(tmp_path: Path) -> None:
             engagement_id="eng",
             correlation_id=f"c-{i}",
             command="x",
-            verdict="ALLOW",
-            reason="",
         )
 
     emitted = await summarizer.run_once()
@@ -134,8 +130,6 @@ async def test_summarizer_only_summarizes_once_per_window(tmp_path: Path) -> Non
             engagement_id="eng-idem",
             correlation_id=f"c-{i}",
             command="cmd",
-            verdict="ALLOW",
-            reason="",
         )
 
     assert await summarizer.run_once() is True
@@ -192,8 +186,6 @@ async def test_lifespan_wires_summarizer(tmp_path: Path, monkeypatch: pytest.Mon
                 engagement_id="eng-l5",
                 correlation_id=f"c-{i}",
                 command="x",
-                verdict="ALLOW",
-                reason="",
             )
         # Drive the loop until the periodic task picks up the episodes.
         summaries: list = []

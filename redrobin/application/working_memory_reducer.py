@@ -9,7 +9,6 @@ Event dispatch table (canonical wire types from ``redrobin/domain/events.py``):
 * ``beacon.initial``         → upsert a ``Session`` keyed by ``bid``.
 * ``beacon.command_input``   → append an L3 ``Episode`` (raw activity log). Mutates no
   working-memory field, so the snapshot is deliberately NOT re-emitted.
-* ``opsec.verdict``          → when ``verdict == "BLOCK"``, append a finding.
 * ``working_memory.deltas``  → merge an enrichment deltas batch via
   ``WorkingMemoryRepo.apply_deltas`` (single writer; provenance system-supplied).
 
@@ -40,7 +39,6 @@ from typing import Any
 
 from redrobin.application.event_bus import EventBus
 from redrobin.domain.memory import (
-    Finding,
     Session,
     WorkingMemoryDeltas,
     working_memory_to_snapshot,
@@ -125,9 +123,6 @@ class WorkingMemoryReducer:
             # reducer must NOT broadcast a full snapshot for every command.
             self._on_command_input(payload)
             return False
-        elif etype == "opsec.verdict":
-            self._on_verdict(payload)
-            return True
         elif etype == "working_memory.deltas":
             self._on_enrichment_deltas(payload)
             return True
@@ -172,46 +167,9 @@ class WorkingMemoryReducer:
                 engagement_id=self._engagement_id,
                 correlation_id=str(payload.get("correlation_id") or ""),
                 command=command,
-                verdict="",
-                reason="",
             )
         except Exception:
             logger.exception("episodic record failed for command=%s", command)
-
-    def _on_verdict(self, payload: dict[str, Any]) -> None:
-        verdict = payload.get("verdict", "UNKNOWN")
-        command = payload.get("command", "?")
-        reason = payload.get("reason", "")
-        beacon_id_raw = payload.get("beacon_id")
-        beacon_id = str(beacon_id_raw) if beacon_id_raw is not None else None
-
-        # Slice 10: every verdict (not only BLOCK) becomes an Episode so the
-        # promoter sees full operator activity. Failures here must not crash
-        # the reducer — the working-memory finding path below is more
-        # important for live operators.
-        if self._episodic is not None:
-            try:
-                self._episodic.record(
-                    engagement_id=self._engagement_id,
-                    correlation_id=str(payload.get("correlation_id", "") or ""),
-                    command=str(command),
-                    verdict=str(verdict),
-                    reason=str(reason),
-                )
-            except Exception:
-                logger.exception("episodic record failed for verdict=%s", verdict)
-
-        # Finding append still only fires on BLOCK — the working-memory
-        # findings stream is a curated operator-visible audit list, not a
-        # full event log.
-        if verdict != "BLOCK":
-            return
-        finding = Finding(
-            kind="opsec_block",
-            summary=f"Blocked command: {command} — {reason}",
-            source_beacon_id=beacon_id,
-        )
-        self._repo.append_finding(finding)
 
     def _on_enrichment_deltas(self, payload: dict[str, Any]) -> None:
         """Merge an enrichment deltas batch. Provenance is taken from the

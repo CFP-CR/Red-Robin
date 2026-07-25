@@ -79,6 +79,39 @@ def test_a_failing_episodic_write_does_not_crash_the_reducer(tmp_path):
     reducer._dispatch({"type": "beacon.command_input", "payload": {"command": "whoami"}})
 
 
+def test_episode_has_no_verdict_or_reason_fields():
+    import dataclasses
+
+    from redrobin.domain.memory import Episode
+
+    names = {f.name for f in dataclasses.fields(Episode)}
+    assert names == {"id", "engagement_id", "correlation_id", "command", "created_at"}
+
+
+def test_reducer_ignores_opsec_verdict(tmp_path):
+    """The pre-flight gate is gone: ``opsec.verdict`` is no longer a handled type.
+
+    It must fall through to the silent-ignore path — no episode, no finding, and
+    ``_dispatch`` returning False so no working-memory snapshot is broadcast.
+    """
+    reducer, wm_repo, ep_repo = _reducer(tmp_path, EventBus())
+    mutated = reducer._dispatch(
+        {
+            "type": "opsec.verdict",
+            "payload": {
+                "verdict": "BLOCK",
+                "command": "mimikatz",
+                "reason": "high signal",
+                "beacon_id": "B-005",
+                "correlation_id": "c-1",
+            },
+        }
+    )
+    assert mutated is False
+    assert ep_repo.list_episodes_for_engagement("eng-1") == []
+    assert wm_repo.load().findings == []
+
+
 @pytest.mark.asyncio
 async def test_end_to_end_over_the_bus(tmp_path):
     bus = EventBus()
