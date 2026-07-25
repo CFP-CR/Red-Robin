@@ -56,7 +56,7 @@ This is a deletion, so the pillars are served by subtraction, not by new abstrac
 
 **Product data:** `rules/` — 15 Sigma/OPSEC YAMLs, plus the "Adding a rule" flow in `CONTRIBUTING.md`
 
-**Domain:** the `opsec.verdict` event type and the `VerdictAction` enum; `PromotedLesson`; `Episode.verdict` and `Episode.reason`
+**Domain:** `opsec.py` entirely (`Verdict` + `VerdictAction`) · `rules.py` entirely (`Rule`, `RuleSeverity`, `EventContext`) · the `OpsecVerdictEvent` type in `events.py` and its `Envelope` severity-serialization branch · `PromotedLesson` · `Episode.verdict` and `Episode.reason`. **`events.Severity` is KEPT** — see the trap in §5.5.
 
 **`.cna`:** `redrobin_gate` · `redrobin_query_quick` · every `alias` override that routes an operator command through the gate · the `events_consumed: ["opsec.verdict"]` handshake declaration · the verdict WebSocket consumer
 
@@ -103,7 +103,7 @@ elif etype == "beacon.command_input":
 - **`lifespan_helpers.py` + `app.py`** — remove `start_rules`, `start_pipeline`, `start_lesson_promoter` and their close hooks. Shutdown loses two steps.
 - **`boot_validation.py`** — `ANTHROPIC_API_KEY` is still required, but for the **assistant / enricher / summarizer**, not "for Layer B". Message and rationale updated; the requirement itself is unchanged.
 - **TUI** — see §5.5; it is the one operator-visible change.
-- **Docs** — `CLAUDE.md` (the gate is no longer "the first feature and the capture hook"), `CONTRIBUTING.md` ("Adding a rule" section), `.claude/rules/wire-protocol.md` (`opsec.verdict` row), `docs/architecture-design.md` (a status note: the gate was removed, L3 is now command-sourced), and the smoke runbook (checkpoints that exercise the gate).
+- **Docs** — `CLAUDE.md` (the gate is no longer "the first feature and the capture hook"), `CONTRIBUTING.md` ("Adding a rule" section), `.claude/rules/wire-protocol.md` (the `opsec.verdict` row), **`.claude/rules/testing.md`** (it names `VerdictAction` as a canonical enum for assertions — that line must drop `VerdictAction` and keep `Severity`), `.claude/rules/architecture.md` if it references the gate, `docs/architecture-design.md` (a status note: the gate was removed, L3 is now command-sourced), and the smoke runbook (the checkpoints that exercise the gate).
 
 ### §5.5 Changed — the TUI (the only operator-visible change)
 
@@ -121,11 +121,15 @@ The gate's TUI surface is larger than it looks, because #28 already made most of
 
 Untouched: the Chat pane, Sessions, Working Memory, the Inspector, the help overlay, and the command palette.
 
-**⚠️ Implementation trap — `WARN` and `ESCALATE` belong to TWO vocabularies:**
-- `VerdictAction` = PASS / WARN / BLOCK / ESCALATE → **the gate's**, deleted.
-- `Severity` = INFO / WARN / DANGER / ESCALATE → **the assistant's** (every advisory's `opsec` field), **kept**.
+**⚠️ Implementation trap — there are THREE overlapping severity vocabularies, and only two go:**
 
-`chat.py` has its own `_RISK_COLORS` keyed on the *Severity* values. A grep-and-delete pass over `"WARN"` or `"ESCALATE"` would break advisory rendering. Delete by symbol and by module, never by string match.
+| Enum | Values | Home | Consumers | Fate |
+|---|---|---|---|---|
+| `VerdictAction` | PASS / WARN / BLOCK / ESCALATE | `domain/opsec.py` | the gate only (`verdicts_router`, `layer_a/b_engine`, `verdict_pipeline`, the factory) | **deleted** — the whole `domain/opsec.py` (`Verdict` + `VerdictAction`) goes |
+| `RuleSeverity` | INFO / WARN / DANGER | `domain/rules.py` | the Sigma rules (`layer_a_engine`, `rules_loader`) | **deleted** with `domain/rules.py` + `rules_loader.py` |
+| `Severity` | INFO / WARN / DANGER / ESCALATE | `domain/events.py` | **the assistant** — `Recommendation.opsec_risk`, `parser.py` | **KEPT.** It only loses one consumer: the deleted `OpsecVerdictEvent.severity` field and its `Envelope` serialization branch |
+
+`chat.py`'s `_RISK_COLORS` is keyed on the **`Severity`** values, so a grep-and-delete pass over `"WARN"` or `"ESCALATE"` would break advisory rendering. **Delete by symbol and by module, never by string match.**
 
 ## §6 Explicit non-goals
 
