@@ -54,6 +54,10 @@ Create `tests/unit/test_domain_chat.py`:
 ```python
 from __future__ import annotations
 
+import dataclasses
+
+import pytest
+
 from redrobin.domain.chat import (
     DIALOGUE_KINDS,
     VOLUNTEERED_KINDS,
@@ -131,12 +135,8 @@ def test_zero_cap_selects_nothing_from_that_group():
 def test_chat_turn_is_frozen_and_defaults_correlation_id():
     t = _turn(1, "question")
     assert t.correlation_id is None
-    try:
+    with pytest.raises(dataclasses.FrozenInstanceError):
         t.text = "mutated"  # type: ignore[misc]
-    except Exception as exc:
-        assert exc.__class__.__name__ == "FrozenInstanceError"
-    else:
-        raise AssertionError("ChatTurn must be frozen")
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
