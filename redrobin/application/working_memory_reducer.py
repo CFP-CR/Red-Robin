@@ -7,6 +7,8 @@ only by its own integration test.
 Event dispatch table (canonical wire types from ``redrobin/domain/events.py``):
 
 * ``beacon.initial``         → upsert a ``Session`` keyed by ``bid``.
+* ``beacon.command_input``   → append an L3 ``Episode`` (raw activity log). Mutates no
+  working-memory field, so the snapshot is deliberately NOT re-emitted.
 * ``opsec.verdict``          → when ``verdict == "BLOCK"``, append a finding.
 * ``working_memory.deltas``  → merge an enrichment deltas batch via
   ``WorkingMemoryRepo.apply_deltas`` (single writer; provenance system-supplied).
@@ -118,6 +120,11 @@ class WorkingMemoryReducer:
         if etype == "beacon.initial":
             self._on_beacon_initial(payload)
             return True
+        elif etype == "beacon.command_input":
+            # L3 activity log. Returns False: no working-memory field changed, so the
+            # reducer must NOT broadcast a full snapshot for every command.
+            self._on_command_input(payload)
+            return False
         elif etype == "opsec.verdict":
             self._on_verdict(payload)
             return True
@@ -146,6 +153,30 @@ class WorkingMemoryReducer:
             integrity=str(integrity_raw) if integrity_raw is not None else None,
         )
         self._repo.upsert_session(session)
+
+    def _on_command_input(self, payload: dict[str, Any]) -> None:
+        """Record one Episode per beacon command — the raw activity log L5 narrates from.
+
+        Replaces the verdict stream as L3's source: the gate happened to fire on every
+        command, so ``opsec.verdict`` was a de-facto command stream; ``beacon.command_input``
+        is the real one and needs no LLM. Never raises — a failed episode write must not
+        stop the reducer.
+        """
+        if self._episodic is None:
+            return
+        command = str(payload.get("command") or "").strip()
+        if not command:
+            return
+        try:
+            self._episodic.record(
+                engagement_id=self._engagement_id,
+                correlation_id=str(payload.get("correlation_id") or ""),
+                command=command,
+                verdict="",
+                reason="",
+            )
+        except Exception:
+            logger.exception("episodic record failed for command=%s", command)
 
     def _on_verdict(self, payload: dict[str, Any]) -> None:
         verdict = payload.get("verdict", "UNKNOWN")
