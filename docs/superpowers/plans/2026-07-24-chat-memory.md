@@ -169,8 +169,11 @@ from dataclasses import dataclass
 class ChatTurn:
     """One recorded turn of the conversation.
 
-    ``ts`` is an ISO-8601 UTC timestamp with microsecond precision (so ordering ties
-    are practically impossible). ``role`` is ``"operator"`` or ``"assistant"``;
+    ``ts`` is an ISO-8601 UTC timestamp with microsecond precision (so ordering ties are
+    practically impossible). Ordering is a lexicographic sort of that string, which is
+    chronological ONLY while every ts carries the same UTC offset — guaranteed by the
+    single-writer invariant (``ChatRecorder`` always stamps ``datetime.now(timezone.utc)``).
+    ``role`` is ``"operator"`` or ``"assistant"``;
     ``kind`` is one of the five values in the two frozensets below.
     ``correlation_id`` carries the reactive trigger handle (``"<beacon>:<command>"``)
     for an advisory, and is None otherwise.
@@ -1235,7 +1238,7 @@ In `run_answer_cycle`, add `chat_history: str = ""` to the signature (after `que
         ),
 ```
 
-Leave `run_interpretation_cycle` and `build_interpretation_context` **untouched**.
+Leave `run_interpretation_cycle` and `build_interpret_context` **untouched**. (Verified: `run_interpretation_cycle` builds its prompt with its own `build_interpret_context`, NOT with `build_push_context` — so the interpretation cycle cannot inherit the chat section structurally, not merely by discipline.)
 
 - [ ] **Step 6: Add `history_reader` to the `Assistant`**
 
@@ -1520,8 +1523,8 @@ In `start_assistant`, immediately after the `kb` / `journal` / `lesson_store` bl
     # the assistant off there is no stream to record. The path reuses the engagement
     # directory start_working_memory already resolved (it also handles the degraded
     # no-engagement fallback), so the resolution logic is not duplicated here.
-    chat_recorder: ChatRecorder | None = None
     history_reader: Callable[[], str] | None = None
+    chat_task: asyncio.Task[None] | None = None
     if settings.assistant_enabled:
         wm_repo = getattr(app.state, "working_memory_repo", None)
         if wm_repo is not None:
@@ -1547,21 +1550,20 @@ Add the reader to the `Assistant(...)` construction, immediately after `snapshot
         history_reader=history_reader,
 ```
 
-Finally, extend the existing `close()` hook in `start_assistant` so the recorder is drained too — replace the current body with:
+Finally, extend the existing `close()` hook in `start_assistant` so the recorder is drained too. **Drain both tasks CONCURRENTLY under one timeout** — the close hooks run in reverse start order, so the EventBus (started first) is closed LAST, meaning neither task has received the `_close` sentinel yet when this hook runs and both will hit their timeout. Two sequential `wait_for(…, 2.0)` calls would therefore stall shutdown for 4 s instead of 2 s. Replace the current body:
 
 ```python
     async def close() -> None:
-        chat_task = getattr(app.state, "chat_recorder_task", None)
-        if chat_task is not None:
-            try:
-                await asyncio.wait_for(chat_task, timeout=2.0)
-            except asyncio.TimeoutError:
-                chat_task.cancel()
-        try:
-            await asyncio.wait_for(assistant_task, timeout=2.0)
-        except asyncio.TimeoutError:
-            assistant_task.cancel()
+        # Both tasks are still blocked on the bus here (the bus closes after us, in
+        # reverse start order), so they are awaited CONCURRENTLY under a single
+        # timeout — sequential waits would double the shutdown stall.
+        pending_tasks = [t for t in (assistant_task, chat_task) if t is not None]
+        _, pending = await asyncio.wait(pending_tasks, timeout=2.0)
+        for task in pending:
+            task.cancel()
 ```
+
+`chat_task` is the local captured from the wiring block above (None when the assistant is disabled) — no `app.state` lookup needed.
 
 - [ ] **Step 6: Run the full suite + all 5 gates**
 
