@@ -54,7 +54,7 @@ curl -X POST http://127.0.0.1:7777/v1/events \
   -H "Content-Type: application/json" \
   -d '{
     "spec_version": "0.1.0",
-    "id": "evt_01HZXAB9MK2P6Q9TFGHJKLMNPQ",
+    "id": "evt_01HZXAB9MK2P6Q9TFGHJKRMNPQ",
     "ts": "2026-07-26T14:32:00.000Z",
     "source": {"adapter": "cobaltstrike", "version": "0.1.0", "engagement_id": "op-smoke"},
     "event": {

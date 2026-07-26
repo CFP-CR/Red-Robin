@@ -206,9 +206,12 @@ Two independent pieces, and it's worth keeping them straight:
 - The **`.cna`** is the capture hook. Loaded in the CS Client, it observes
   what you type and what comes back and POSTs it to the daemon. It needs no
   YAML — see "Cobalt Strike Client Java requirement" below for loading it.
-- The **adapter YAML** below is the daemon's own REST client to the team
-  server — used for dispatching TUI-originated commands and for recovering
-  beacon state at startup. Optional; skip it if you only want capture.
+- The **adapter YAML** below configures the daemon's own REST client to the
+  team server. At startup the daemon logs that client in and reports it on the
+  `Adapters:` banner line, but **nothing in the daemon calls it yet** — there is
+  no TUI-dispatch path and no beacon-state recovery today. It is wired-but-unused
+  capability. Optional; skip it unless you want the login verified, because
+  capture works entirely without it.
 
 To wire the REST client, drop an adapter YAML:
 
@@ -306,13 +309,19 @@ Two console lines confirm the script is live:
 [Red Robin] .cna loaded; capture active (observe-only, no interception).
 ```
 
-A 30-second heartbeat against `/v1/adapter/heartbeat` surfaces daemon
-outages in the CS event log, so you find out that capture is dropping on the
-floor instead of working blind:
+**There is no periodic heartbeat today.** The 30-second `fork{}` that would poll
+`/v1/adapter/heartbeat` is commented out in `redrobin.cna` (Sleep's `fork()` cannot
+see `$REDROBIN_HTTP`; re-enabling it needs the `lambda(...)` rewrite tracked as
+#110). Do not expect capture loss to announce itself on a timer.
+
+What you get instead: every capture POST that fails warns immediately in the CS
+event log, so you learn the daemon is down on the **next command you type** —
 
 ```
-[Red Robin] daemon unreachable; command capture is being dropped
+[Red Robin] daemon connection refused at http://127.0.0.1:7777 — is the daemon running?
 ```
+
+If you are idle, you will not be told. Check the daemon terminal if in doubt.
 
 The captured command history is on disk per engagement — useful when you want
 the record rather than the chat:

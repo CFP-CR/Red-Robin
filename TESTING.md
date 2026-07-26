@@ -164,9 +164,18 @@ it touches no external API. It does NOT mean `daemon start` will run in
 
 ### Step 1.2 — daemon start (terminal A, keep open)
 
+**The assistant is OFF by default** (`assistant_enabled=False`), and `init` does
+not write the flag to `.env`. Step 1.4's pass condition is "chat answers", so you
+must opt in here or Tier 1 cannot pass:
+
 ```powershell
+$env:REDROBIN_ASSISTANT_ENABLED = "1"
 uv run redrobin daemon start --host 127.0.0.1 --port 7777
 ```
+
+Set it in *this* terminal before starting the daemon — it gates the daemon's
+assistant, KB and chat-transcript wiring at boot, not the TUI. To make it stick,
+add `REDROBIN_ASSISTANT_ENABLED=1` to `$TEST_ROOT\.env`.
 
 **Expect:** Slice 7 banner to stderr:
 
@@ -247,11 +256,18 @@ reducer), so re-sending it always stores.
 Then confirm the reducer landed it:
 
 ```powershell
-Get-Content "$TEST_ROOT\working_memory.json" | ConvertFrom-Json | Format-List
+Get-Content "$TEST_ROOT\engagements\op-smoke\working_memory.json" |
+  ConvertFrom-Json | Format-List
 ```
 
+Note the **per-engagement** path. With `REDROBIN_ENGAGEMENT_SLUG=op-smoke`
+resolved (it is — `init` wrote it to `.env`), state lives under
+`engagements\<slug>\`. The root-level `working_memory.json` is only the degraded
+fallback used when no engagement resolves, so reading it here finds nothing.
+
 **Expect:** `sessions` contains `B-1` on host `WS-SMOKE-01`. The command is
-written to L3 episodic history (`episodic.db`), not to the working-memory JSON.
+written to L3 episodic history (`engagements\op-smoke\episodic.db`), not to the
+working-memory JSON.
 
 **Negative check — the gate is gone.** The pre-flight verdict route must not
 exist (`try`/`catch` rather than `-SkipHttpErrorCheck`, so this works on
@@ -320,7 +336,7 @@ redrobin daemon stop
 |-------|----------------|
 | Step 1.3 ingest | Both POSTs return `ok: True, stored: True` |
 | Step 1.3 dedup | Verbatim re-POST of the command returns `duplicate: True` |
-| Step 1.3 reducer | `working_memory.json` `sessions` contains `B-1` |
+| Step 1.3 reducer | `engagements\op-smoke\working_memory.json` `sessions` contains `B-1` |
 | Step 1.3 no gate | `POST /v1/verdict/quick` returns 404 |
 | Step 1.4 TUI | 3 panes render, chat answers, `i` / `?` overlays work |
 | Step 1.5 stop | Clean exit, no errors |
@@ -393,10 +409,18 @@ uv run python adapters/sliver-mock/adapter.py `
 [sliver-mock] disconnected
 ```
 
-In terminal A (daemon log), you should see corresponding log lines as events
-flow through the bus and the reducer folds them into working memory. Structured
-events (`host.observation`, `credential.observed`) land directly; free-text
-command output is extracted by the LLM enricher, not by the reducer.
+In terminal A (daemon log), you should see corresponding log lines as events flow
+through the bus. Be precise about what the reducer actually folds into working
+memory — it handles exactly four types: `beacon.initial` (sessions),
+`beacon.command_input` (an L3 episode, no working-memory change),
+`working_memory.deltas`, and `engagement.milestone`.
+
+**`host.observation` and `credential.observed` are validated and persisted to
+`events.jsonl`, but they drive no panel** — the reducer ignores them. Hosts and
+credentials reach working memory only via `working_memory.deltas`, which the LLM
+enricher produces from `beacon.command_output`. So Step 2.3's hosts/credentials
+depend on a working `ANTHROPIC_API_KEY`, not on the structured events the
+scenario sends.
 
 ### Step 2.3 — verify working memory ingested the scenario
 
@@ -406,8 +430,9 @@ In terminal B after sliver-mock finishes:
 $token = Get-Content "$env:USERPROFILE\redrobin-smoke\transport.token"
 $H = @{ Authorization = "Bearer $token" }
 
-# The working memory state is on disk as JSON. Inspect:
-Get-Content "$env:USERPROFILE\redrobin-smoke\working_memory.json" | ConvertFrom-Json | Format-List
+# The working memory state is on disk as JSON (per-engagement path). Inspect:
+Get-Content "$env:USERPROFILE\redrobin-smoke\engagements\op-smoke\working_memory.json" |
+  ConvertFrom-Json | Format-List
 ```
 
 **Expect:** `hosts` array contains `WS-FINANCE-04.acme.local` (or similar from
@@ -454,13 +479,17 @@ uv run redrobin daemon stop
 | Check | Pass condition |
 |-------|----------------|
 | Step 2.2 events sent | All scenario events show `[sliver-mock] sent <type>` |
-| Step 2.3 working memory | At least one host + credential in the JSON |
+| Step 2.3 sessions | `sessions` contains the scenario beacon (reducer-driven, deterministic) |
+| Step 2.3 working memory | At least one host + credential in the JSON — **requires `ANTHROPIC_API_KEY`**, since these come from the LLM enricher over `beacon.command_output`, not from the scenario's `host.observation` / `credential.observed` events |
 | Step 2.4 TUI memory pane | Working Memory pane reflects the scenario state |
 | No daemon crash | Terminal A shows no tracebacks |
 
 **If hosts/credentials don't show up in working memory** despite events being
-sent, that's a wire-protocol bug — the same class of bug Phase 2 had with
-`/v1/events` not bus-publishing. Stop and report.
+sent, check the enricher first — a missing/failing `ANTHROPIC_API_KEY` produces
+exactly this symptom and is not a bug. Look for `enrichment failed` in the daemon
+log. Only if `sessions` is ALSO empty (that path is deterministic and needs no
+LLM) are you looking at a wire-protocol bug — the class Phase 2 had with
+`/v1/events` not bus-publishing. In that case, stop and report.
 
 ---
 
@@ -756,7 +785,8 @@ text, and returns the output unchanged so your console display is untouched.
 - **Working memory file**: new entries.
 
 ```powershell
-Get-Content "$env:USERPROFILE\redrobin-smoke\working_memory.json" | ConvertFrom-Json | Format-List
+Get-Content "$env:USERPROFILE\redrobin-smoke\engagements\op-smoke\working_memory.json" |
+  ConvertFrom-Json | Format-List
 ```
 
 Look for `credentials` containing the dumped users + NTLM hashes, `hosts`
@@ -894,7 +924,14 @@ Either:
 
 ### The assistant never says anything in the chat pane
 
-Unprompted advisories are gated on purpose. `TriggerGate` suppresses an
+**Check the enable flag first.** The assistant is off unless the daemon was
+started with `REDROBIN_ASSISTANT_ENABLED=1` (default `False`). With it unset the
+daemon boots fine, the TUI connects, the chat pane renders — and nothing ever
+answers, because the assistant, KB and chat transcript were never wired at boot.
+This is the single most common cause of a silent pane. Confirm it in the daemon's
+terminal, restart with the flag, and retry before reading further.
+
+Beyond that: unprompted advisories are gated on purpose. `TriggerGate` suppresses an
 utterance when the `correlation_id` was already spoken on, when the working-
 memory state signature hasn't changed, or when the cooldown window
 (`REDROBIN_ASSISTANT_COOLDOWN_SEC`) hasn't elapsed — and the model applies its

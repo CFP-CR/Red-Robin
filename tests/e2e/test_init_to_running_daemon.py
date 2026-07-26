@@ -2,8 +2,8 @@
 
 Exercises the full operator journey through the new ``redrobin init``
 entry point introduced in Slice 5: the init helper writes the on-disk
-layout (``rules/shared``, ``engagements/<slug>/engagement.yaml``,
-``.env``, sample lazagne rule), the FastAPI lifespan picks it up
+layout (``engagements/<slug>/engagement.yaml``, ``adapters/``, ``.env``),
+the FastAPI lifespan picks it up
 through :class:`Settings`, every startup helper runs end-to-end, and
 the startup banner reflects the resolved engagement.
 
