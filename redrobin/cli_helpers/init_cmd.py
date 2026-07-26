@@ -99,7 +99,7 @@ def run_init(
             engagement_slug = ans
 
     # Layout
-    for sub in ("rules/shared", "engagements", "adapters"):
+    for sub in ("engagements", "adapters"):
         (root / sub).mkdir(parents=True, exist_ok=True)
     eng_dir = root / "engagements" / engagement_slug
     eng_dir.mkdir(parents=True, exist_ok=True)

@@ -8,9 +8,10 @@ test — roughly 10 minutes if you have your API keys handy.
 - **Python 3.11+** (3.12 recommended; the test matrix runs against 3.11 + 3.12).
 - **`uv`** — the project uses `uv sync` for dependency install.
   Install via [astral.sh/uv](https://docs.astral.sh/uv/getting-started/installation/).
-- **Anthropic API key** (`ANTHROPIC_API_KEY`) — Layer B verdicts degrade to no-op
-  without it. You can still start the daemon with `--allow-degraded` for a
-  Layer-A-only setup.
+- **Anthropic API key** (`ANTHROPIC_API_KEY`) — the assistant, the enricher and
+  the summariser all need it. You can still start the daemon with
+  `--allow-degraded` for a capture-only setup (events are still received,
+  persisted and reduced into working memory; nothing talks back).
 - **Voyage AI API key** (`VOYAGE_API_KEY`) — KB retrieval returns empty without
   it.
 - **Cobalt Strike license** — optional. Only required if you intend to load
@@ -53,13 +54,15 @@ uv run redrobin init \
   --engagement-slug op-smoke
 ```
 
-`init` is idempotent — re-running never clobbers your existing `.env`,
-engagement YAML, or sample rule. What it creates:
+`init` is idempotent — re-running never clobbers your existing `.env` or
+engagement YAML. What it creates:
 
 - `~/.redrobin/.env` — pinned env config (chmod 600 on POSIX).
 - `~/.redrobin/engagements/<slug>/engagement.yaml` — placeholder scope.
-- `~/.redrobin/rules/shared/sample-lazagne.yaml` — example BLOCK rule.
-- `~/.redrobin/transport.token` — bearer token for daemon auth.
+- `~/.redrobin/adapters/` — where your adapter YAML goes (see §5).
+
+`~/.redrobin/transport.token` (the bearer token the TUI and adapters
+authenticate with) is minted on first daemon start, not by `init`.
 
 See `docs/secrets-handling.md` for caveats on Git Bash, Windows ACLs, and
 the dotenv CWD-pin behavior. See `docs/operator-cli-conventions.md` for the
@@ -67,23 +70,38 @@ interactive vs non-interactive pattern.
 
 ## 3. `redrobin doctor`
 
-Full preflight — env vars, root layout, rule count, real network probes
-against Anthropic, Voyage, and any configured CS adapter:
+Full preflight — env vars, root layout, and real network probes against
+Anthropic, Voyage, and any configured CS adapter:
 
 ```bash
 uv run redrobin doctor
 ```
 
-Quick preflight — env presence + rule count only, no network calls (useful
-in CI):
+```
+[*] Red Robin doctor (preflight check)
+Configuration:
+  ROOT:               /home/operator/.redrobin
+  ENGAGEMENT:         op-smoke
+  ANTHROPIC_API_KEY:  set
+  VOYAGE_API_KEY:     set
+  ROOT_EXISTS:        yes (/home/operator/.redrobin)
+
+Connectivity:
+  [OK ] anthropic                         310ms
+  [OK ] voyage                            180ms
+[+] Doctor finished: OK
+```
+
+Quick preflight — env presence only, no network calls (useful in CI):
 
 ```bash
 uv run redrobin doctor --quick
 ```
 
-Exit code 0 means OK. Exit code 1 means DEGRADED — Layer A still works,
-Layer B may be disabled or KB retrieval may be empty. The output names each
-missing piece so you know what to fix.
+Exit code 0 means OK. Exit code 1 means DEGRADED — capture and working
+memory still work, but the assistant may be disabled or KB retrieval may
+come back empty. The output names each missing piece so you know what to
+fix.
 
 ## 4. Engagement YAML
 
@@ -111,9 +129,12 @@ summary: |
 ```
 
 Scope rules: `in_scope` and `out_of_scope` accept hostnames, suffix
-patterns, and CIDRs. `out_of_scope` wins on conflict. `summary` is
-injected as a cached system block into Layer B's LLM prompt, so anything
-you put there shapes the verdict reasoning.
+patterns, and CIDRs. `out_of_scope` wins on conflict. Scope is **context,
+not enforcement** — Red Robin projects it into working memory so the
+assistant can tell you when you look like you're drifting out of bounds;
+it cannot stop the command. `summary` is injected as a cached system block
+into the assistant's prompt, so anything you put there shapes its
+reasoning.
 
 To create additional engagements:
 
@@ -129,10 +150,12 @@ state under `~/.redrobin/engagements/<slug>/`:
 
 - `engagement.yaml` — scope, objectives, kill-chain status (operator-edited)
 - `working_memory.json` — live host/credential/finding/session facts
-- `episodic.db` — every verdict and observation, one row per event
+- `events.jsonl` — the raw captured wire events, append-only
+- `episodic.db` — one row per command the operator ran (sourced from
+  `beacon.command_input`)
 
 Each engagement is isolated: switching engagements never mixes hosts,
-credentials, or verdict history between them. The daemon resolves the
+credentials, or command history between them. The daemon resolves the
 active engagement at startup with this precedence:
 
 1. `REDROBIN_ENGAGEMENT_SLUG` env var (explicit override, primarily for
@@ -143,13 +166,14 @@ active engagement at startup with this precedence:
 **Degraded mode** (no engagement active): the daemon writes to root paths
 `~/.redrobin/{working_memory.json, episodic.db}` and tags all episodes
 with `engagement_id="eng-default"`. The daemon banner emits a clear
-warning when this happens — verdicts won't be persisted per-engagement.
+warning when this happens — state won't be persisted per-engagement.
 This mode primarily exists for tests and dev scripts; production operators
 should always activate an engagement first.
 
 **Cross-engagement state** (shared, NOT per-engagement):
 
-- `~/.redrobin/longterm.db` — long-term lessons promoted from episodic
+- `~/.redrobin/longterm.db` — long-term lessons, written when the assistant
+  captures one (there is no automatic promoter)
 - `~/.redrobin/context_summaries.db` — L5 sliding-window summaries
 - `~/.redrobin/shared/` — anything explicitly meant to span engagements
 
@@ -177,8 +201,16 @@ New engagements created after this change get their own clean DB at
 
 ## 5. Cobalt Strike adapter (optional)
 
-If you want the daemon to dispatch ALLOW verdicts to a real teamserver,
-drop an adapter YAML:
+Two independent pieces, and it's worth keeping them straight:
+
+- The **`.cna`** is the capture hook. Loaded in the CS Client, it observes
+  what you type and what comes back and POSTs it to the daemon. It needs no
+  YAML — see "Cobalt Strike Client Java requirement" below for loading it.
+- The **adapter YAML** below is the daemon's own REST client to the team
+  server — used for dispatching TUI-originated commands and for recovering
+  beacon state at startup. Optional; skip it if you only want capture.
+
+To wire the REST client, drop an adapter YAML:
 
 ```bash
 cp adapters/cobaltstrike/cs-main.example.yaml ~/.redrobin/adapters/cs-main.yaml
@@ -247,38 +279,43 @@ it (relative path `./jars/redrobin-aggressor-http-1.0.2.jar`).
 `docs/superpowers/specs/2026-05-17-cna-jar-helper-design.md` for the
 architecture rationale.
 
-### Layer B (async) verdict visibility
+### What the `.cna` does (and does not) do
 
-Red Robin's pre-flight gate has two layers:
+The `.cna` is a **capture hook only**. It installs no `alias` overrides, so
+your beacon console behaves exactly like stock Cobalt Strike — nothing is
+intercepted, delayed, blocked or rewritten, and Red Robin prints no verdict
+line into the beacon console.
 
-- **Layer A** — synchronous Sigma/YAML rule eval (~150 ms). Verdicts surface
-  in the beacon console immediately as `[Red Robin] DANGER: ...`,
-  `[Red Robin] WARN: ...`, or `[Red Robin] novel pattern — Layer B reviewing async`.
+Three capture surfaces, all passthrough-safe:
 
-- **Layer B** — async Claude LLM judge (~10–30 s). When Layer B finishes
-  evaluating a command that Layer A marked as ESCALATE, its verdict surfaces
-  back to the **same beacon console** as a second line:
+| Aggressor hook       | Wire event               |
+| -------------------- | ------------------------ |
+| `on beacon_input`    | `beacon.command_input`   |
+| `set BEACON_OUTPUT`  | `beacon.command_output` (always returns `$2` unchanged) |
+| `on beacon_initial`  | `beacon.initial` (plus a load-time backfill for beacons already checked in) |
 
-  ```
-  [Red Robin] Layer B BLOCK: <Claude's rationale>
-  [Red Robin] Layer B WARN:  <Claude's rationale>
-  ```
+Each is POSTed to `POST /v1/events` on the daemon. The leg is **one-way**:
+nothing flows from the daemon back to the CS Client. Everything the assistant
+has to say arrives in the TUI's Assistant Chat pane, on its own clock —
+unprompted when it judges something material, or on demand when you ask.
 
-  Only `WARN` and `BLOCK` retroactive verdicts are surfaced. A clean
-  Layer B result (`PASS`) is silent — no news is good news. The full
-  enum is `PASS / WARN / BLOCK / ESCALATE`; `ESCALATE` is what Layer A
-  emits when it defers to Layer B, and Layer B's job is to upgrade that
-  to one of `PASS / WARN / BLOCK`.
+Two console lines confirm the script is live:
 
-Layer B verdicts are delivered over a WebSocket subscription to the daemon
-(`/v1/adapters/events`), maintained by the
-`com.redrobin.aggressor.RedRobinEventStream` class inside the helper JAR.
-No operator configuration required — the connection establishes
-automatically when `redrobin.cna` loads.
+```
+[Red Robin] handshake OK; session=ses_...
+[Red Robin] .cna loaded; capture active (observe-only, no interception).
+```
 
-If the daemon goes down, the WS connection drops; the JAR reconnects with
-exponential backoff (up to 60 s). Verdicts published during the gap are
-NOT replayed — check `episodic.db` for the historical record:
+A 30-second heartbeat against `/v1/adapter/heartbeat` surfaces daemon
+outages in the CS event log, so you find out that capture is dropping on the
+floor instead of working blind:
+
+```
+[Red Robin] daemon unreachable; command capture is being dropped
+```
+
+The captured command history is on disk per engagement — useful when you want
+the record rather than the chat:
 
 ```bash
 uv run python tools/inspect_episodic.py
@@ -294,11 +331,22 @@ e.g. `uv run python tools/inspect_episodic.py ~/.redrobin/engagements/<slug>/epi
 uv run redrobin daemon start --host 127.0.0.1 --port 7777
 ```
 
-The startup banner prints to stderr — look for `ANTHROPIC_API_KEY: set`
-and `VOYAGE_API_KEY: set` lines. If either says `MISSING (degraded)`, the
-banner also tells you what's disabled.
+The startup banner prints to stderr — look for the `Anthropic: set` and
+`Voyage: set` lines. If either says `MISSING (degraded)`, the banner also
+tells you what's disabled.
 
-To run without LLM keys at all (Layer A only):
+**The assistant is dark-launched — off unless you ask for it.** Capture,
+persistence and working memory all run either way, but the chat pane stays
+mute until you opt in:
+
+```bash
+REDROBIN_ASSISTANT_ENABLED=1 uv run redrobin daemon start
+```
+
+(or add `REDROBIN_ASSISTANT_ENABLED=1` to `~/.redrobin/.env`, which `init`
+does not write for you).
+
+To run without LLM keys at all (capture + working memory only, no assistant):
 
 ```bash
 uv run redrobin daemon start --allow-degraded
@@ -324,27 +372,32 @@ Defaults match those flag values, so `uv run redrobin tui` alone works for
 the default daemon address. The TUI reads `~/.redrobin/transport.token`
 automatically.
 
+Three panes: **Sessions** (live beacons), **Assistant Chat** (the copilot —
+this is where all advice appears), **Working Memory** (hosts, credentials,
+findings, objectives). `c` focuses the chat, `i` opens the inspector, `?`
+shows help, `q` quits.
+
 ## 8. Smoke test
 
-In the TUI, type `whoami` and press Enter. A verdict should land in the
-verdict pane (PASS for `whoami`, since it has no matching BLOCK rule).
+With the daemon and TUI up and the `.cna` loaded, run something harmless in
+a beacon console — `whoami` will do. Within a second or two:
 
-Hot-reload check: in another shell, drop a rule live:
+- **Sessions** shows the beacon.
+- **Working Memory** picks up the host/user facts the output reveals.
+- **Assistant Chat** may or may not say anything. Silence is correct
+  behaviour, not a failure: the assistant is deliberately selective and
+  speaks only when it judges something material. To force a round-trip, type
+  a question into the chat pane (`c` to focus) — e.g. *"what do you know
+  about this host?"* — and you should get an answer citing working memory.
 
-```bash
-cat > ~/.redrobin/rules/shared/test-block.yaml <<'EOF'
-id: rule-test-whoami
-description: Test block for smoke
-severity: DANGER
-match:
-  command: whoami
-reason: Smoke test rule
-EOF
-```
+Nothing appears in the beacon console, and nothing you type there is delayed
+or blocked. That is the intended behaviour: **the adapter captures, the core
+advises.**
 
-The daemon should pick up the new rule within seconds (watchdog observer).
-Type `whoami` in the TUI again — verdict should now be BLOCK. Delete the
-test rule when done.
+If the chat pane stays silent even when asked, check two things: that the
+daemon was started with `REDROBIN_ASSISTANT_ENABLED=1`, and that the banner
+does not say `Anthropic: MISSING (degraded)`. Either one leaves capture
+working and the assistant switched off.
 
 ## 9. Stop
 

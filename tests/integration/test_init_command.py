@@ -19,7 +19,8 @@ def test_init_creates_structure(tmp_path):
         interactive=False,
     )
     assert rc == 0
-    assert (tmp_path / "rr" / "rules" / "shared").is_dir()
+    # No `rules/` — the OPSEC rule pack went with the pre-flight gate (2026-07-26).
+    assert not (tmp_path / "rr" / "rules").exists()
     assert (tmp_path / "rr" / "engagements" / "op-first" / "engagement.yaml").is_file()
     assert (tmp_path / "rr" / "adapters").is_dir()
     assert (tmp_path / "rr" / ".env").is_file()

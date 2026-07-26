@@ -36,7 +36,6 @@ def test_dotenv_loaded_when_doctor_invoked(monkeypatch, tmp_path):
         "VOYAGE_API_KEY=from-dotenv\n"
         "REDROBIN_ROOT=" + str(tmp_path) + "\n"
     )
-    (tmp_path / "rules" / "shared").mkdir(parents=True)
     # Pre-clear env to ensure dotenv is what populates them
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("VOYAGE_API_KEY", raising=False)

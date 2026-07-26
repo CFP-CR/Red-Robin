@@ -1,14 +1,15 @@
 """Strip Red Robin's own console annotations from beacon output before enrichment.
 
-The ``.cna`` gate ``blog``s lines like ``[Red Robin] novel pattern — Layer B
-reviewing async`` into the beacon's console, which Cobalt Strike then echoes back
-into the output stream the enricher sees. Enriching those lines produces junk
-findings (``novel_pattern`` / ``unusual_activity``) and extracts "Red Robin" as a
-tool. This helper drops any line whose first non-whitespace content is the
+The ``.cna`` prints lines like ``[Red Robin] handshake OK; session=ses_...`` into
+the beacon's console, which Cobalt Strike then echoes back into the output stream
+the enricher sees. Enriching those lines produces junk findings
+(``novel_pattern`` / ``unusual_activity``) and extracts "Red Robin" as a tool.
+This helper drops any line whose first non-whitespace content is the
 self-annotation prefix, so only genuine command output reaches the LLM.
 
-Defensive (enricher-side). The ROOT fix — stop the ``.cna`` from emitting the
-annotation into the output stream at all — is the separate ``.cna`` plan.
+Belt-and-braces (enricher-side). The ``.cna``'s ``set BEACON_OUTPUT`` hook already
+skips re-emitting its own ``[Red Robin]`` lines, so this is the second line of
+defence for anything that reaches the enricher by another path.
 """
 
 from __future__ import annotations

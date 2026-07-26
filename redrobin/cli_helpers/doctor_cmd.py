@@ -37,7 +37,7 @@ def run_doctor(*, settings: Settings, quick: bool) -> int:
     if settings.anthropic_api_key:
         print("  ANTHROPIC_API_KEY:  set")
     else:
-        print("  ANTHROPIC_API_KEY:  MISSING - Layer B will degrade to no-op")
+        print("  ANTHROPIC_API_KEY:  MISSING - assistant/enricher/summariser disabled")
         failures.append("ANTHROPIC_API_KEY not set")
 
     # VOYAGE_API_KEY
@@ -54,14 +54,6 @@ def run_doctor(*, settings: Settings, quick: bool) -> int:
     else:
         print("  ROOT_EXISTS:        NO - run `redrobin init`")
         failures.append(f"{root} not initialized")
-
-    # rules dir — informational only; the daemon creates it on first start.
-    rules_dir = root / "rules"
-    if rules_dir.exists():
-        rule_count = sum(1 for _ in rules_dir.rglob("*.yaml"))
-        print(f"  RULES:              {rule_count} loaded")
-    else:
-        print("  RULES:              (will be created on first daemon start)")
 
     # --quick: env-var presence check only, skip network.
     if quick:
@@ -100,7 +92,7 @@ def run_doctor(*, settings: Settings, quick: bool) -> int:
                 failures.append(f"{r.name}: {r.reason}")
 
     if failures:
-        print("[+] Doctor finished: DEGRADED (Layer A still works)")
+        print("[+] Doctor finished: DEGRADED (command capture still works)")
         return 1
     print("[+] Doctor finished: OK")
     return 0

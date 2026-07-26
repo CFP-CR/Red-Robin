@@ -1,4 +1,4 @@
-"""redrobin/domain/events.py — Wire protocol event types (11 events + envelope).
+"""redrobin/domain/events.py — Wire protocol event types (10 events + envelope).
 
 Source: spec §4 Componente 7. Mirror of `protocol/schemas/v0.1/`. Round-trip with
 the protocol schema is enforced by tests in `tests/unit/test_domain_events.py`.

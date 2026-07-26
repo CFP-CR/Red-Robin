@@ -7,7 +7,6 @@ The Red Robin operator's local state lives under ~/.redrobin/ (or whatever
     shared/             — cross-engagement state (longterm.db, tradecraft.db, kb-index/)
     engagements/        — per-engagement isolated state (working_memory.json, episodic.db, events.jsonl)
     kb-source/          — operator-curated KB markdown
-    rules/{shared,personal}/  — YAML rules
     config.toml, transport.token, redrobin.log
 
 This module enforces:
@@ -34,9 +33,6 @@ LAYOUT: tuple[tuple[str, int], ...] = (
     ("engagements", 0o700),
     ("engagements/archived", 0o700),
     ("kb-source", 0o700),
-    ("rules", 0o700),
-    ("rules/shared", 0o700),
-    ("rules/personal", 0o700),
 )
 
 

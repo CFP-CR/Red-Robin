@@ -120,8 +120,8 @@ def test_doctor_exit_code_zero_when_all_pass(monkeypatch, tmp_path):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("VOYAGE_API_KEY", "test-key")
     root = tmp_path / ".redrobin"
-    rules_dir = root / "rules"
-    rules_dir.mkdir(parents=True)
+    # doctor reports ROOT_EXISTS; create it so the run is OK, not DEGRADED.
+    root.mkdir(parents=True)
     monkeypatch.setenv("REDROBIN_ROOT", str(root))
     from redrobin.cli import cmd_doctor
 

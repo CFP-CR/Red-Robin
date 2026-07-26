@@ -150,11 +150,32 @@ Operator launches CS Client via the official launcher with **zero JVM flags**.
 - [ ] In Script Console after .cna load: NO ClassNotFoundException visible.
 - [ ] Optional verification — type in Script Console: `println([$REDROBIN_HTTP getClass]);` → expect `class com.redrobin.aggressor.RedRobinHttp`.
 
-### 3.3 Heartbeat round-trip
+### 3.3 Heartbeat round-trip — **MANUAL ONLY** (the periodic fork is disabled)
 
-- [ ] Wait 30-40 seconds after .cna load.
+> **Do not wait for this one — it will never fire on its own.** The 30-second `fork{}` that
+> drove `redrobin_heartbeat()` is **commented out** in `redrobin.cna` (see the
+> `===== Heartbeat fork — DISABLED for v0.1 =====` block, immediately above
+> `on script_unload`): Sleep's `fork()` builds a fully isolated scope that cannot see
+> `$REDROBIN_HTTP`, so the loop was disabled pending the `lambda(...)` rewrite (#110).
+> **Pre-existing condition — NOT caused by the pre-flight gate removal.** The
+> `redrobin_heartbeat` sub itself is live and correct, so this step must be driven **by
+> hand** (or the fork temporarily re-enabled). The coverage is kept because the
+> heartbeat route is still the adapter's only liveness probe.
+
+- [ ] In the CS Client Script Console, fire one heartbeat by hand:
+  ```sleep
+  redrobin_heartbeat();
+  ```
 - [ ] In daemon log expect: `GET /v1/adapter/heartbeat?adapter=cs-main HTTP/1.1 200 OK`
 - [ ] In Script Console expect: NO `Attempted to call a non-static method on a null reference` errors.
+- [ ] Negative path: stop the daemon, run `redrobin_heartbeat();` again, and expect exactly
+      `[Red Robin] daemon unreachable; command capture is being dropped`. Restart the daemon.
+- [ ] _Optional — only if you want the periodic path exercised:_ uncomment the `fork({...})`
+      block in `redrobin.cna`, reload, wait 30-40 s, then **revert the edit**. Expect it to
+      misbehave today: inside the fork `$REDROBIN_HTTP` is invisible, the GET throws, and
+      `redrobin_http_get` catches it as `code => 0` — so you get a spurious
+      `[Red Robin] daemon unreachable...` warn every 30 s with a healthy daemon. That is
+      #110, not a regression; record and move on.
 
 ### 3.4 Actionable error logging
 
@@ -176,12 +197,21 @@ Operator launches CS Client via the official launcher with **zero JVM flags**.
   ```
   (Or attempt 2 then attempt 3 then success, depending on timing.)
 
-### 3.6 Handshake manifest is gate-free
+### 3.6 Handshake manifest is capture-only
 
-- [ ] In the daemon log / adapter session store, confirm the registered manifest has **no**
-      `preflight_block_console`, no `preflight_block_tui`, no `gate_scope`, and no
-      `events_consumed` key.
-- [ ] Confirm `events_emitted` still lists the five capture types.
+The manifest is sent inline by `redrobin_handshake_with_retry` in `redrobin.cna`; check what
+the daemon actually registered, not the file.
+
+- [ ] In the daemon log / adapter session store, confirm the registered manifest declares
+      exactly these capabilities — `tui_dispatch`, `output_observe`, `console_annotation`,
+      `emergency_kill_switch` all `true`, and `command_modification` `false`.
+- [ ] Confirm `events_emitted` lists the five capture types: `beacon.command_input`,
+      `beacon.command_output`, `host.observation`, `credential.observed`, `beacon.initial`.
+      (Known pre-existing divergence: `adapters/cobaltstrike/manifest.toml` still lists
+      `adapter.heartbeat` as its fifth entry instead of `beacon.initial`. Only the `.cna`'s
+      inline list is registered, so do NOT fail this step on that mismatch.)
+- [ ] Confirm there is **no** `events_consumed` key — with the verdict WebSocket gone the
+      adapter consumes nothing from the daemon; it only POSTs.
 
 ### 3.7 Java version guard (optional smoke)
 
@@ -318,5 +348,6 @@ tested; this smoke is the ONLY acceptance for the `.cna` `beacon.initial` emit (
 
 - §1 (no interception) passes in full — this is the acceptance for the gate removal.
 - §2 (capture path) passes in full — this is the product.
-- §3-§6 pass on real CS 4.12 + daemon.
+- §3-§6 pass on real CS 4.12 + daemon. §3.3 (heartbeat) is **manual only** — it cannot pass by
+  waiting, because the periodic `fork{}` is disabled in `redrobin.cna` (#110, pre-existing).
 - Update this file with PASS/FAIL annotations during the smoke test.

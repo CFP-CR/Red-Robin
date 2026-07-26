@@ -28,6 +28,15 @@ tags:
 - Red Team Village @ DEF CON 34: **2026-05-31**
 - La Villa @ DEF CON 34: **2026-06-01**
 
+> **STATUS NOTE — 2026-07-26 (supersedes parts of this document).** The synchronous OPSEC
+> **pre-flight gate was removed**: Layer A (Sigma/YAML rules + the `rules/` pack), Layer B (LLM
+> judge), the verdict pipeline, `VerdictAction`, the `opsec.verdict` event, `POST /v1/verdict/quick`,
+> and all 28 Aggressor `alias` overrides are deleted. **Red Robin is advisory-only** — the adapter
+> *captures* (`beacon.command_input` / `beacon.command_output` / `beacon.initial` → `POST /v1/events`)
+> and the core *advises* in the TUI chat; nothing intercepts the operator's command path. This
+> document is retained as the **historical v1.2 design record** and is deliberately NOT rewritten;
+> read §Componente 3 and §Componente 4 together with their status notes below.
+
 ---
 
 ## 1. Mission and Thesis
@@ -474,6 +483,12 @@ Para validar que el contrato del adapter es genuinely C2-agnostic, v0.1 ship con
 
 ### Componente 3 — Memory System
 
+> **STATUS NOTE — 2026-07-26.** **L3 Episodic** is now sourced from `beacon.command_input` — one row
+> per operator command — rather than from `opsec.verdict`, which no longer exists. `Episode` is
+> narrowed to `(id, engagement_id, correlation_id, command, created_at)`. **L4 Tradecraft Graph
+> remains unbuilt.** L1 / L2 / L5 are substantially as described. Layer B references below are
+> historical.
+
 **Decisión: B3 — 5 layers completos en v0.1.**
 
 | Layer | Tecnología | Contenido |
@@ -520,6 +535,12 @@ engagement:
 **Auto-detección:** Layer B (LLM judge) infiere phase transitions y propone milestones. Operador confirma o overridea via `:rr milestone`, `:rr phase`, `:rr objective`.
 
 ### Componente 4 — OPSEC Engine
+
+> **STATUS NOTE — 2026-07-26. THIS ENTIRE COMPONENT WAS REMOVED.** Layer A, Layer B, the verdict
+> pipeline, the redactor, the scope enforcer, and the lesson promoter are all deleted — there is no
+> `input_proposed` → verdict path any more, and no consumer of a verdict in either the `.cna` or the
+> TUI. `Severity` (INFO/WARN/DANGER/ESCALATE) survives as the assistant's `Recommendation.opsec_risk`.
+> Everything below is a historical design record.
 
 **Decisión: Híbrido Layer A (YAML rules) + Layer B (LLM judge with RAG) + Severity D (escalating) + Adversarial "explain" mode.**
 

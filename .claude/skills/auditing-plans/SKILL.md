@@ -21,12 +21,11 @@ Cross-reference every claim in the **spec AND the plan** against the actual Red 
 2. **Don't trust citations.** Every file path, line number, type, route, field name, and enum in the docs is a *claim* — `Read` the actual source and confirm it. For a large plan, dispatch parallel Explore agents for breadth.
 3. **Walk each task** against the files it touches — read them, don't assume.
 4. **Check claims against the project rules** (they encode the verified facts; a doc claim that contradicts a rule is a finding until proven against source):
-   - `.claude/rules/wire-protocol.md` — event types + fields (`bid`, never `beacon_id`; `OpsecVerdictEvent` = `source_event_id/severity/reason/rule_id?/suggestions[]`; `Severity` INFO/WARN/DANGER/ESCALATE vs `VerdictAction` PASS/WARN/BLOCK/ESCALATE — **no `ALLOW`**); route `POST /v1/verdict/quick`; port 7777; schemas `additionalProperties:false`.
+   - `.claude/rules/wire-protocol.md` — the 10 event types + fields (`bid`, never `beacon_id`; one enum, `Severity` INFO/WARN/DANGER/ESCALATE — there is no `VerdictAction`); the capture ingress `POST /v1/events`; port 7777; schemas `additionalProperties:false`.
    - `.claude/rules/architecture.md` — the 4 import-linter contracts by name; layer direction; the facade pattern; `LLMProvider` is the only ABC.
-   - `.claude/rules/sigma-rules.md` — OPSEC rules live in the **top-level `rules/`** (NOT `.claude/rules/`); severity is INFO/WARN/DANGER; the match schema.
-   - `.claude/rules/aggressor-cna.md` — **`.cna` changes are validated by a live-beacon operator smoke, never by CI**; `hasmatch`→`ismatch`; `$3`/`$5`; Script Manager reload required.
+   - `.claude/rules/aggressor-cna.md` — **`.cna` changes are validated by a live-beacon operator smoke, never by CI**; the adapter captures and never intercepts (zero `alias` overrides); `hasmatch`→`ismatch`; `$3`/`$5`; Script Manager reload required.
    - `.claude/rules/testing.md` — TDD; adapter tests (`adapters/<name>/tests/`) are NOT in CI's `pytest tests/`; the local gotchas.
-5. **Verify the gates + acceptance.** The 5 CI gates are `ruff check` / `ruff format --check` / `mypy redrobin/domain redrobin/application` / `lint-imports --config importlinter.cfg` / `pytest tests/`. A doc claiming a `.cna`/gate/TUI change is "verified by CI" is wrong — that is an operator smoke.
+5. **Verify the gates + acceptance.** The 5 CI gates are `ruff check` / `ruff format --check` / `mypy redrobin/domain redrobin/application` / `lint-imports --config importlinter.cfg` / `pytest tests/`. A doc claiming a `.cna`/capture/TUI change is "verified by CI" is wrong — that is an operator smoke.
 6. **Compile a report** with severity, then **present it** — issues AND what the docs get right.
 
 ## Severity
@@ -57,4 +56,4 @@ Cross-reference every claim in the **spec AND the plan** against the actual Red 
 | Audit the plan but not the spec | Audit **both** — the plan drifts from the spec, and they can contradict. |
 | Only report what's wrong | Include the "gets RIGHT" section — accurate praise builds trust. |
 | Report an issue without a fix | Every finding names the correct value / concrete fix. |
-| Confuse `rules/` with `.claude/rules/` | Top-level `rules/` = Sigma product data; `.claude/rules/` = Claude tooling. |
+| Treat a top-level `rules/` as real | There is no product `rules/` dir — the Sigma/OPSEC pack went with the pre-flight gate (2026-07-26). Only `.claude/rules/` (Claude tooling) exists. |
