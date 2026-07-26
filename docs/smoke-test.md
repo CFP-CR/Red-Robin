@@ -170,17 +170,23 @@ Watch the TUI while it replays. Expected:
 - `./.rr/engagements/op-smoke/events.jsonl` grows by one line per event —
   the append-only capture record. Check it with
   `wc -l ./.rr/engagements/op-smoke/events.jsonl`.
-- **Working Memory** fills in a few seconds later. That leg goes through the
-  LLM enricher, which reads `beacon.command_output` and publishes
-  `working_memory.deltas` — so it needs a working `ANTHROPIC_API_KEY` and it
-  is not instant. (The reducer itself only handles `beacon.initial`,
-  `beacon.command_input`, `engagement.milestone` and those deltas; the
-  scenario's `host.observation` / `credential.observed` events are validated
-  and persisted but do not currently drive a panel.)
+- **Working Memory's `hosts` and `credentials` arrays stay empty** for this
+  scenario, even with a working `ANTHROPIC_API_KEY` — expected, not a
+  failure. The scenario's only `beacon.command_output` (a `net group "Domain
+  Admins"` listing) names no host besides the beacon's own — which the
+  enricher is grounded to never re-report as newly-discovered — and it
+  carries no secret material for a credential to attach to. (The reducer
+  itself only handles `beacon.initial`, `beacon.command_input`,
+  `engagement.milestone` and `working_memory.deltas`; the scenario's
+  `host.observation` / `credential.observed` events are validated and
+  persisted to `events.jsonl` but do not currently drive a panel.)
 
 Then ask the assistant something in the chat pane (`c` to focus), e.g.
 *"what do you know about this host?"*. Expected: an answer grounded in the
-working memory you just watched fill in.
+beacon session shown in Sessions (`WS-FINANCE-04.acme.local` / `acme\jdoe`) —
+the assistant's prompt context carries the full working-memory snapshot,
+`sessions` included, so it can ground an answer in that beacon even though
+`hosts`/`credentials` stay empty for this scenario.
 
 Note: unprompted advisories are **not** part of the pass criteria. The
 assistant is deliberately selective (dedup, novelty, and a 30 s cooldown), so

@@ -440,9 +440,11 @@ Get-Content "$env:USERPROFILE\redrobin-smoke\engagements\op-smoke\working_memory
 from the scenario's `beacon.initial`. No LLM involved (see the paragraph above
 Step 2.3).
 
-`hosts` and `credentials` are the two arrays the LLM enricher owns, and for
-**this scenario** expect them to stay **empty** even with a working
-`ANTHROPIC_API_KEY` — that is correct, not a failure:
+The LLM enricher owns five arrays — `hosts`, `credentials`, `findings`,
+`tools_used`, `defenses_observed` (the merge in `enricher.py`'s `_enrich`) —
+and for **this scenario**, `hosts` and `credentials` specifically are expected
+to stay **empty** even with a working `ANTHROPIC_API_KEY`. That is correct,
+not a failure:
 
 - `hosts` stays empty because the scenario's lone `beacon.command_output`
   (the `net group "Domain Admins"` listing) names no host at all, and the
@@ -455,6 +457,11 @@ Step 2.3).
   `WorkingMemoryDeltas.from_payload` drops any credential lacking a
   `secret`/`ntlm_hash` (#114 — a username alone is not a credential).
 
+`findings` is NOT blocked the same way — nothing stops the enricher from
+logging an observation about the Domain Admins listing itself, so a non-empty
+`findings` array here is possible. It just isn't guaranteed, so it is not a
+pass/fail signal either way.
+
 To confirm the wire path itself, independent of the LLM, check the append-only
 capture log instead:
 
@@ -464,8 +471,11 @@ Select-String -Path "$env:USERPROFILE\redrobin-smoke\engagements\op-smoke\events
 ```
 
 **Expect:** 3 matching lines (2x `host.observation`, 1x `credential.observed`)
-— proof the daemon validated and persisted every event the scenario sent, even
-though the reducer folds neither type into working memory.
+— proof the daemon validated and persisted these 3 of the scenario's 7 events
+(the two types the reducer ignores), independent of the LLM. This does not by
+itself prove the other 4 events landed — `beacon.initial`, 2x
+`beacon.command_input`, `beacon.command_output` — Step 2.2's `[sliver-mock]
+sent <type>` log and Step 2.3's `sessions` check are what cover those.
 
 ### Step 2.4 — TUI shows the simulated state
 
@@ -518,13 +528,21 @@ uv run redrobin daemon stop
 and re-checking or replacing the key will not change the outcome. Step 2.3 has
 the full reason: no other host in the one command output, the beacon's own
 host is grounded out of extraction, and the output carries no secret material
-for a credential to attach to. (If you want to confirm the enricher actually
-ran rather than errored, check the daemon log for `enrichment failed` — its
-absence means extraction completed normally and correctly found nothing to
-report for this input.) Only if `sessions` is ALSO empty (that path is
-deterministic and needs no LLM) are you looking at a wire-protocol bug — the
-class Phase 2 had with `/v1/events` not bus-publishing. In that case, stop and
-report.
+for a credential to attach to.
+
+To confirm the enricher actually ran on this input at all — as opposed to
+never firing, e.g. a missing `ANTHROPIC_API_KEY`, `REDROBIN_ENRICHMENT_ENABLED=0`,
+or the enrichment gate rejecting the output — look for `enrichment ok:
+command=... beacon=win_ws01 ... deltas=0` in the daemon log. That specific
+line, with `deltas=0`, is the real proof extraction ran and correctly found
+nothing (`enricher.py`'s success-path log, which fires even when nothing was
+extracted). **Do not use the absence of `enrichment failed` for this** — that
+message only fires on an LLM/network error or fully-unparseable output
+(`enricher.py`'s `_emit_failed`); a missing key or a disabled enricher
+produces NEITHER line, because `_enrich` returns silently before ever calling
+the LLM. Only if `sessions` is ALSO empty (that path is deterministic and
+needs no LLM) are you looking at a wire-protocol bug — the class Phase 2 had
+with `/v1/events` not bus-publishing. In that case, stop and report.
 
 ---
 
