@@ -64,17 +64,3 @@ episodes = Table(
     Column("command", Text, nullable=False),
     Column("created_at", DateTime, nullable=False),
 )
-
-
-# Slice 10 — structured (command, verdict) patterns promoted from recurring
-# episodes. Lives in the long-term database alongside ``facts``.
-promoted_lessons = Table(
-    "promoted_lessons",
-    metadata,
-    Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("command", Text, nullable=False, index=True),
-    Column("verdict", String(16), nullable=False),
-    Column("summary", Text, nullable=False),
-    Column("occurrence_count", Integer, nullable=False),
-    Column("created_at", DateTime, nullable=False),
-)

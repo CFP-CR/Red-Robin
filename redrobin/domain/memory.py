@@ -1,16 +1,17 @@
 """redrobin/domain/memory.py — Memory schemas per spec §4 Componente 3.
 
 5 memory layers:
-  L1 Long-term:    PromotedLesson (durable, cross-engagement, structured)
+  L1 Long-term:    Lesson (durable, cross-engagement, operator-correction record)
   L2 Working:      WorkingMemory (hosts, defenses, tools, kill_chain) — per-engagement JSON
   L3 Episodic:     Episode (raw command-activity log, per-engagement) — SQLite
   L4 Tradecraft:   technique → bypass → detection graph — SQLite (deferred to v0.2 in v0.1)
   L5 Context:      sliding-window ContextSummary — in-memory + summary.txt
 
 Slice 12 removed the never-used ``Fact`` (free-form L1 long-term record)
-dataclass. ``PromotedLesson`` remains the structured L1 row shape; the
-automatic promoter that once produced it was retired with the pre-flight
-gate, and the assistant's ``capture_lesson`` tool now writes L1 directly.
+dataclass, and removing the pre-flight gate took ``PromotedLesson`` with it —
+that row shape was keyed by ``(command, verdict)`` and only the deleted
+automatic promoter ever wrote it. The assistant's ``capture_lesson`` tool is
+now the sole L1 writer, via ``Lesson``.
 """
 
 from __future__ import annotations
@@ -161,29 +162,11 @@ class Episode:
 
 
 @dataclass(frozen=True)
-class PromotedLesson:
-    """L1 long-term record synthesised from recurring episodes.
-
-    Structured pattern record keyed by ``(command, verdict)`` and surfaced
-    cross-engagement. The automatic promoter that once produced these was
-    retired with the pre-flight gate; the shape is retained because
-    :class:`LongtermRepo` still reads and writes existing rows.
-    """
-
-    id: int | None  # None until persisted
-    command: str
-    verdict: str  # BLOCK | WARN
-    summary: str
-    occurrence_count: int
-    created_at: datetime
-
-
-@dataclass(frozen=True)
 class Lesson:
     """L1 operator-correction lesson (spec §6.D) — a context-scoped, NEVER-blanket
-    record captured when the operator corrects the assistant. Distinct from
-    ``PromotedLesson`` (the verdict-aggregation record keyed by command/verdict):
-    this is the operator-correction lesson-source (§10). ``scope`` is
+    record captured when the operator corrects the assistant, and since the
+    pre-flight gate's verdict-aggregation record was deleted, the only L1 row
+    shape left. This is the operator-correction lesson-source (§10). ``scope`` is
     ``"operator"`` (persists cross-engagement — cumulative) or ``"engagement"``
     (quarantined — read back only for its own engagement, so a honeypot fact never
     contaminates the next client). Provenance (``engagement_id``, ``created_at``)

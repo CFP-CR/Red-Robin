@@ -1,9 +1,11 @@
-"""Persistence unit tests — sync sqlite3 API for EpisodicRepo + LongtermRepo.
+"""Persistence unit tests — sync sqlite3 API for EpisodicRepo.
 
 The original async SQLAlchemy API was removed in Slice 9 of the v0.1.x
 hardening pass (single-mode repos). Tests below exercise the surviving
 sync surface: ``EpisodicRepo.record`` / ``list_episodes_for_engagement``
-and ``LongtermRepo.upsert_lesson`` / ``list_lessons``.
+plus the gate-era schema migration. ``LongtermRepo``'s surviving surface
+(the operator-correction lessons) is covered in ``test_operator_lessons.py``;
+its ``PromotedLesson`` API went with the pre-flight gate.
 """
 
 from __future__ import annotations
@@ -11,9 +13,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime
 
-from redrobin.domain.memory import PromotedLesson
 from redrobin.infrastructure.persistence.episodic_repo import EpisodicRepo
-from redrobin.infrastructure.persistence.longterm_repo import LongtermRepo
 
 
 def test_episodic_record_and_list(tmp_path) -> None:
@@ -127,23 +127,3 @@ def test_episodic_migration_is_idempotent(tmp_path) -> None:
     repo.record(engagement_id="vantage", correlation_id="c-2", command="ps")
 
     assert [e.command for e in repo.list_episodes_for_engagement("vantage")] == ["whoami", "ps"]
-
-
-def test_longterm_upsert_and_list(tmp_path) -> None:
-    repo = LongtermRepo(tmp_path / "longterm.db")
-    lesson = repo.upsert_lesson(
-        PromotedLesson(
-            id=None,
-            command="nanodump.bof",
-            verdict="BLOCK",
-            summary="nanodump blocked by Falcon",
-            occurrence_count=3,
-            created_at=datetime.now(),
-        )
-    )
-    assert lesson.id is not None
-
-    all_lessons = repo.list_lessons()
-    assert len(all_lessons) == 1
-    assert all_lessons[0].command == "nanodump.bof"
-    assert all_lessons[0].occurrence_count == 3

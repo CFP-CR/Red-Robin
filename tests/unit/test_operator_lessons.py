@@ -1,6 +1,7 @@
 # tests/unit/test_operator_lessons.py
 from __future__ import annotations
 
+import sqlite3
 from datetime import datetime
 
 from redrobin.domain.memory import Lesson
@@ -47,8 +48,21 @@ def test_read_back_mixes_operator_and_own_engagement(tmp_path):
     assert got == {"op-wide", "A-only"}  # NOT B-only
 
 
-def test_operator_lessons_table_is_separate_from_promoted_lessons(tmp_path):
-    # adding an operator lesson does not disturb the PromotedLesson API
-    repo = LongtermRepo(tmp_path / "longterm.db")
+def test_operator_lesson_write_is_scoped_to_its_own_table(tmp_path):
+    """The write lands in ``operator_lessons`` and disturbs no neighbour table.
+
+    ``longterm.db`` is shared (``facts`` lives beside ``operator_lessons``), so a
+    lesson leaking into the wrong table would surface as cross-contaminated L1
+    reads. Previously asserted via the ``promoted_lessons`` read path, which was
+    deleted with the pre-flight gate; ``facts`` is the surviving neighbour.
+    """
+    db = tmp_path / "longterm.db"
+    repo = LongtermRepo(db)
     repo.add_operator_lesson(_lesson("operator", None))
-    assert repo.list_lessons() == []  # PromotedLesson table still empty
+
+    con = sqlite3.connect(db)
+    try:
+        assert con.execute("SELECT COUNT(*) FROM operator_lessons").fetchone()[0] == 1
+        assert con.execute("SELECT COUNT(*) FROM facts").fetchone()[0] == 0
+    finally:
+        con.close()
