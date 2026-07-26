@@ -361,8 +361,10 @@ async def start_enricher(
     ``build_enricher_llm`` returns None and ``_enrich`` returns immediately on every
     event — the daemon still boots, but this enricher is the ONLY producer of
     ``working_memory.deltas``, so nothing extracts facts from command output at all.
-    Working memory then holds only what the reducer takes straight off the wire
-    (``beacon.initial`` → ``Session``); hosts, credentials and findings stay empty.
+    Working memory then holds only the engagement definition seeded at boot by
+    ``apply_engagement_scope`` (client/scope/ROE/objectives) plus what the reducer
+    takes straight off the wire (``beacon.initial`` → ``Session``); hosts,
+    credentials and findings stay empty.
     There is no fallback extractor — Plan B2 retired the command-output regex
     producer, so degraded here means no enrichment, not reduced enrichment.
     """
@@ -410,9 +412,8 @@ async def start_assistant(app: FastAPI, settings: Settings) -> tuple[Assistant, 
     engagement_id = app.state.engagement_id
 
     # Re-read the active engagement_id off ``app.state`` each call so a future
-    # engagement switch surfaces the right summary without rebuilding the assistant
-    # (mirrors Layer B's ``_engagement_id_provider``). The captured value is only a
-    # fallback if the attribute is ever missing.
+    # engagement switch surfaces the right summary without rebuilding the assistant.
+    # The captured value is only a fallback if the attribute is ever missing.
     def _engagement_id_provider() -> str:
         return getattr(app.state, "engagement_id", engagement_id)
 
