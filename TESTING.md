@@ -435,10 +435,37 @@ Get-Content "$env:USERPROFILE\redrobin-smoke\engagements\op-smoke\working_memory
   ConvertFrom-Json | Format-List
 ```
 
-**Expect:** `hosts` array contains `WS-FINANCE-04.acme.local` (or similar from
-the scenario), `credentials` array contains observed creds, `sessions` array
-contains the beacon. Exact values depend on the scenario JSON — open it
-side-by-side to cross-check.
+**Expect:** `sessions` contains an entry for beacon `win_ws01` —
+`hostname: WS-FINANCE-04.acme.local`, `user: acme\jdoe` — populated straight
+from the scenario's `beacon.initial`. No LLM involved (see the paragraph above
+Step 2.3).
+
+`hosts` and `credentials` are the two arrays the LLM enricher owns, and for
+**this scenario** expect them to stay **empty** even with a working
+`ANTHROPIC_API_KEY` — that is correct, not a failure:
+
+- `hosts` stays empty because the scenario's lone `beacon.command_output`
+  (the `net group "Domain Admins"` listing) names no host at all, and the
+  enricher is separately grounded to never re-emit a beacon's own host/user as
+  newly-discovered (`_build_enricher_user_message`, #105) — so even the one
+  host this beacon has (`WS-FINANCE-04.acme.local`) is withheld from
+  extraction.
+- `credentials` stays empty because that output is bare usernames
+  (`Administrator`, `svc_backup`, `jdoe`) with no secret material, and
+  `WorkingMemoryDeltas.from_payload` drops any credential lacking a
+  `secret`/`ntlm_hash` (#114 — a username alone is not a credential).
+
+To confirm the wire path itself, independent of the LLM, check the append-only
+capture log instead:
+
+```powershell
+Select-String -Path "$env:USERPROFILE\redrobin-smoke\engagements\op-smoke\events.jsonl" `
+  -Pattern '"host\.observation"|"credential\.observed"'
+```
+
+**Expect:** 3 matching lines (2x `host.observation`, 1x `credential.observed`)
+— proof the daemon validated and persisted every event the scenario sent, even
+though the reducer folds neither type into working memory.
 
 ### Step 2.4 — TUI shows the simulated state
 
@@ -451,12 +478,14 @@ uv run redrobin tui `
   --connect-http http://127.0.0.1:7777
 ```
 
-**Expect:** Working Memory pane (right side) shows the host(s), credentials, and
-any findings from the scenario; Sessions (left) shows the scenario's beacons. The
-Assistant Chat pane (center) may carry an unprompted advisory if the replayed
-activity cleared the assistant's trigger gate — that is a bonus, not a pass
-condition, since the gate is deliberately quiet (dedup + novelty + cooldown).
-Exit with `q`.
+**Expect:** Sessions (left) shows the scenario's beacon — `win_ws01` /
+`WS-FINANCE-04.acme.local` / `acme\jdoe` — the deterministic half, no LLM
+required. Working Memory's `hosts` and `credentials` arrays are expected to
+stay empty for this scenario (Step 2.3 explains why) — don't wait for panels
+that won't move. The Assistant Chat pane (center) may carry an unprompted
+advisory if the replayed activity cleared the assistant's trigger gate — that
+is a bonus, not a pass condition, since the gate is deliberately quiet (dedup +
+novelty + cooldown). Exit with `q`.
 
 ### Step 2.5 — replay at real-time speed (optional, ~3 min)
 
@@ -479,17 +508,23 @@ uv run redrobin daemon stop
 | Check | Pass condition |
 |-------|----------------|
 | Step 2.2 events sent | All scenario events show `[sliver-mock] sent <type>` |
-| Step 2.3 sessions | `sessions` contains the scenario beacon (reducer-driven, deterministic) |
-| Step 2.3 working memory | At least one host + credential in the JSON — **requires `ANTHROPIC_API_KEY`**, since these come from the LLM enricher over `beacon.command_output`, not from the scenario's `host.observation` / `credential.observed` events |
-| Step 2.4 TUI memory pane | Working Memory pane reflects the scenario state |
+| Step 2.3 sessions | `sessions` contains beacon `win_ws01` / `WS-FINANCE-04.acme.local` (reducer-driven, deterministic, no LLM) |
+| Step 2.3 wire path | `events.jsonl` contains the 2x `host.observation` + 1x `credential.observed` lines the scenario sent (deterministic proof the wire path worked, independent of the LLM) |
+| Step 2.4 TUI memory pane | Sessions pane shows the beacon; `hosts`/`credentials` in Working Memory are expected EMPTY for this scenario (not a failure — see Step 2.3) |
 | No daemon crash | Terminal A shows no tracebacks |
 
-**If hosts/credentials don't show up in working memory** despite events being
-sent, check the enricher first — a missing/failing `ANTHROPIC_API_KEY` produces
-exactly this symptom and is not a bug. Look for `enrichment failed` in the daemon
-log. Only if `sessions` is ALSO empty (that path is deterministic and needs no
-LLM) are you looking at a wire-protocol bug — the class Phase 2 had with
-`/v1/events` not bus-publishing. In that case, stop and report.
+**`hosts`/`credentials` staying empty in working memory is expected for
+`acme_corp`** — it is not a symptom of a missing/failing `ANTHROPIC_API_KEY`,
+and re-checking or replacing the key will not change the outcome. Step 2.3 has
+the full reason: no other host in the one command output, the beacon's own
+host is grounded out of extraction, and the output carries no secret material
+for a credential to attach to. (If you want to confirm the enricher actually
+ran rather than errored, check the daemon log for `enrichment failed` — its
+absence means extraction completed normally and correctly found nothing to
+report for this input.) Only if `sessions` is ALSO empty (that path is
+deterministic and needs no LLM) are you looking at a wire-protocol bug — the
+class Phase 2 had with `/v1/events` not bus-publishing. In that case, stop and
+report.
 
 ---
 

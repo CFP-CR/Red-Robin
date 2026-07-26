@@ -1,11 +1,10 @@
 """Slice 14 E2E: redrobin init → daemon boot.
 
-Exercises the full operator journey through the new ``redrobin init``
-entry point introduced in Slice 5: the init helper writes the on-disk
-layout (``engagements/<slug>/engagement.yaml``, ``adapters/``, ``.env``),
-the FastAPI lifespan picks it up
-through :class:`Settings`, every startup helper runs end-to-end, and
-the startup banner reflects the resolved engagement.
+Exercises the full operator journey through the new ``redrobin init`` entry
+point introduced in Slice 5: the init helper writes the on-disk layout
+(``engagements/<slug>/engagement.yaml``, ``adapters/``, ``.env``), the FastAPI
+lifespan picks it up through :class:`Settings`, every startup helper runs
+end-to-end, and the startup banner reflects the resolved engagement.
 
 Migrates the prior Phase-2 manual env-var bootstrap to the new
 init-driven flow — there is now one canonical way to set up a fresh
