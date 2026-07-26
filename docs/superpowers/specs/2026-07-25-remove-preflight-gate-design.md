@@ -11,9 +11,22 @@ Deletes the synchronous pre-flight gate — the feature Red Robin was born as �
 
 **The product moved.** The daemon judges every beacon command (Layer A Sigma → Layer B LLM judge → a verdict of PASS/WARN/BLOCK/ESCALATE). The value today is the **copilot that advises**, not a checker that rules on the operator's commands.
 
-**And the gate is already toothless — verified in the shipped `.cna` (2026-07-25).** Its five hooks are `set BEACON_OUTPUT`, `on beacon_input`, `on beacon_initial`, `on heartbeat_5s`, `on script_unload`. There is **no `alias` override anywhere**, and `on beacon_input` *only* emits `beacon.command_input` — it never calls the gate. The `redrobin_gate` and `redrobin_query_quick` subs are **dead code: defined, never called**. The only thing a verdict does at the C2 boundary is `heartbeat_5s` printing `[Red Robin] Layer B <verdict>: <reason>` into the beacon console.
+**The gate is fully live and it intercepts the operator's command path.**
 
-This reframes the 2026-07-22 smoke: the operator's `mimikatz sekurlsa` was **never technically blocked**. A `BLOCK` message appeared, the operator read it as a block and stopped. That is a **UX block, not an enforcement one** — which strengthens the case for deletion rather than weakening it: ~1400 lines of judgment whose only real effect is a console message that induces the operator to block themselves, with no way to act on it.
+> **CORRECTION (2026-07-26).** This section previously claimed the gate was "already toothless — no `alias` override anywhere, `redrobin_gate` is dead code". **That was wrong.** The check behind it grepped only `redrobin.cna` itself and never followed the `include()` statements at `redrobin.cna:453-457`, which load four alias template files:
+>
+> | File | `alias` overrides | calls to `redrobin_gate` |
+> |---|---|---|
+> | `aliases/tier1a_gate.sleep` | 16 | 18 |
+> | `aliases/tier1b_wrapper.sleep` | 7 | 7 |
+> | `aliases/tier2_warn.sleep` | 5 | 5 |
+> | **total** | **28** | **30** |
+>
+> The overrides cover `mimikatz`, `dcsync`, `hashdump`, `psexec`, `jump`, `spawn`, `getsystem`, `inject`, `shell`, `powershell` and more. Tier-1A **hard-blocks** on a DANGER verdict (`berror` + `return false`) — the command never reaches the beacon. So the 2026-07-22 smoke's `mimikatz sekurlsa` **was** technically blocked, not merely discouraged by a console message.
+>
+> **Consequence for the removal order.** Deleting `POST /v1/verdict/quick` before the aliases leaves them querying a route that no longer exists; the gate then returns `UNAVAILABLE`, which Tier-1A treats as dangerous — hard-blocking 16 commands while telling the operator the daemon is unreachable. **The aliases must therefore be deleted as part of this change, not assumed absent.**
+
+The case for deletion is unchanged and if anything stronger: the gate really does stand between the operator and their C2, on a judgment the operator has already made, with an LLM call in the critical path.
 
 **What it costs to keep.** ~1400 lines across eight application modules, two API surfaces, a Sigma rule pack with hot-reload, and ~90 lines of dead `.cna` code — plus the conceptual weight of a two-tier verdict protocol that every reader of this codebase has to learn before understanding what Red Robin actually does.
 
@@ -62,7 +75,11 @@ This is a deletion, so the pillars are served by subtraction, not by new abstrac
 
 **Domain:** `opsec.py` entirely (`Verdict` + `VerdictAction`) · `rules.py` entirely (`Rule`, `RuleSeverity`, `EventContext`) · the `OpsecVerdictEvent` type in `events.py` and its `Envelope` severity-serialization branch · `PromotedLesson` · `Episode.verdict` and `Episode.reason`. **`events.Severity` is KEPT** — see the trap in §5.5.
 
-**`.cna`** (verified against the shipped file — **there are no `alias` overrides to remove**): the dead `redrobin_gate` and `redrobin_query_quick` subs · the `heartbeat_5s` branch that prints `[Red Robin] Layer B …` verdicts into the beacon console (and the `/v1/adapters/events` polling that feeds it) · the `events_consumed: ["opsec.verdict"]` handshake declaration. **`on beacon_input`, `on beacon_initial`, and `set BEACON_OUTPUT` are NOT touched** — they are the capture path.
+**The C2 adapter** (corrected 2026-07-26 — this is substantially larger than first stated): the **four alias template files** `aliases/tier1a_gate.sleep`, `tier1b_wrapper.sleep`, `tier2_warn.sleep`, `popup_beacon.sleep` and their four `include()` lines — **28 `alias` overrides in total, the gate's actual enforcement** · the `redrobin_gate` and `redrobin_query_quick` subs they call · the `heartbeat_5s` branch that prints `[Red Robin] Layer B …` verdicts (and the `/v1/adapters/events` polling feeding it) · the gate capability declarations in **both** `adapters/cobaltstrike/manifest.toml` **and** `adapters/sliver-mock/manifest.toml` (`preflight_block_console`, `preflight_block_tui`, `gate_scope`, `events_consumed`) and their mirror in the `.cna` handshake JSON · the `opsec.verdict` event in `adapters/sliver-mock/scenarios/acme_corp.json` · and the helper-jar sources `RedRobinEventStream.java`, `VerdictEvent.java`, `RedRobinEventStreamTest.java`.
+
+**NOT touched — the capture path:** `on beacon_input`, `on beacon_initial`, `set BEACON_OUTPUT`, `on script_unload`, the `redrobin_emit_*` helpers, the HTTP/escape/token helpers, and `RedRobinHttp.java`.
+
+**Deliberately out of scope:** rebuilding the committed binary `jars/redrobin-aggressor-http-1.0.2.jar`. Its stale verdict classes are inert once nothing calls them; rebuilding a committed binary is separate work and gets its own ticket. The source/binary divergence is recorded rather than hidden.
 
 **Tests:** the 18 gate test files listed in §8.
 
@@ -176,7 +193,9 @@ Step 3 after step 2 keeps each commit's tests coherent: the fields disappear onl
 
 ## §10 Risks
 
-- **The `.cna` is not CI-testable** — but the edit is far smaller than it first appeared. Since `on beacon_input` never calls the gate and no `alias` exists, this is **deleting dead code plus one console-message branch**, not surgery on the operator's command path. The capture hooks are untouched. Mitigation remains: the `.cna` is its own task, landed last before docs, and validated by the operator smoke.
+- **The `.cna` is not CI-testable, and the adapter edit is the riskiest part of this change** (corrected 2026-07-26 — an earlier draft of this spec wrongly called it small). Removing 28 `alias` overrides *is* surgery on the operator's command path: a mistake there breaks the ability to task a beacon, which is the exact failure the deletion exists to prevent. Mitigations: the adapter is its own task, landed last before docs; the capture hooks are explicitly out of bounds; and the operator smoke is the only acceptance.
+- **The removal order is load-bearing, not cosmetic.** Deleting `POST /v1/verdict/quick` before the aliases produces a *worse* state than either endpoint — the aliases query a dead route, read `UNAVAILABLE` as dangerous, and hard-block 16 commands while blaming the daemon. Any future re-sequencing of this plan must keep the adapter change in the same branch as the route deletion.
+- **Two adapter test suites are NOT in CI.** `pytest tests/` does not include `adapters/*/tests/`, so the five gates cannot see an adapter regression. Both suites must be run explicitly whenever the adapter changes — this was discovered when a `sliver-mock` replay test went red on the branch without any gate noticing.
 - **Losing the console message.** Today a WARN/BLOCK verdict prints in the beacon console — the operator's only in-CS signal from Red Robin. After this change the beacon console is silent and everything comes through the TUI chat. That is the intent (one voice, one surface), but it *is* a behavioral change for an operator who works mostly in the CS window, and worth confirming during the smoke.
 - **L5 quality shifts.** Summaries stop mentioning verdict reasons and start narrating commands. Expected and intended, but the operator should eyeball the first few summaries after the change.
 - **Losing the deterministic layer.** Layer A caught known-bad patterns without an LLM; post-change, if the assistant is disabled or degraded, nothing comments on a dangerous command. This is the accepted trade — the operator asked for advisory-only — and it is worth stating plainly rather than discovering later.
