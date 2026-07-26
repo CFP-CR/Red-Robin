@@ -299,10 +299,17 @@ async def start_l5_summarizer(app: FastAPI, settings: Settings) -> tuple[L5Summa
 
     Slice 13 — reads recent episodes from the same ``episodic_repo`` the
     reducer writes to, compresses them via the cheap summariser model,
-    and appends one row per window to the ``summary_repo`` that Layer B
-    reads on every ``evaluate(...)`` call. Schedules next to the
-    promoter loop so a single daemon-wide cancel tears both down on
-    shutdown.
+    and appends one row per window to the ``summary_repo``.
+
+    The consumer is the **assistant**: ``start_assistant``'s ``_read_summary``
+    closure reads the newest row back (``list_recent(engagement_id, limit=1)``)
+    into every push-context, so the story-so-far survives older commands rolling
+    off the in-memory window. The pre-flight gate's Layer B used to read these
+    rows too; it was deleted, so the assistant is now the only reader.
+
+    Runs as a standalone ``l5_summarizer`` task — the close hook below is the
+    only thing that stops it, and ``app.py`` awaits it before ``close_bus()``
+    so no tail summarisation races the shutdown.
 
     Close hook cancels the loop and waits up to 2 s for it to exit.
     """
@@ -351,8 +358,13 @@ async def start_enricher(
 
     Subscribes to ``beacon.command_output`` and publishes ``working_memory.deltas``
     events the reducer (started earlier) merges. When ANTHROPIC_API_KEY is missing,
-    ``build_enricher_llm`` returns None and the enricher short-circuits — daemon
-    still boots (degraded), the regex path still populates working memory.
+    ``build_enricher_llm`` returns None and ``_enrich`` returns immediately on every
+    event — the daemon still boots, but this enricher is the ONLY producer of
+    ``working_memory.deltas``, so nothing extracts facts from command output at all.
+    Working memory then holds only what the reducer takes straight off the wire
+    (``beacon.initial`` → ``Session``); hosts, credentials and findings stay empty.
+    There is no fallback extractor — Plan B2 retired the command-output regex
+    producer, so degraded here means no enrichment, not reduced enrichment.
     """
     enricher = WorkingMemoryEnricher(
         bus=app.state.event_bus,
