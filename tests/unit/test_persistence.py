@@ -13,6 +13,8 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime
 
+import pytest
+
 from redrobin.infrastructure.persistence.episodic_repo import EpisodicRepo
 
 
@@ -127,3 +129,40 @@ def test_episodic_migration_is_idempotent(tmp_path) -> None:
     repo.record(engagement_id="vantage", correlation_id="c-2", command="ps")
 
     assert [e.command for e in repo.list_episodes_for_engagement("vantage")] == ["whoami", "ps"]
+
+
+def test_episodic_migration_demands_sqlite_335_by_name(tmp_path, monkeypatch) -> None:
+    """On SQLite < 3.35 the migration must fail with a message that explains itself.
+
+    ``ALTER TABLE ... DROP COLUMN`` landed in 3.35. A peer operator on a
+    distro-packaged Python (RHEL 8 ships 3.26, Ubuntu 20.04 ships 3.31) otherwise
+    gets a bare ``OperationalError: near "DROP": syntax error`` at boot, naming
+    neither the requirement nor the fix. Must still be a hard failure — swallowing
+    it would leave every episode write raising NOT NULL, i.e. silent total L3 loss.
+    """
+    db = tmp_path / "episodic.db"
+    _legacy_db(db)
+    monkeypatch.setattr(sqlite3, "sqlite_version_info", (3, 31, 1))
+    monkeypatch.setattr(sqlite3, "sqlite_version", "3.31.1")
+
+    with pytest.raises(RuntimeError) as exc:
+        EpisodicRepo(db)
+
+    message = str(exc.value)
+    assert "3.35" in message  # the requirement
+    assert "3.31.1" in message  # what is actually running
+    assert "episodes" in message  # which table is stuck
+
+
+def test_episodic_old_sqlite_is_fine_when_no_migration_is_due(tmp_path, monkeypatch) -> None:
+    """The guard is scoped to the migration, not to the repo.
+
+    An old SQLite build with a fresh (or already-migrated) database issues no
+    ``DROP COLUMN`` at all, so it must keep working rather than be locked out.
+    """
+    monkeypatch.setattr(sqlite3, "sqlite_version_info", (3, 31, 1))
+
+    repo = EpisodicRepo(tmp_path / "episodic.db")  # fresh DB — no legacy columns
+    episode = repo.record(engagement_id="vantage", correlation_id="c1", command="whoami")
+
+    assert episode.id is not None

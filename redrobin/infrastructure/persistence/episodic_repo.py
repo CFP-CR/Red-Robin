@@ -48,6 +48,13 @@ CREATE INDEX IF NOT EXISTS ix_episodes_engagement_id ON episodes (engagement_id)
 """
 
 
+# ``ALTER TABLE ... DROP COLUMN`` landed in SQLite 3.35.0 (2021-03-12). Distro-packaged
+# Pythons lag well behind it — RHEL 8 ships 3.26, Ubuntu 20.04 ships 3.31 — and the
+# unguarded statement fails there with a bare ``OperationalError: near "DROP": syntax
+# error`` that names neither the requirement nor the fix.
+_MIN_SQLITE_FOR_DROP_COLUMN = (3, 35, 0)
+
+
 def _iso(ts: datetime) -> str:
     """ISO-8601 string for sqlite3 — avoids the deprecated default datetime adapter (Py 3.12)."""
     return ts.isoformat()
@@ -101,11 +108,31 @@ class EpisodicRepo:
         wrapped in ``except``: a migration that cannot complete must fail loudly at
         construction, exactly like the ``executescript`` above, rather than leave a
         repo whose every write silently fails.
+
+        The version guard below obeys that same rule — it raises rather than
+        degrading — and is scoped to the migration, not to the repo, so an old
+        SQLite build with a fresh or already-migrated database is unaffected.
         """
         existing = {row[1] for row in conn.execute("PRAGMA table_info(episodes)")}
-        for column in ("verdict", "reason"):
-            if column in existing:
-                conn.execute(f"ALTER TABLE episodes DROP COLUMN {column}")
+        legacy_columns = [column for column in ("verdict", "reason") if column in existing]
+        if not legacy_columns:
+            return
+        if sqlite3.sqlite_version_info < _MIN_SQLITE_FOR_DROP_COLUMN:
+            required = ".".join(str(part) for part in _MIN_SQLITE_FOR_DROP_COLUMN)
+            raise RuntimeError(
+                f"This episodic database still carries the pre-flight gate's "
+                f"{'/'.join(legacy_columns)} column(s) on its `episodes` table, and "
+                f"migrating them off needs SQLite >= {required} for "
+                f"`ALTER TABLE ... DROP COLUMN`. This Python is linked against SQLite "
+                f"{sqlite3.sqlite_version}. Red Robin refuses to start rather than run "
+                f"with a table every episode write would fail against (silent total loss "
+                f"of L3 memory). Fix: run the daemon on a Python linked against SQLite "
+                f">= {required} (e.g. a uv- or pyenv-managed build rather than the "
+                f"distro package), then start it again — the migration is automatic and "
+                f"preserves existing rows."
+            )
+        for column in legacy_columns:
+            conn.execute(f"ALTER TABLE episodes DROP COLUMN {column}")
 
     def record(
         self,
