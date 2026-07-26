@@ -7,13 +7,10 @@ vendor = "CFP-CR"
 license = "MIT"
 
 [capabilities]
-preflight_block_console = false
-preflight_block_tui = true
 tui_dispatch = false
 output_observe = true
 console_annotation = false
 emergency_kill_switch = false
-gate_scope = "per_operator"
 command_modification = false
 
 events_emitted = [
@@ -25,7 +22,6 @@ events_emitted = [
     "credential.observed",
     "adapter.heartbeat",
 ]
-events_consumed = []  # mock doesn't consume verdicts (one-way replay)
 
 [requirements]
 sliver = "mock"

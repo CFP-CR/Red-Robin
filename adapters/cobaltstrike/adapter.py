@@ -1,7 +1,7 @@
 """adapters/cobaltstrike/adapter.py — Python-side connector for CS adapter.
 
-While the `.cna` Aggressor script handles Path 1 (alias gate) entirely inside
-the CS Client process, this Python module provides:
+While the `.cna` Aggressor script handles Path 1 (operator-activity capture)
+entirely inside the CS Client process, this Python module provides:
 
   - Path 2 dispatch: TUI-originated commands -> CS REST API (POST /api/v1/beacons/.../consoleCommand)
   - State recovery: GET /api/v1/beacons to enumerate connected beacons at adapter startup

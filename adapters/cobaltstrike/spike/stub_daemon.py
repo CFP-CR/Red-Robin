@@ -20,10 +20,10 @@ async def ping() -> dict[str, bool]:
     return {"ok": True}
 
 
-@app.post("/v1/verdict/quick")
-async def quick_verdict() -> dict[str, str]:
-    # Always PASS — this is a latency-only stub.
-    return {"action": "PASS", "reason": "stub daemon — no real verdict"}
+@app.post("/v1/events")
+async def events() -> dict[str, bool]:
+    # Accept-and-discard — this is a latency-only stub for the capture path.
+    return {"accepted": True}
 
 
 if __name__ == "__main__":

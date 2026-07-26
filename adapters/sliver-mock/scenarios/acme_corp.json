@@ -109,26 +109,5 @@
         "raw": "shell vssadmin list shadows"
       }
     }
-  },
-  {
-    "delay_ms": 200,
-    "envelope": {
-      "spec_version": "0.1.0",
-      "id": "evt_01HZX9KMMCKACMEP08AAAAAAAA",
-      "ts": "2026-05-10T14:30:21.700Z",
-      "source": {"adapter": "sliver-mock", "version": "1.0.0", "engagement_id": "demo_acme"},
-      "event": {
-        "type": "opsec.verdict",
-        "source_event_id": "evt_01HZX9KMMCKACMEP07AAAAAAAA",
-        "severity": "DANGER",
-        "reason": "VSS enumeration matches ransomware precursor TTP (T1490). High-signal EID 8222 — engagement-ending event for most blue teams.",
-        "rule_id": "vssadmin_ransomware_precursor",
-        "suggestions": [
-          "Confirm shadow copy state via WMI: Get-WmiObject Win32_ShadowCopy (lower EID footprint)",
-          "If shadow copies are the actual objective, schedule via wmic shadowcopy /create /noninteractive",
-          "Re-evaluate: is shadow-copy enumeration on the objective list, or is this exploratory?"
-        ]
-      }
-    }
   }
 ]

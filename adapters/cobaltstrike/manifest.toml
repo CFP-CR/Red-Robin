@@ -8,13 +8,10 @@ license = "MIT"
 homepage = "https://github.com/CFP-CR/Red-Robin"
 
 [capabilities]
-preflight_block_console = true
-preflight_block_tui = true
 tui_dispatch = true
 output_observe = true
 console_annotation = true
 emergency_kill_switch = true
-gate_scope = "per_operator"
 command_modification = false
 
 events_emitted = [
@@ -24,7 +21,6 @@ events_emitted = [
     "credential.observed",
     "adapter.heartbeat",
 ]
-events_consumed = ["opsec.verdict"]
 
 [requirements]
 cobalt_strike = ">=4.12"

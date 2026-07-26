@@ -39,9 +39,8 @@ def cs_manifest():
         "spec_versions_supported": ">=0.1.0,<0.2.0",
         "name": "cs-aggressor",
         "version": "1.0.0",
-        "capabilities": {"preflight_block_console": True},
+        "capabilities": {"output_observe": True},
         "events_emitted": ["beacon.command_input"],
-        "events_consumed": ["opsec.verdict"],
         "requirements": {"cobalt_strike": ">=4.12"},
     }
 

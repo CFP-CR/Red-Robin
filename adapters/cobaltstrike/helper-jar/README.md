@@ -13,25 +13,40 @@ targets our public surface.
 See `docs/superpowers/specs/2026-05-17-cna-jar-helper-design.md` for
 the full rationale.
 
-## Shipped classes (as of 1.0.2)
+## Sources in this tree
 
 - `com.redrobin.aggressor.RedRobinHttp` — synchronous POST/GET against the
-  daemon (handshake, verdict, events, heartbeat) + the schema-required
+  daemon (handshake, capture events, heartbeat) + the schema-required
   ULID generator `ulid()` (Crockford b32; 48-bit ts + 80-bit randomness).
-- `com.redrobin.aggressor.RedRobinEventStream` — WebSocket subscriber
-  for the daemon's `/v1/adapters/events` endpoint (Layer B verdicts).
-  Auto-reconnect with exponential backoff (1s → 60s); drop-oldest
-  backpressure on a 256-entry queue Sleep polls via `pollEvent(ms)`.
-- `com.redrobin.aggressor.VerdictEvent` — DTO for opsec.verdict payloads
-  delivered over the WebSocket.
+
+## Removed sources — the committed JAR is now AHEAD of this tree
+
+`RedRobinEventStream` (WebSocket subscriber for the daemon's deleted
+`/v1/adapters/events` endpoint) and `VerdictEvent` (its `opsec.verdict` DTO)
+existed only to deliver pre-flight-gate verdicts. The gate was removed, so
+their sources — and `RedRobinEventStreamTest` — were deleted.
+
+**The prebuilt `../jars/redrobin-aggressor-http-1.0.2.jar` was deliberately
+NOT rebuilt** (rebuilding a committed binary is separate, ticketed work). It
+therefore still contains `RedRobinEventStream.class`, its `$Listener` inner
+class, and `VerdictEvent.class`. Those classes are **inert** — nothing in
+`redrobin.cna` loads them any more.
+
+⚠️ **Whoever rebuilds this JAR must confirm `redrobin.cna` has no
+`Class forName` call for the removed classes** (it does not today —
+`redrobin_init_event_stream` was deleted in the same change). A rebuild that
+drops the classes while the `.cna` still reflected on them would throw
+`ClassNotFoundException` during boot, before the handshake, killing capture
+entirely.
 
 ## Dependencies (vendored in `lib/`)
 
 - `junit-platform-console-standalone-1.10.0.jar` — test-only (JUnit 5).
-- `json-20240303.jar` — runtime (org.json). Used by `RedRobinEventStream`
-  to decode WebSocket frames. Also shipped sibling to the helper JAR in
-  `adapters/cobaltstrike/jars/json-20240303.jar` for the .cna's
-  `URLClassLoader`.
+- `json-20240303.jar` — was runtime (org.json) for `RedRobinEventStream`'s
+  frame decoding. With that class's source gone it has **no remaining source
+  consumer**, but it is still vendored and still shipped sibling to the
+  helper JAR at `adapters/cobaltstrike/jars/json-20240303.jar` because the
+  un-rebuilt JAR's bytecode still references it. Retire it with the rebuild.
 
 Provenance + SHA-256 for both: see `lib/README.md`.
 
@@ -54,8 +69,9 @@ co-located with `json-20240303.jar`).
 
 ## Test
 
-Build script runs JUnit 5 tests before packaging
-(`RedRobinHttpTest` + `RedRobinEventStreamTest`). To run tests only:
+Build script runs JUnit 5 tests before packaging (`RedRobinHttpTest`; the
+`RedRobinEventStreamTest` companion was deleted with its subject). To run
+tests only:
 
 ```powershell
 # Windows
