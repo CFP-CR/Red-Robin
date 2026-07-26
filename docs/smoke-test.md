@@ -173,9 +173,12 @@ Watch the TUI while it replays. Expected:
 - **Working Memory's `hosts` and `credentials` arrays stay empty** for this
   scenario, even with a working `ANTHROPIC_API_KEY` — expected, not a
   failure. The scenario's only `beacon.command_output` (a `net group "Domain
-  Admins"` listing) names no host besides the beacon's own — which the
-  enricher is grounded to never re-report as newly-discovered — and it
-  carries no secret material for a credential to attach to. (The reducer
+  Admins"` listing) names no host at all, and separately the enricher is
+  grounded never to re-report the beacon's own host or user as
+  newly-discovered (`_build_enricher_user_message`, #105). That output also
+  carries no secret material for a credential to attach to — its three names
+  are bare usernames, and `WorkingMemoryDeltas.from_payload` drops any
+  credential with no `secret`/`ntlm_hash` (#114). (The reducer
   itself only handles `beacon.initial`, `beacon.command_input`,
   `engagement.milestone` and `working_memory.deltas`; the scenario's
   `host.observation` / `credential.observed` events are validated and

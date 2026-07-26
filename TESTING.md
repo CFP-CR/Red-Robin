@@ -409,8 +409,10 @@ uv run python adapters/sliver-mock/adapter.py `
 [sliver-mock] disconnected
 ```
 
-In terminal A (daemon log), you should see corresponding log lines as events flow
-through the bus. Be precise about what the reducer actually folds into working
+In terminal A you get one uvicorn access line per POST —
+`"POST /v1/events HTTP/1.1" 200 OK` — and nothing else per event: the reducer
+and the enricher print nothing on their success paths (the note under the Tier 2
+success criteria explains why). Be precise about what the reducer folds into working
 memory — it handles exactly four types: `beacon.initial` (sessions),
 `beacon.command_input` (an L3 episode, no working-memory change),
 `working_memory.deltas`, and `engagement.milestone`.
@@ -471,11 +473,21 @@ Select-String -Path "$env:USERPROFILE\redrobin-smoke\engagements\op-smoke\events
 ```
 
 **Expect:** 3 matching lines (2x `host.observation`, 1x `credential.observed`)
-— proof the daemon validated and persisted these 3 of the scenario's 7 events
-(the two types the reducer ignores), independent of the LLM. This does not by
-itself prove the other 4 events landed — `beacon.initial`, 2x
-`beacon.command_input`, `beacon.command_output` — Step 2.2's `[sliver-mock]
-sent <type>` log and Step 2.3's `sessions` check are what cover those.
+— proof the daemon validated and persisted these 3 of the scenario's 7 events,
+independent of the LLM. Both types fall through `_dispatch`'s `else` in
+`working_memory_reducer.py`, and so does `beacon.command_output`: three of this
+scenario's five event types are ones the reducer does not handle (the paragraph
+above Step 2.3 lists the four it does).
+
+This does not by itself prove the other 4 events landed — `beacon.initial`, 2x
+`beacon.command_input`, `beacon.command_output`. Step 2.3's `sessions` check
+covers `beacon.initial`. Step 2.2's `[sliver-mock] sent <type>` line does not
+cover the rest: sliver-mock prints it after `raise_for_status()`
+(`adapters/sliver-mock/adapter.py`), so it attests that `POST /v1/events`
+answered 2xx — envelope and payload passed schema validation and the daemon
+accepted them — and nothing about persistence. That route answers 200 with
+`stored: false` and appends nothing when the dedup gate hits, and equally when
+no engagement is active or its directory is missing (`api/events_router.py`).
 
 ### Step 2.4 — TUI shows the simulated state
 
@@ -526,23 +538,51 @@ uv run redrobin daemon stop
 **`hosts`/`credentials` staying empty in working memory is expected for
 `acme_corp`** — it is not a symptom of a missing/failing `ANTHROPIC_API_KEY`,
 and re-checking or replacing the key will not change the outcome. Step 2.3 has
-the full reason: no other host in the one command output, the beacon's own
-host is grounded out of extraction, and the output carries no secret material
-for a credential to attach to.
+the full reason: the one command output names no host at all, the beacon's own
+host is separately grounded out of extraction, and the output carries no secret
+material for a credential to attach to.
 
-To confirm the enricher actually ran on this input at all — as opposed to
-never firing, e.g. a missing `ANTHROPIC_API_KEY`, `REDROBIN_ENRICHMENT_ENABLED=0`,
-or the enrichment gate rejecting the output — look for `enrichment ok:
-command=... beacon=win_ws01 ... deltas=0` in the daemon log. That specific
-line, with `deltas=0`, is the real proof extraction ran and correctly found
-nothing (`enricher.py`'s success-path log, which fires even when nothing was
-extracted). **Do not use the absence of `enrichment failed` for this** — that
-message only fires on an LLM/network error or fully-unparseable output
-(`enricher.py`'s `_emit_failed`); a missing key or a disabled enricher
-produces NEITHER line, because `_enrich` returns silently before ever calling
-the LLM. Only if `sessions` is ALSO empty (that path is deterministic and
-needs no LLM) are you looking at a wire-protocol bug — the class Phase 2 had
-with `/v1/events` not bus-publishing. In that case, stop and report.
+**The daemon prints no per-event confirmation that enrichment succeeded**, so
+don't go looking for one. To rule out "the enricher never ran at all," use the
+three things that *are* observable:
+
+- **The key.** Step 2.1 starts the daemon without `--allow-degraded`. With
+  `REDROBIN_ALLOW_DEGRADED` also unset, a missing `ANTHROPIC_API_KEY` makes
+  `redrobin daemon start` print `ERROR: ANTHROPIC_API_KEY required for the
+  assistant/enricher/summariser` and exit 2 *before* binding the port
+  (`infrastructure/boot_validation.py`) — so a daemon that started at all had
+  the key. If `REDROBIN_ALLOW_DEGRADED=1` is set in that shell, a missing key
+  instead prints `WARN: ANTHROPIC_API_KEY missing — running degraded (no
+  assistant, enrichment, or summaries)` and boot continues, and the Step 1.2
+  banner reads `Anthropic:  MISSING (degraded)` rather than `Anthropic:  set`.
+  Both go to stderr in terminal A, and the banner prints at every start. The
+  banner and the enricher's LLM-client factory read the same
+  `ANTHROPIC_API_KEY` environment variable, so `Anthropic:  set` means the
+  factory found a key too.
+- **`REDROBIN_ENRICHMENT_ENABLED=0`** also short-circuits `_enrich`, and
+  neither the banner nor `doctor` reports it — the setting is passed to the
+  enricher at boot and never echoed. Check the environment of the shell you
+  started the daemon in, and `$TEST_ROOT\.env`. It defaults to on.
+- **The trigger gate** skips output shorter than
+  `REDROBIN_ENRICHMENT_MIN_OUTPUT_CHARS` (default 8) or a command verb listed
+  in `REDROBIN_ENRICHMENT_DENYLIST` (empty by default) — `enricher/trigger.py`.
+  This scenario's one output is 73 characters, so it clears the floor unless
+  you set a denylist yourself.
+
+**Do not read anything into the absence of `enrichment failed` either.** That
+message fires only on an LLM/network error or on output no chunk of which could
+be parsed (`enricher.py`'s `_emit_failed`, two call sites) — a missing key, a
+disabled enricher and a clean run that extracted nothing all produce no line at
+all, so its absence separates none of them. Its *presence* is meaningful, and
+it does reach terminal A: it is logged at ERROR, whereas the enricher's
+success-path line is `logger.info` and never prints. `redrobin daemon start`
+passes only `log_level="info"` to uvicorn, which configures uvicorn's own
+loggers; nothing sets a level or a handler for `redrobin.*`, so Red Robin's own
+modules sit at WARNING and their INFO lines are dropped.
+
+Only if `sessions` is ALSO empty (that path is deterministic and needs no LLM)
+are you looking at a wire-protocol bug — the class Phase 2 had with
+`/v1/events` not bus-publishing. In that case, stop and report.
 
 ---
 
@@ -969,11 +1009,14 @@ Either:
   `~\.redrobin\transport.token`, which may not be the token your daemon is using
 - The dedup gate swallowed a re-emit: identical `bid|correlation_id|type` returns
   `duplicate: True` and is dropped before the bus publish
-- Enricher is short-circuited (no `ANTHROPIC_API_KEY`, or the LLM provider
-  failed) — the reducer no longer regex-parses command output since Plan B2.
-  Check `redrobin/application/agents/enricher/enricher.py` + daemon logs for
-  `enrichment failed` warnings, and confirm the engagement was started with
-  the key set (not `REDROBIN_ALLOW_DEGRADED=1`)
+- Enricher is short-circuited (no `ANTHROPIC_API_KEY`,
+  `REDROBIN_ENRICHMENT_ENABLED=0`, or the LLM provider failed) — the reducer no
+  longer regex-parses command output since Plan B2. Scan the daemon terminal for
+  `enrichment failed:` lines; they are logged at ERROR, so they do print, and one
+  is a real alarm. Their absence proves nothing, though — the no-key and disabled
+  paths return before any LLM call and log nothing per event (Tier 2's note under
+  the success criteria has the full reasoning). Confirm instead that the boot
+  banner read `Anthropic:  set` rather than `MISSING (degraded)`
 
 ### The assistant never says anything in the chat pane
 
