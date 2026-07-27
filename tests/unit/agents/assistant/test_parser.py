@@ -217,6 +217,10 @@ def test_terminal_status_preserves_model_prompt_when_given():
 def test_terminal_status_is_case_insensitive():
     it = parse_interpretation('{"milestone_id": "obj-3", "status": "complete"}')
     assert it is not None and it.needs_confirm is True
+    # matching is case-insensitive, but the operator-facing prompt echoes the model's
+    # ORIGINAL casing — the status is quoted back, not normalised
+    assert it.status == "complete"
+    assert it.prompt == "Mark obj-3 complete?"
 
 
 def test_soft_status_stays_auto_write():
