@@ -3,7 +3,7 @@
 Per spec §5.2: working memory lives at `~/.redrobin/engagements/<slug>/working_memory.json`.
 Mutable (no immutable history); operator-curated + auto-updated from events.
 
-Reducer helpers (``upsert_session``, ``append_finding``, ``list_credentials``)
+Reducer helpers (``upsert_session``, ``list_credentials``)
 and the single-writer batch merge ``apply_deltas`` (the sole working-memory
 enrichment path since Plan B2 retired the command-output regex). Each helper
 is a synchronous load → mutate → save against the single-engagement JSON file;
@@ -88,12 +88,6 @@ class WorkingMemoryRepo:
         wm = self.load()
         wm.sessions = [s for s in wm.sessions if s.beacon_id != session.beacon_id]
         wm.sessions.append(session)
-        self.save(wm)
-
-    def append_finding(self, finding: Finding) -> None:
-        """Append a finding (no dedup — findings are an audit stream)."""
-        wm = self.load()
-        wm.findings.append(finding)
         self.save(wm)
 
     def apply_deltas(self, deltas: WorkingMemoryDeltas) -> None:
