@@ -158,11 +158,16 @@ async def test_lifespan_records_chat_beside_the_working_memory(tmp_path, monkeyp
         await app.state.event_bus.publish(
             {"type": "operator.question", "payload": {"text": "am I loud?", "source": "operator"}}
         )
+        # Poll for THIS turn, not for "any turn": the assistant task is live on the same
+        # bus, so waiting on the first arrival and then asserting a 1-element list would
+        # race anything else the daemon appends.
         for _ in range(100):
             await asyncio.sleep(0.01)
-            if repo.tail():
+            turns = repo.tail()
+            if any(t.text == "am I loud?" for t in turns):
                 break
-        assert [t.text for t in repo.tail()] == ["am I loud?"]
+        recorded = [(t.role, t.kind, t.text) for t in repo.tail()]
+        assert ("operator", "question", "am I loud?") in recorded
 
     # Clean teardown: the recorder drains on the bus sentinel (close_bus runs before
     # close_assistant), NOT via the 2.0 s cancel fallback.
@@ -182,4 +187,13 @@ async def test_no_chat_recorder_when_the_assistant_is_disabled(tmp_path, monkeyp
     async with app.router.lifespan_context(app):
         assert getattr(app.state, "chat_recorder", None) is None
         assert getattr(app.state, "chat_history_repo", None) is None
-    assert not (tmp_path / "chat_history.jsonl").exists()
+        assert getattr(app.state, "chat_recorder_task", None) is None
+        # Drive the bus with an event the recorder WOULD have recorded. Asserting on the
+        # path alone proves nothing — the repo only holds a Path and creates the file in
+        # append, so a built-but-idle recorder leaves no file either.
+        await app.state.event_bus.publish(
+            {"type": "operator.question", "payload": {"text": "am I loud?", "source": "operator"}}
+        )
+        for _ in range(20):
+            await asyncio.sleep(0.01)
+    assert list(tmp_path.rglob("chat_history.jsonl")) == []
