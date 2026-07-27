@@ -5,11 +5,15 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.widgets import Input, RichLog, Static
 
+from redrobin.domain.events import Severity
 from redrobin.tui.textual_ui.chat import (
     ChatPane,
+    _DANGER,
     _PLACEHOLDER_CONFIRM,
     _PLACEHOLDER_IDLE,
+    _RISK_COLORS,
     _SPIN_FRAMES,
+    _SUCCESS,
     _thinking_text,
     format_answer,
     format_confirm_bar,
@@ -41,6 +45,33 @@ def test_format_resolution_confirmed_and_declined():
     assert "obj-1" in ok and "confirmed" in ok.lower()
     no = format_resolution("obj-1", False).plain
     assert "obj-1" in no and "declined" in no.lower()
+
+
+def _span_styles(t: Text) -> str:
+    """The styles a Rich Text carries, flattened — the only read-back for a renderer's
+    colours (Text exposes spans, not a per-character style map)."""
+    return " ".join(str(span.style) for span in t.spans)
+
+
+def test_confirm_bar_and_resolution_share_the_hoisted_palette():
+    # yes/confirmed is _SUCCESS, no/declined is _DANGER — both renderers draw from the one
+    # module palette rather than repeating the hex literals (issue #32).
+    bar = _span_styles(format_confirm_bar("Mark obj-1 COMPLETE?"))
+    assert _SUCCESS in bar and _DANGER in bar  # /y and /n
+    assert _SUCCESS in _span_styles(format_resolution("obj-1", True))
+    assert _DANGER in _span_styles(format_resolution("obj-1", False))
+
+
+def test_risk_colours_still_cover_the_whole_severity_enum():
+    # load-bearing for advisory rendering: the palette hoist must not drop or re-tint a
+    # risk band. Every Severity keeps a colour, and the four values are pinned.
+    assert set(_RISK_COLORS) == {s.value for s in Severity}
+    assert _RISK_COLORS == {
+        "INFO": "#3fb950",
+        "WARN": "#e3b341",
+        "DANGER": "#f85149",
+        "ESCALATE": "#58a6ff",
+    }
 
 
 def test_format_operator_echo_labels_you():

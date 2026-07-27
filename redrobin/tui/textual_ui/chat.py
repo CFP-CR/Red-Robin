@@ -19,10 +19,19 @@ from textual.widgets import Input, RichLog, Static
 from redrobin.domain.assistant import OPERATOR_QUESTION_ID_PREFIX
 from redrobin.tui.textual_ui.frames import Registry
 
+# The pane's whole palette. Every colour in this module comes from here — the same green
+# means "yes/low risk" and the same red means "no/high risk" wherever they appear.
 _ACCENT = "#58a6ff"
 _MUTED = "#8b949e"
 _CONFIRM = "#e3b341"
-_RISK_COLORS = {"INFO": "#3fb950", "WARN": "#e3b341", "DANGER": "#f85149", "ESCALATE": "#58a6ff"}
+_SUCCESS = "#3fb950"
+_DANGER = "#f85149"
+_RISK_COLORS = {
+    "INFO": _SUCCESS,
+    "WARN": _CONFIRM,
+    "DANGER": _DANGER,
+    "ESCALATE": _ACCENT,
+}  # keys = the Severity enum (advisory rendering depends on all four)
 
 _PLACEHOLDER_IDLE = "Ask the assistant…  (/y or /n to a confirm)"
 _PLACEHOLDER_CONFIRM = "▶ Confirm pending — reply /y or /n"
@@ -223,9 +232,9 @@ def format_confirm_bar(question: str) -> Text:
     t = Text()
     t.append(question or "Confirm?", style=f"bold {_CONFIRM}")
     t.append("     ")
-    t.append("/y", style="bold #3fb950")
+    t.append("/y", style=f"bold {_SUCCESS}")
     t.append(" yes   ", style=_MUTED)
-    t.append("/n", style="bold #f85149")
+    t.append("/n", style=f"bold {_DANGER}")
     t.append(" no", style=_MUTED)
     return t
 
@@ -235,11 +244,11 @@ def format_resolution(milestone_id: str, confirmed: bool) -> Text:
     milestone status shows in the Working-Memory panel; this records the operator's call."""
     t = Text()
     if confirmed:
-        t.append("✓ ", style="bold #3fb950")
-        t.append(f"{milestone_id} confirmed", style="#3fb950")
+        t.append("✓ ", style=f"bold {_SUCCESS}")
+        t.append(f"{milestone_id} confirmed", style=_SUCCESS)
     else:
-        t.append("✗ ", style="bold #f85149")
-        t.append(f"{milestone_id} declined", style="#f85149")
+        t.append("✗ ", style=f"bold {_DANGER}")
+        t.append(f"{milestone_id} declined", style=_DANGER)
     return t
 
 
