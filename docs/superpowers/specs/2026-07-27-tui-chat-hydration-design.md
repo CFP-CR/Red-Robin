@@ -38,7 +38,7 @@ Two files change:
 | `redrobin/api/tui_ws.py` | `_build_chat_history()`, a mirror of `_build_initial_snapshot()`, plus one `_send` call |
 | `redrobin/tui/textual_ui/chat.py` | `format_history_turn()`, a frame handler, and one `registry.register("chat_history")` |
 
-No new facade, no new widget, no new pane, no new state.
+No new facade, no new widget, no new pane. The only new state is a single `ChatPane._hydrated` flag, required because the TUI reconnects (see **Reconnect** below).
 
 ### Why no application-layer facade is needed
 
@@ -86,11 +86,13 @@ Three options were weighed:
 2. **Re-parse the colour out of the stored text.** Rejected. Fragile string-scraping that breaks silently if `advisory_text`'s format changes.
 3. **Render it uncoloured.** **Chosen.** Uniform and honest; the word `WARN` is still there, only without the highlight. This is the single line in the pane that differs from live.
 
-### Duplicate over loss in the connect race
+### Subscribe before reading, as a forward-looking invariant
 
-`tui_ws` subscribes to the bus *before* reading the transcript. A turn written in that millisecond window appears both in the history frame and in a live event, rendering twice.
+`tui_ws` subscribes to the bus *before* reading the transcript. The first draft of this spec claimed a turn written in that window would render twice, and told the reader to keep the order for that reason.
 
-**This is deliberate.** Reversing the order (read, then subscribe) trades a visible, harmless duplicate for a **silent loss** of a turn. For a chat display, duplicating beats losing. To be recorded in a code comment so it is not "fixed" later.
+**The audit measured it and the duplicate does not currently fire.** There is no guaranteed yield point between `bus.subscribe()` and the read: the bus lock is uncontended, `_build_initial_snapshot` is fully synchronous, and `send_json` did not suspend even on a 900 KB frame under a real uvicorn server.
+
+The order is still kept, and deliberately — but the justification is forward-looking, not a live hazard. If a yield point ever appears there, subscribe-then-read costs a visible, harmless duplicate, while read-then-subscribe would **silently lose** the turn. The code comment must say this, not assert a mechanism a future reader can measure as false and then delete along with the invariant.
 
 ## Degraded behaviour
 
