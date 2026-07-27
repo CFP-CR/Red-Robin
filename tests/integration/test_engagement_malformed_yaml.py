@@ -23,7 +23,6 @@ from redrobin.application.engagement_service import EngagementService
 @pytest.fixture()
 def isolated_root(tmp_path, monkeypatch):
     monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path))
-    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
     monkeypatch.delenv("REDROBIN_ENGAGEMENT_SLUG", raising=False)
     monkeypatch.delenv("REDROBIN_ENGAGEMENT_ID", raising=False)

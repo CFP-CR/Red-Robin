@@ -19,7 +19,6 @@ from redrobin.application.engagement_service import EngagementService
 def isolated_root(tmp_path, monkeypatch):
     """Point all daemon paths at a tmp_path; clear the engagement env var."""
     monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path))
-    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     # Boot validation exits(2) when ANTHROPIC_API_KEY / VOYAGE_API_KEY are
     # missing unless the operator opts into degraded mode. These tests only
     # care about engagement resolution, so opt in.

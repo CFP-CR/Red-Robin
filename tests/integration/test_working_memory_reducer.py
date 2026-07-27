@@ -164,7 +164,6 @@ async def test_reducer_republishes_snapshot_after_mutation(tmp_path):
 
 @pytest.mark.asyncio
 async def test_lifespan_starts_reducer_task(tmp_path, monkeypatch):
-    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     monkeypatch.setenv("REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json"))
     monkeypatch.setenv("REDROBIN_ENGAGEMENT_ID", "eng-test-001")
     monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")

@@ -29,7 +29,6 @@ def daemon(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     eng_dir.mkdir(parents=True, exist_ok=True)
     (root / ".active_engagement").write_text("eng-b3", encoding="utf-8")
     monkeypatch.setenv("REDROBIN_ROOT", str(root))
-    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     monkeypatch.setenv("REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json"))
     monkeypatch.setenv("REDROBIN_EPISODIC_PATH", str(tmp_path / "ep.db"))
     monkeypatch.setenv("REDROBIN_LONGTERM_PATH", str(tmp_path / "lt.db"))
@@ -234,7 +233,6 @@ def test_state_survives_test_client_restart(tmp_path: Path, monkeypatch) -> None
     eng_dir.mkdir(parents=True, exist_ok=True)
     (root / ".active_engagement").write_text("eng-b3", encoding="utf-8")
     monkeypatch.setenv("REDROBIN_ROOT", str(root))
-    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     monkeypatch.setenv("REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json"))
     monkeypatch.setenv("REDROBIN_EPISODIC_PATH", str(tmp_path / "ep.db"))
     monkeypatch.setenv("REDROBIN_LONGTERM_PATH", str(tmp_path / "lt.db"))
@@ -307,7 +305,6 @@ def test_lifespan_attaches_dedup_keys_under_engagement_dir(
     # AND the per-engagement append both work together.
     (root / ".active_engagement").write_text(eng_slug, encoding="utf-8")
     monkeypatch.setenv("REDROBIN_ROOT", str(root))
-    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     monkeypatch.setenv("REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json"))
     monkeypatch.setenv("REDROBIN_EPISODIC_PATH", str(tmp_path / "ep.db"))
     monkeypatch.setenv("REDROBIN_LONGTERM_PATH", str(tmp_path / "lt.db"))

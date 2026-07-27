@@ -16,7 +16,6 @@ def _isolated_root(tmp_path, monkeypatch):
     root = tmp_path / ".redrobin"
     root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("REDROBIN_ROOT", str(root))
-    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     yield root
 
 
