@@ -370,6 +370,44 @@ async def test_confirm_bar_reveals_on_question_and_hides_on_resolve():
         assert len(pane.query_one("#chat-log", RichLog).lines) >= 2
 
 
+@pytest.mark.asyncio
+async def test_confirm_bar_restacks_to_the_next_pending():
+    # Stacked confirms: the bar always renders _pending[0]. Resolving the head must
+    # RE-RENDER the bar with the second pending (not hide it); only an empty queue hides.
+    reg = Registry()
+    register_chat(reg)
+    async with _SendHarness(sent_result=True).run_test() as pilot:
+        pane = pilot.app.query_one("#events", ChatPane)
+        bar = pane.query_one("#confirm-bar", Static)
+        inp = pane.query_one("#chat-input", Input)
+        for mid in ("obj-1", "obj-2"):
+            reg.dispatch(
+                target=pilot.app,
+                frame={
+                    "type": "operator.question",
+                    "payload": {
+                        "text": f"Mark {mid} COMPLETE?",
+                        "context_refs": [f"milestone:{mid}"],
+                        "source": "assistant",
+                    },
+                },
+            )
+        assert pane._pending == ["obj-1", "obj-2"]  # queued in arrival order
+        assert bar.display is True
+        assert "Mark obj-1 COMPLETE?" in str(bar.content)  # the head is what /y resolves
+        # resolve the head -> the bar re-renders with the NEXT pending, still revealed
+        await pane.on_input_submitted(Input.Submitted(inp, "/y"))
+        assert pane._pending == ["obj-2"]
+        assert bar.display is True
+        assert "Mark obj-2 COMPLETE?" in str(bar.content)
+        assert inp.placeholder == _PLACEHOLDER_CONFIRM  # still in confirm mode
+        # resolve the last -> the queue empties, the bar hides, the placeholder restores
+        await pane.on_input_submitted(Input.Submitted(inp, "/n"))
+        assert pane._pending == []
+        assert bar.display is False
+        assert inp.placeholder == _PLACEHOLDER_IDLE
+
+
 # ---- interactivity increment: the "thinking" spinner (assistant.thinking) ----
 
 
@@ -430,6 +468,20 @@ async def test_thinking_fast_cycle_no_flash():
         pane.stop_thinking()  # ends before 200ms -> cancels the timer, never reveals
         assert pane.query_one("#thinking-status", Static).display is False
         assert pane._think_timer is None
+
+
+@pytest.mark.asyncio
+async def test_reveal_thinking_refuses_once_the_cycle_ended():
+    # The race the cancel above cannot cover: the 200ms timer ALREADY fired, so its
+    # callback is in flight when the cycle ends. _reveal_thinking's own `_thinking <= 0`
+    # guard is the second line of defence — it must still refuse to reveal (no flash).
+    async with _ChatHarness().run_test() as pilot:
+        pane = pilot.app.query_one("#events", ChatPane)
+        status = pane.query_one("#thinking-status", Static)
+        pane._thinking = 0  # the cycle finished inside the 200ms window
+        pane._reveal_thinking()  # the already-fired timer's callback lands late
+        assert status.display is False  # never revealed
+        assert pane._spin_timer is None  # and no orphan animation interval was armed
 
 
 @pytest.mark.asyncio
