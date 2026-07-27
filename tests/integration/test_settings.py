@@ -19,7 +19,6 @@ def test_settings_defaults_when_env_empty(monkeypatch, tmp_path):
         "REDROBIN_SUMMARY_PATH",
         "REDROBIN_ENGAGEMENTS_DIR",
         "REDROBIN_ENGAGEMENT_SLUG",
-        "REDROBIN_ADAPTERS_DIR",
         "REDROBIN_PROMOTER_INTERVAL_SEC",
         "REDROBIN_PROMOTER_MIN_OCCURRENCES",
         "REDROBIN_L5_WINDOW",
@@ -64,7 +63,6 @@ def test_settings_paths_derive_from_root(monkeypatch, tmp_path):
     s = Settings()
     assert s.rules_dir == tmp_path / "rr" / "rules"
     assert s.engagements_dir == tmp_path / "rr" / "engagements"
-    assert s.adapters_dir == tmp_path / "rr" / "adapters"
     assert s.pid_file == tmp_path / "rr" / "daemon.pid"
     assert s.transport_token_file == tmp_path / "rr" / "transport.token"
 

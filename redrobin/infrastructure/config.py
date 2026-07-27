@@ -44,7 +44,6 @@ class Settings(BaseSettings):
     longterm_path: Path | None = Field(default=None, alias="REDROBIN_LONGTERM_PATH")
     summary_path: Path | None = Field(default=None, alias="REDROBIN_SUMMARY_PATH")
     engagements_dir: Path | None = Field(default=None, alias="REDROBIN_ENGAGEMENTS_DIR")
-    adapters_dir: Path | None = Field(default=None, alias="REDROBIN_ADAPTERS_DIR")
     pid_file: Path | None = Field(default=None, alias="REDROBIN_PID_FILE")
     transport_token_file: Path | None = Field(default=None, alias="REDROBIN_TRANSPORT_TOKEN_FILE")
 
@@ -128,8 +127,6 @@ class Settings(BaseSettings):
             self.summary_path = self.root / "context_summaries.db"
         if self.engagements_dir is None:
             self.engagements_dir = self.root / "engagements"
-        if self.adapters_dir is None:
-            self.adapters_dir = self.root / "adapters"
         if self.pid_file is None:
             self.pid_file = self.root / "daemon.pid"
         if self.transport_token_file is None:
