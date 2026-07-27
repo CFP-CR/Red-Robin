@@ -298,10 +298,10 @@ sub redrobin_emit_beacon_initial {
 sub redrobin_handshake_with_retry {
     local('$manifest_json $response $attempt $delay');
     $manifest_json = '{"manifest":{"manifest_version":"0.1.0","spec_versions_supported":">=0.1.0,<0.2.0",' .
-                     '"name":"cs-aggressor","version":"1.0.0","capabilities":{"tui_dispatch":true,' .
-                     '"output_observe":true,"console_annotation":true,"emergency_kill_switch":true,' .
+                     '"name":"cs-aggressor","version":"1.0.0","capabilities":{"tui_dispatch":false,' .
+                     '"output_observe":true,"console_annotation":false,"emergency_kill_switch":false,' .
                      '"command_modification":false},"events_emitted":["beacon.command_input","beacon.command_output",' .
-                     '"host.observation","credential.observed","beacon.initial"],' .
+                     '"beacon.initial"],' .
                      '"requirements":{"cobalt_strike":">=4.12"}}}';
 
     $attempt = 1;
