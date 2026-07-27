@@ -208,8 +208,9 @@ Client Java requirement" below for loading it.
 There is nothing to configure on the daemon side. Red Robin never connects out
 to the team server: it has no REST client, no credentials, and no dispatch
 path. The adapter captures, the core advises. Earlier versions shipped a
-wired-but-unused `cs-main.yaml` REST client; it was removed in v0.1.x because
-nothing ever called it and it contradicted the advisory-only design.
+`cs-main.yaml` REST client that the pre-flight gate used to dispatch PASS
+verdicts to the beacon console; removing the gate left it uncalled, and it was
+deleted in v0.1.x as it contradicted the advisory-only design.
 
 ### Cobalt Strike Client Java requirement
 

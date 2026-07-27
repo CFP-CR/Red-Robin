@@ -21,7 +21,7 @@ Red-Robin/
 │   └── tui/                 # Textual TUI (textual_ui/: panels, chat, inspector)
 ├── protocol/                # wire protocol v0.1 (schemas + fixtures + validator)
 ├── adapters/                # C2 adapters
-│   ├── cobaltstrike/        # CS adapter (.cna capture hook + Python REST connector)
+│   ├── cobaltstrike/        # CS adapter (.cna capture hook; capture-only, no dispatch)
 │   └── sliver-mock/         # synthetic Sliver event replayer
 ├── migrations/              # async Alembic migrations
 ├── tests/                   # unit + integration tests

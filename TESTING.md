@@ -93,10 +93,12 @@ There is no `rules\` directory. The Sigma/OPSEC rule pack died with the
 pre-flight gate — if you see one, it is left over from an older run against this
 root.
 
-`transport.token` is NOT written by `init`; it is generated on first use by
-whichever process needs it (`daemon start`, `redrobin tui`). Expect it to appear
-after Step 1.2, not before — along with the rest of the layout the daemon
-creates on boot (`shared\`, `engagements\archived\`, `kb-source\`).
+`transport.token` will NOT appear under `$TEST_ROOT` yet — not because `init`
+never mints one, but because it mints it at `REDROBIN_ROOT` (defaulting to
+`~\.redrobin`), which `--root` does not override. Step 1.2 runs from
+`$TEST_ROOT`, where the `.env` `init` just wrote pins `REDROBIN_ROOT`, so the
+daemon mints `$TEST_ROOT\transport.token` there — along with the rest of the
+layout it creates on boot (`shared\`, `engagements\archived\`, `kb-source\`).
 
 ### Activate the venv (do this in EVERY terminal you open)
 
@@ -301,8 +303,8 @@ redrobin tui `
 ```
 
 (`--connect-http` is accepted for CLI compatibility but unused — the Textual
-client is a read-only WebSocket observer. It never POSTs to the daemon over
-HTTP; operator chat messages go back up the same `/v1/tui` socket.)
+client never POSTs to the daemon over HTTP. Everything travels over the single
+`/v1/tui` socket: daemon frames down, and operator chat back up.)
 
 **Expect:**
 - 3 panes: **Sessions** (left), **Assistant Chat** (center), **Working Memory**
@@ -745,9 +747,11 @@ guarantee that binds them:
    TUI's Assistant Chat pane, with an `opsec_risk` of INFO/WARN/DANGER. It is
    advice after the fact, not a decision before it.
 
-There is no TUI-dispatch path. The Textual client is a read-only WebSocket
-observer, and the daemon has no outbound path to the team server at all — the
-CS REST client was deleted in v0.1.x because nothing ever called it.
+There is no TUI-dispatch path. The Textual client cannot dispatch to a beacon —
+it sends only `operator.question` / `operator.answer` upstream — and the daemon
+has no outbound path to the team server at all. The CS REST client that once
+carried the gate's PASS-verdict dispatch was orphaned when the pre-flight gate
+was removed, and deleted in v0.1.x once nothing called it.
 
 ### Pre-reqs
 

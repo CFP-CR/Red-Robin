@@ -73,9 +73,10 @@ uv run redrobin doctor
 ```
 
 Expected: `[+] Doctor finished: OK` and exit code 0. If any probe fails, the
-output names the failing probe and its reason — fix and retry. The daemon
-will start in degraded mode if any LLM key is missing; doctor surfaces the
-failure explicitly so the operator notices.
+output names the failing probe and its reason — fix and retry. A missing LLM
+key makes the daemon exit 2 at boot unless you pass `--allow-degraded` (or set
+`REDROBIN_ALLOW_DEGRADED=1`); doctor surfaces the failure explicitly first so
+the operator notices before starting the daemon.
 
 ## Step 3 — Start the daemon
 
