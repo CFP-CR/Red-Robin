@@ -8,15 +8,50 @@ argparse.
 
 from __future__ import annotations
 
+import copy
 import os
 import sys
 import time
+from typing import Any
 
 from redrobin.application.transport_auth import get_or_create_token
 from redrobin.cli_helpers.daemon_pidfile import PidFile, is_pid_alive, read_pid
 from redrobin.infrastructure.boot_validation import validate_for_boot
 from redrobin.infrastructure.config import Settings
 from redrobin.infrastructure.filesystem import ensure_layout
+
+
+def build_uvicorn_log_config(level: str = "info") -> dict[str, Any]:
+    """Extend uvicorn's default logging config with a ``redrobin`` logger (#31).
+
+    uvicorn configures only its own ``uvicorn*`` loggers and declares no root
+    logger, so without this the whole ``redrobin.*`` tree sits at effective
+    WARNING with no handler and every ``logger.info`` in the daemon is dropped
+    (the assistant's decisions, the enricher's "enrichment ok", the lifespan's
+    "startup complete"). We deep-copy uvicorn's template — its
+    ``disable_existing_loggers`` is False, so ``redrobin.*`` loggers already
+    imported at dictConfig time survive — and add one ``redrobin`` parent logger
+    with its own timestamped stderr handler. Child loggers carry no handler of
+    their own, so they propagate up to this one entry; ``propagate`` is False so
+    records stop here rather than double-emitting through any future root handler.
+    """
+    import uvicorn.config
+
+    config = copy.deepcopy(uvicorn.config.LOGGING_CONFIG)
+    config["formatters"]["redrobin"] = {
+        "format": "%(asctime)s %(levelname)-7s %(name)s | %(message)s",
+    }
+    config["handlers"]["redrobin"] = {
+        "class": "logging.StreamHandler",
+        "formatter": "redrobin",
+        "stream": "ext://sys.stderr",
+    }
+    config["loggers"]["redrobin"] = {
+        "handlers": ["redrobin"],
+        "level": level.upper(),
+        "propagate": False,
+    }
+    return config
 
 
 def run_daemon_start(
@@ -55,6 +90,7 @@ def run_daemon_start(
             port=resolved_port,
             factory=True,
             log_level="info",
+            log_config=build_uvicorn_log_config("info"),
         )
     return 0
 
