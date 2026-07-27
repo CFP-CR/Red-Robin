@@ -224,6 +224,26 @@ async def test_pending_not_consumed_when_send_fails():
 
 
 @pytest.mark.asyncio
+async def test_input_submitted_bubbles_from_the_input_up_to_the_pane():
+    # Every other input test calls on_input_submitted directly. This one drives the real
+    # keyboard path so the Submitted message has to bubble out of the #chat-bottom Vertical
+    # to reach ChatPane's handler — the wiring the operator actually uses.
+    async with _SendHarness(sent_result=True).run_test() as pilot:
+        pane = pilot.app.query_one("#events", ChatPane)
+        inp = pane.query_one("#chat-input", Input)
+        inp.focus()
+        await pilot.pause()
+        await pilot.press("h", "i")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert pilot.app.sent_msgs == [
+            {"type": "operator.question", "question_id": "opq-0", "text": "hi"}
+        ]
+        assert inp.value == ""  # the handler cleared the input
+        assert any("hi" in strip.text for strip in pane.query_one("#chat-log", RichLog).lines)
+
+
+@pytest.mark.asyncio
 async def test_pending_consumed_when_send_confirmed():
     # A confirmed send (True) consumes the pending it targeted.
     async with _SendHarness(sent_result=True).run_test() as pilot:
@@ -366,8 +386,10 @@ async def test_confirm_bar_reveals_on_question_and_hides_on_resolve():
         assert pane._pending == []
         assert bar.display is False
         assert inp.placeholder == _PLACEHOLDER_IDLE
-        # the echo ("/y") + the resolution trace both landed in the chat log
-        assert len(pane.query_one("#chat-log", RichLog).lines) >= 2
+        # the echo ("/y") + the durable resolution trace both landed in the chat log
+        written = [strip.text for strip in pane.query_one("#chat-log", RichLog).lines]
+        assert any("/y" in line for line in written)
+        assert any("obj-1 confirmed" in line for line in written)
 
 
 @pytest.mark.asyncio
