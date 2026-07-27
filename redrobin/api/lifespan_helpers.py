@@ -477,11 +477,15 @@ async def start_assistant(app: FastAPI, settings: Settings) -> tuple[Assistant, 
         # ``asyncio.wait`` does NOT retrieve exceptions from the done set (unlike the
         # ``wait_for`` this replaced, which re-raised into app.py's "close_assistant
         # failed" log). ``Assistant.run`` guards per-event exceptions, so a crash at the
-        # LOOP level surfaces here and nowhere else — retrieve it explicitly.
+        # LOOP level surfaces here and nowhere else — retrieve it explicitly. Both tasks
+        # are NAMED at creation ("assistant" / "chat-recorder"), so log the name: one line
+        # covering two loops is only diagnostic if it says which one died.
         for task in done:
             if not task.cancelled() and task.exception() is not None:
                 logger.error(
-                    "assistant/chat task ended with an exception", exc_info=task.exception()
+                    "assistant/chat task %r ended with an exception",
+                    task.get_name(),
+                    exc_info=task.exception(),
                 )
         for task in pending:
             task.cancel()

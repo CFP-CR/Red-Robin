@@ -8,6 +8,10 @@ there is no atomic whole-file replace.
 Reads are bounded: ``tail`` streams the file through a ``deque`` so memory is
 O(max_lines), never O(file). A malformed line — a truncated append, a missing field — is
 skipped so one bad entry cannot break the read. Neither method raises on a missing file.
+
+Two methods only. The spec asked for an ``exists()`` for parity with ``WorkingMemoryRepo``,
+but nothing ever called it (``tail`` does its own missing-file check, and the boot path
+never needs to seed this file the way it seeds working memory), so it was dropped.
 """
 
 from __future__ import annotations
@@ -23,7 +27,8 @@ from redrobin.domain.chat import ChatTurn
 logger = logging.getLogger(__name__)
 
 # Memory safety valve for a pathologically long log: the read is O(max_lines), never
-# O(file) (~400 KB worst case at this value).
+# O(file). PUBLIC (exported below) because ``application.chat.history`` passes it to
+# ``tail`` explicitly so a saturated read is observable there.
 #
 # It bounds the READ, and through it the selection: the selector only ever sees these last
 # lines, so a tail SATURATED with one kind starves the other window's quota — e.g. 2000
@@ -32,7 +37,16 @@ logger = logging.getLogger(__name__)
 # far above both quotas (10 + 5 by default) so that needs a genuinely pathological tail;
 # ``build_history_reader`` logs a debug line if it ever happens. One file per engagement
 # spans daemon restarts, so this is a real (if unlikely) shape, not a theoretical one.
-_MAX_TAIL_LINES = 2000
+#
+# COST OF THE CAP, measured (2026-07-27, CPython 3.13 / Windows 11, warm page cache, a
+# realistic 2000-line transcript — mixed questions/answers/composed advisories, 534 KB):
+# ``tail`` medians 7.5 ms, p95 10.1 ms; at the pre-2026-07-25 cap of 500 it was 1.8 ms.
+# That read is SYNCHRONOUS on the event loop and runs once per reactive cycle, i.e. once
+# per beacon command — but the cycle it feeds is an LLM round-trip measured in SECONDS,
+# so ~7 ms is three orders of magnitude below the work it precedes. Left synchronous and
+# left at 2000 deliberately; revisit (thread-offload, or an in-process tail cache) only
+# if the cap grows again or a profile shows the loop stalling.
+MAX_TAIL_LINES = 2000
 
 
 def _parse_line(raw: str) -> ChatTurn | None:
@@ -49,6 +63,7 @@ def _parse_line(raw: str) -> ChatTurn | None:
         logger.debug("chat_history: skipped a malformed line")
         return None
     if not isinstance(data, dict):
+        logger.debug("chat_history: skipped a line that parsed but is not a JSON object")
         return None
     try:
         correlation_id = data.get("correlation_id")
@@ -74,9 +89,6 @@ class ChatHistoryRepo:
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
 
-    def exists(self) -> bool:
-        return self.path.exists()
-
     def append(self, turn: ChatTurn) -> None:
         """Append one turn as a single JSON line. Creates the parent dir if needed.
 
@@ -90,8 +102,13 @@ class ChatHistoryRepo:
         with self.path.open("a", encoding="utf-8", errors="replace") as fh:
             fh.write(line + "\n")
 
-    def tail(self, max_lines: int = _MAX_TAIL_LINES) -> list[ChatTurn]:
-        """The last ``max_lines`` parseable turns, oldest first. Missing file -> []."""
+    def tail(self, max_lines: int = MAX_TAIL_LINES) -> list[ChatTurn]:
+        """The parseable turns among the last ``max_lines`` LINES, oldest first.
+
+        NOT "the last ``max_lines`` parseable turns": the cap bounds the lines READ, and
+        an unparseable line among them is dropped rather than backfilled, so the result
+        can be shorter than ``max_lines`` even on a much longer file. Missing file -> [].
+        """
         if not self.path.exists():
             return []
         with self.path.open("r", encoding="utf-8", errors="replace") as fh:
@@ -104,4 +121,4 @@ class ChatHistoryRepo:
         return turns
 
 
-__all__ = ["ChatHistoryRepo"]
+__all__ = ["MAX_TAIL_LINES", "ChatHistoryRepo"]

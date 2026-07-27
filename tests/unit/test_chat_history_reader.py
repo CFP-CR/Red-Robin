@@ -6,7 +6,7 @@ import logging
 from redrobin.application.chat.history import _MAX_TURN_CHARS, build_history_reader, render_turns
 from redrobin.domain.chat import ChatTurn
 from redrobin.infrastructure.persistence.chat_history_repo import (
-    _MAX_TAIL_LINES,
+    MAX_TAIL_LINES,
     ChatHistoryRepo,
 )
 
@@ -104,7 +104,7 @@ def test_reader_logs_a_debug_line_when_the_tail_is_saturated(tmp_path, caplog):
                 "text": f"adv{n}",
             }
         )
-        for n in range(_MAX_TAIL_LINES)
+        for n in range(MAX_TAIL_LINES)
     ]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -120,7 +120,7 @@ def test_reader_returns_empty_string_when_the_repo_raises(tmp_path):
     class _BoomRepo:
         path = tmp_path / "chat_history.jsonl"
 
-        def tail(self, max_lines: int = 500):
+        def tail(self, max_lines: int = MAX_TAIL_LINES):
             raise OSError("unreadable")
 
     read = build_history_reader(_BoomRepo(), dialogue_max=10, volunteered_max=5)  # type: ignore[arg-type]

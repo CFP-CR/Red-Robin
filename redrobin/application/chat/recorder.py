@@ -35,11 +35,14 @@ def advisory_text(payload: dict[str, Any]) -> str:
     The application layer cannot reuse the TUI renderer (import-linter: application
     never imports presentation), so this mirrors the operator-facing shape — the action
     plus why/opsec/conf — minus refs, which were dropped from the output on 2026-07-24.
-    Absent fields are omitted rather than rendered empty.
+    Absent fields are omitted rather than rendered empty. Every field is STRIPPED, matching
+    the dialogue path (``turn_for`` strips at extraction): these values come off a model
+    reply, so trailing newlines and indentation are routine, and an unstripped one would be
+    baked into the stored turn and re-injected into every later prompt.
     """
-    lines = [str(payload.get("suggested_action") or "")]
+    lines = [str(payload.get("suggested_action") or "").strip()]
     for label, key in (("why", "rationale"), ("opsec", "opsec_risk"), ("conf", "confidence")):
-        value = str(payload.get(key) or "")
+        value = str(payload.get(key) or "").strip()
         if value:
             lines.append(f"{label}    {value}")
     return "\n".join(line for line in lines if line)
@@ -52,6 +55,26 @@ def turn_for(event_type: str, payload: dict[str, Any], *, ts: str) -> ChatTurn |
     ``correlation_id`` means a command triggered it), so a stored turn and its chat line
     can never disagree. Pure; never raises.
     """
+    if event_type == "advisor.recommendation":
+        # An advisory carries no ``text``: its body is COMPOSED from the action plus
+        # why/opsec/conf, so this branch sits above the dialogue extraction below.
+        # Guard on the ACTION, not the composed body: with an empty suggested_action the
+        # body can still be non-empty (rationale/opsec/conf compose into "why  x"), which
+        # would record an advisory that advises nothing.
+        if not str(payload.get("suggested_action") or "").strip():
+            return None
+        correlation_id = payload.get("correlation_id")
+        return ChatTurn(
+            ts=ts,
+            role="assistant",
+            kind="advisory" if correlation_id else "heads_up",
+            text=advisory_text(payload),
+            correlation_id=str(correlation_id) if correlation_id else None,
+        )
+
+    if event_type not in ("operator.question", "operator.answer"):
+        return None
+
     from_operator = payload.get("source") == "operator"
     # Stripped at extraction: a whitespace-only message is not a turn, and letting one
     # through would burn a slot of the dialogue quota on nothing.
@@ -64,29 +87,12 @@ def turn_for(event_type: str, payload: dict[str, Any], *, ts: str) -> ChatTurn |
             return ChatTurn(ts=ts, role="assistant", kind="confirm", text=text) if text else None
         return None
 
-    if event_type == "operator.answer":
-        if not text:
-            return None
-        role = "operator" if from_operator else "assistant"
-        return ChatTurn(ts=ts, role=role, kind="answer", text=text)
-
-    if event_type == "advisor.recommendation":
-        # Guard on the ACTION, not the composed body: with an empty suggested_action the
-        # body can still be non-empty (rationale/opsec/conf compose into "why  x"), which
-        # would record an advisory that advises nothing.
-        if not str(payload.get("suggested_action") or "").strip():
-            return None
-        body = advisory_text(payload)
-        correlation_id = payload.get("correlation_id")
-        return ChatTurn(
-            ts=ts,
-            role="assistant",
-            kind="advisory" if correlation_id else "heads_up",
-            text=body,
-            correlation_id=str(correlation_id) if correlation_id else None,
-        )
-
-    return None
+    # operator.answer
+    if not text:
+        return None
+    return ChatTurn(
+        ts=ts, role="operator" if from_operator else "assistant", kind="answer", text=text
+    )
 
 
 class ChatRecorder:

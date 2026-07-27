@@ -102,14 +102,18 @@ class Assistant:
         """The chat slice for this cycle (empty when the feature is unwired).
 
         Never raises: a failing reader degrades to no conversation context rather than
-        breaking the cycle — the same contract as summary_reader."""
+        breaking the cycle — the same contract as summary_reader. The isinstance guard
+        mirrors ``_seed_snapshot``: the wired producer always returns str, but the reader is
+        an injected Callable, and a non-str would only fail LATER, inside the prompt
+        assembly, costing the whole cycle instead of just the conversation section."""
         if self._history_reader is None:
             return ""
         try:
-            return self._history_reader()
+            history = self._history_reader()
         except Exception:
             logger.exception("assistant: history_reader failed; proceeding without chat history")
             return ""
+        return history if isinstance(history, str) else ""
 
     async def run(self) -> None:
         sub = await self._bus.subscribe()
