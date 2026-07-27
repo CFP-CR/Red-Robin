@@ -18,8 +18,12 @@ from dataclasses import dataclass
 class ChatTurn:
     """One recorded turn of the conversation.
 
-    ``ts`` is an ISO-8601 UTC timestamp with microsecond precision (so ordering ties are
-    practically impossible). Ordering is a lexicographic sort of that string, which is
+    ``ts`` is an ISO-8601 UTC timestamp at microsecond RESOLUTION (so ordering ties are
+    practically impossible). Not always microsecond-WIDTH: ``datetime.isoformat`` omits the
+    fractional field entirely when ``microsecond == 0``, so a stamp can read
+    ``...T05:00:01+00:00``. Ordering is unaffected — ``'+'`` sorts below ``'.'`` and below
+    every digit, so an abbreviated stamp sorts first within its second, which is where it
+    belongs. Ordering is a lexicographic sort of that string, which is
     chronological ONLY while every ts carries the same UTC offset — guaranteed by the
     single-writer invariant (``ChatRecorder`` normalises its clock with
     ``.astimezone(timezone.utc)`` before stamping, whatever clock it was given).
