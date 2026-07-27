@@ -29,7 +29,9 @@ def test_ws_forwards_published_event(app_client):
     app, client = app_client
     token = get_or_create_token()
     with client.websocket_connect(f"/v1/tui?token={token}") as ws:
-        ws.receive_json()  # discard snapshot
+        # two connect frames now: the snapshot and the chat history
+        ws.receive_json()
+        ws.receive_json()
         client.portal.call(
             app.state.event_bus.publish,
             {"type": "working_memory_snapshot", "payload": {"current_phase": "recon"}},
@@ -46,8 +48,11 @@ def test_two_ws_clients_both_receive(app_client):
         client.websocket_connect(f"/v1/tui?token={token}") as ws_a,
         client.websocket_connect(f"/v1/tui?token={token}") as ws_b,
     ):
-        ws_a.receive_json()  # snapshot
-        ws_b.receive_json()  # snapshot
+        # two connect frames now: the snapshot and the chat history
+        ws_a.receive_json()
+        ws_a.receive_json()
+        ws_b.receive_json()
+        ws_b.receive_json()
         client.portal.call(
             app.state.event_bus.publish,
             {"type": "working_memory_snapshot", "payload": {"current_phase": "lateral"}},
