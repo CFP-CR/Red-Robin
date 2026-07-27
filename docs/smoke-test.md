@@ -94,8 +94,8 @@ The assistant is dark-launched — **off unless you set that variable**. Capture
 and working memory run either way, but the chat pane stays mute without it.
 
 This shell blocks. The startup banner prints to stderr — confirm it shows the
-resolved root, engagement (`op-smoke`), adapter list (empty unless you wired
-one), and key status (`set` or `MISSING (degraded)`):
+resolved root, engagement (`op-smoke`), and key status (`set` or
+`MISSING (degraded)`):
 
 ```
 ======================================================================
@@ -104,7 +104,6 @@ one), and key status (`set` or `MISSING (degraded)`):
   Listening:  http://127.0.0.1:7777
   Root:       /.../op-smoke/.rr
   Engagement: op-smoke
-  Adapters:   (none)
   Anthropic:  set
   Voyage:     set
   L5 window:  25 (every 30.0s)
@@ -206,9 +205,9 @@ uv run redrobin daemon stop
 ```
 
 Expected: `daemon stopped (pid=<n>)`, the PID file removed, no leftover
-processes. The Slice 10 shutdown order drains background tasks before
-closing the adapter REST clients, so the daemon's stdout should NOT show
-"httpx client closed" tracebacks during shutdown.
+processes. Shutdown drains in-flight background tasks before cancelling the
+summariser and closing the bus, so the daemon's stdout should NOT show
+tracebacks during shutdown.
 
 ## Troubleshooting
 
@@ -217,11 +216,6 @@ closing the adapter REST clients, so the daemon's stdout should NOT show
   rewrite the file — edit it manually or delete and re-run `init`.
 - **`doctor` fails on the Voyage probe with `HTTP 401`.** Same fix path
   for `VOYAGE_API_KEY`.
-- **`doctor` fails on the CS adapter.** Check
-  `./.rr/adapters/cs-main.yaml` `teamserver_url` / `operator_user` /
-  `operator_password`, and `verify_ssl: false` if the team server uses a
-  self-signed cert. The CS adapter is optional; doctor only probes
-  adapters you've configured.
 - **Daemon won't start.** Read the banner. The two most common causes:
   - `ERROR: ANTHROPIC_API_KEY required ...` — set the key or pass
     `--allow-degraded` (no assistant, enrichment or summaries; capture and

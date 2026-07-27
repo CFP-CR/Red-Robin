@@ -186,7 +186,6 @@ add `REDROBIN_ASSISTANT_ENABLED=1` to `$TEST_ROOT\.env`.
   Listening:  http://127.0.0.1:7777
   Root:       C:\Users\jcspi\redrobin-smoke
   Engagement: op-smoke
-  Adapters:   (none)
   Anthropic:  set
   Voyage:     set
   L5 window:  25 (every 30.0s)
@@ -589,9 +588,12 @@ are you looking at a wire-protocol bug — the class Phase 2 had with
 ## Tier 3 — CS Local (Load `.cna`, No Live Beacon)
 
 **Goal:** validate that `adapters/cobaltstrike/redrobin.cna` parses cleanly in
-a real Aggressor Console, that its handshake against the daemon succeeds, and
-that the daemon's `cs_adapter_loader` can log in to your team server. **No
-beacon required.**
+a real Aggressor Console and that its handshake against the daemon succeeds.
+**No beacon required.**
+
+Red Robin never reaches out to the team server itself — the `.cna` is the only
+thing that talks to CS, and it only ever POSTs captured activity to the daemon.
+There is no adapter YAML and no daemon-side team server login to configure.
 
 ### Pre-reqs
 
@@ -604,58 +606,20 @@ beacon required.**
   `127.0.0.1:7777` works. If they're on different machines, you'll need to
   bind the daemon to `0.0.0.0` and open the port.
 
-### Step 3.1 — drop the CS adapter YAML
-
-```powershell
-$TEST_ROOT = "$env:USERPROFILE\redrobin-smoke"
-$adapterDir = "$TEST_ROOT\adapters"
-
-@"
-name: cs-main
-kind: cobaltstrike
-teamserver_url: https://YOUR-TS-IP:50050
-operator_user: YOUR-OPERATOR-USERNAME
-operator_password: YOUR-OPERATOR-PASSWORD
-verify_ssl: false
-"@ | Out-File -Encoding utf8 "$adapterDir\cs-main.yaml"
-```
-
-Replace the placeholders with real values. On POSIX you'd `chmod 600`; on
-Windows the file inherits your user's NTFS ACLs.
-
-### Step 3.2 — verify adapter probe
+### Step 3.1 — start the daemon
 
 ```powershell
 cd $TEST_ROOT
-uv run redrobin doctor
-```
-
-**Expect:** `Connectivity:` block now includes a line like:
-
-```
-  [OK ] cs-adapter(https://YOUR-TS-IP:50050)   234ms
-```
-
-If `[FAIL]`:
-- `HTTP 401` → operator user/password wrong in the YAML
-- `Connection refused` → wrong port or team server not running
-- `SSL: CERTIFICATE_VERIFY_FAILED` → flip `verify_ssl: false`
-- Connection timeout → firewall or wrong IP
-
-Fix until you get `[OK ]`. Don't proceed otherwise.
-
-### Step 3.3 — start daemon with CS adapter loaded
-
-```powershell
 uv run redrobin daemon start --host 0.0.0.0 --port 7777
 ```
 
 (`0.0.0.0` instead of `127.0.0.1` if your CS Client is on a different machine.)
 
-**Expect:** banner now shows `Adapters: cs-main`. Daemon log shows
-`cs_adapter loaded: name=cs-main url=https://YOUR-TS-IP:50050`.
+**Expect:** the Tier 1 startup banner, unchanged. Nothing CS-specific appears
+at boot — the daemon learns about the adapter only when the `.cna` handshakes
+in Step 3.3.
 
-### Step 3.4 — configure `redrobin.cna` URL and token
+### Step 3.2 — configure `redrobin.cna` URL and token
 
 **URL** — edit the Sleep global near the top of
 `adapters/cobaltstrike/redrobin.cna`:
@@ -686,7 +650,7 @@ Copy-Item "$env:USERPROFILE\redrobin-smoke\transport.token" `
 If that file is missing the `.cna` throws on load from the `FileReader` — a
 FileNotFound, not a Red Robin warning.
 
-### Step 3.5 — load `.cna` in Aggressor Console
+### Step 3.3 — load `.cna` in Aggressor Console
 
 In CS Client, with the team server connected:
 
@@ -715,7 +679,7 @@ needs `java.net.http`. Install a modern JVM (e.g. Temurin 21) and reload.
 wrong. Fix Step 3.4 and **reload the script** — the retry loop does not resume
 on its own.
 
-### Step 3.6 — confirm the script registers no commands (no beacon needed)
+### Step 3.4 — confirm the script registers no commands (no beacon needed)
 
 The `.cna` contains **no `alias` definitions**. It hooks
 `on beacon_input`, `set BEACON_OUTPUT`, and `on beacon_initial` — all
@@ -744,10 +708,9 @@ fires when a command is actually tasked to a real beacon, which is Tier 4.
 
 | Check | Pass condition |
 |-------|----------------|
-| 3.2 doctor adapter probe | `[OK ]` |
-| 3.3 daemon banner | `Adapters: cs-main` |
-| 3.5 .cna load | No parse errors; `handshake OK` + `capture active` lines print |
-| 3.6 no interception | Console behaves exactly like stock CS; no `[Red Robin]` output in response to the command |
+| 3.1 daemon start | Banner prints; daemon listening on the chosen host:port |
+| 3.3 .cna load | No parse errors; `handshake OK` + `capture active` lines print |
+| 3.4 no interception | Console behaves exactly like stock CS; no `[Red Robin]` output in response to the command |
 
 **Common failure modes:**
 - `.cna` parse error on load → fix syntax in source, commit, reload
@@ -755,7 +718,7 @@ fires when a command is actually tasked to a real beacon, which is Tier 4.
   `$REDROBIN_URL` wrong, or network unreachable between CS Client machine and
   daemon
 - Daemon sees the POST but returns 401 → token mismatch; the `.cna` read a
-  different `transport.token` than the daemon is using (see Step 3.4)
+  different `transport.token` than the daemon is using (see Step 3.2)
 - `.cna` throws FileNotFound on load → `~\.redrobin\transport.token` is missing
 - A `[Red Robin]` gate/verdict message appears in the console → an alias
   override survived the gate removal. Stop and report; this is the exact

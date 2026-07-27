@@ -5,18 +5,20 @@ and platform-specific caveats every operator needs to know.
 
 ## Where secrets live
 
-Red Robin reads two classes of secret:
+Red Robin reads one class of secret:
 
 1. **API keys** — `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY`. Live in
    `~/.redrobin/.env` (created by `redrobin init`). Also overridable via
    the shell environment (explicit shell env wins).
-2. **Adapter credentials** — CS team-server username/password. Live in
-   `~/.redrobin/adapters/*.yaml` (one YAML per adapter instance).
 
-Both directories sit under `~/.redrobin/`, which `redrobin init` creates
-with `chmod 700` on POSIX. The `.gitignore` covers `.env` and
-`adapters/cobaltstrike/*.yaml` (allow-listing only `*.example.yaml` for
-shareable templates).
+That file sits under `~/.redrobin/`, which `redrobin init` creates with
+`chmod 700` on POSIX. The `.gitignore` covers `.env`.
+
+Red Robin holds **no C2 credentials**. It never connects to a team server —
+the `.cna` runs inside the already-authenticated CS Client and only POSTs
+captured activity to the daemon. The one remaining Red-Robin-side credential
+on that channel is the bearer token in `~/.redrobin/transport.token`, minted
+on first daemon start.
 
 ## Rotation procedure
 
@@ -31,14 +33,11 @@ shareable templates).
 
 The daemon does **not** hot-reload `.env`. A restart is mandatory.
 
-### Adapter credentials
+### Transport token
 
-1. Rotate the CS operator password on the team server.
-2. Edit `~/.redrobin/adapters/cs-main.yaml`. Update `operator_password`.
-3. Restart the daemon.
-
-The CS adapter `login()` call runs at daemon startup; bad credentials
-surface as a `FAIL` line under `Connectivity:` in `redrobin doctor`.
+Delete `~/.redrobin/transport.token` and restart the daemon; a fresh token
+is minted on start. Re-copy it to wherever the `.cna` reads it from, then
+reload the script in the CS Client.
 
 ## Leak response
 
@@ -46,24 +45,22 @@ If you suspect a secret leaked (committed to a repo, screen-shared,
 posted in a chat, copied to a logfile):
 
 1. **Rotate at the provider, first.** Revoking the key on Anthropic /
-   Voyage / your CS team server is the only thing that actually stops the
-   leak. Editing `.env` does not invalidate the leaked value.
-2. **Check git history.** The `.gitignore` covers `.env` and
-   `adapters/cobaltstrike/*.yaml`, but verify nothing slipped:
+   Voyage is the only thing that actually stops the leak. Editing `.env`
+   does not invalidate the leaked value.
+2. **Check git history.** The `.gitignore` covers `.env`, but verify
+   nothing slipped:
    ```bash
    git log --all -p -S 'sk-ant-' -- ':!*.example.yaml'
    git log --all -p -S 'ANTHROPIC_API_KEY=' -- ':!*.example.yaml'
-   git log --all -p -- adapters/cobaltstrike/cs-main.yaml
    ```
    Any hit means the secret was committed at some point. Force-push won't
    help — assume the value is compromised forever and rely on the
    revocation at the provider.
-3. **Replace in `.env` / adapter YAML.** Then restart the daemon.
-4. **Audit logs.** Red Robin **does not log** API key values (the startup
-   banner prints `set` or `MISSING (degraded)` only, never values) nor
-   adapter passwords (`tests/integration/test_adapter_perms.py::test_no_password_in_logs`
-   pins this). But operator-side logs (shell history, terminal scrollback,
-   editor swap files) may have captured the value. Clear them.
+3. **Replace in `.env`.** Then restart the daemon.
+4. **Audit logs.** Red Robin **does not log** API key values — the startup
+   banner prints `set` or `MISSING (degraded)` only, never values. But
+   operator-side logs (shell history, terminal scrollback, editor swap
+   files) may have captured the value. Clear them.
 
 ## File permissions
 
@@ -79,33 +76,17 @@ chmod 600 ~/.redrobin/.env
 Windows: the `init` chmod call is skipped on `sys.platform == "win32"`.
 Rely on NTFS ACLs — see the Windows ACL caveat below.
 
-### Adapter YAMLs
-
-POSIX: chmod 600 manually after copying the example:
-
-```bash
-chmod 600 ~/.redrobin/adapters/cs-main.yaml
-```
-
-The adapter loader emits a stderr WARN at daemon boot if any
-`*.yaml` under `~/.redrobin/adapters/` is group or world readable /
-writable. The warning prints to stderr deliberately (not via the logger)
-so the no-password-in-logs contract stays clean — operators still see it
-on the terminal at startup.
-
 ### Windows ACL caveat
 
-The loose-perms check is POSIX-only. It checks
-`stat.S_IRGRP | stat.S_IROTH | stat.S_IWGRP | stat.S_IWOTH` and exits
-early on `sys.platform == "win32"`. Windows operators are **not**
-protected by the WARN.
+`init`'s chmod is POSIX-only — it exits early on `sys.platform == "win32"`,
+so Windows operators get no enforced restriction on `.env`.
 
 Options:
 
 1. **`icacls`** — explicitly restrict the file:
    ```powershell
-   icacls $env:USERPROFILE\.redrobin\adapters\cs-main.yaml /inheritance:r
-   icacls $env:USERPROFILE\.redrobin\adapters\cs-main.yaml /grant:r "$env:USERNAME:(R,W)"
+   icacls $env:USERPROFILE\.redrobin\.env /inheritance:r
+   icacls $env:USERPROFILE\.redrobin\.env /grant:r "$env:USERNAME:(R,W)"
    ```
 2. **Run the daemon under a Windows account whose NTFS ACLs already
    restrict `~/.redrobin/` to that account.** Default Windows ACLs on a
@@ -177,11 +158,8 @@ customer subdirectory and expect home-directory secrets to come along.
 
 - **API key values.** The startup banner shows `set` or `MISSING (degraded)`
   only. No log line carries the literal key.
-- **Adapter passwords.** The CS adapter loader and login flow never log
-  `operator_password`. Pinned by
-  `tests/integration/test_adapter_perms.py::test_no_password_in_logs`.
+- **The transport token.** Auth failures log the outcome, never the bearer
+  value.
 
-The loose-perms WARN intentionally prints to stderr rather than via the
-logger so even an aggressive log capture (e.g. ELK with broad regex
-ingestion) cannot accidentally land the warning in a place that gets
-indexed alongside structured event logs.
+There are no C2 credentials to leak into logs: Red Robin never holds a team
+server username or password.
