@@ -35,8 +35,45 @@ def test_command_input_records_one_episode(tmp_path):
     )
     episodes = ep_repo.list_episodes_for_engagement("eng-1")
     assert len(episodes) == 1
-    assert episodes[0].command == "whoami"
+    # The episode stores the FULL command line (``raw``), not the CS verb
+    # (``command``) — L5 narrates from this, and "whoami" alone drops the
+    # substance that lives in the arguments.
+    assert episodes[0].command == "whoami /all"
     assert episodes[0].correlation_id == "c-1"
+
+
+def test_command_input_prefers_the_full_raw_line_over_the_command_verb(tmp_path):
+    # ``run net view /domain`` and ``run whoami /all`` both carry command="run";
+    # only ``raw`` distinguishes them, so ``raw`` is what L3/L5 must keep.
+    reducer, _, ep_repo = _reducer(tmp_path, EventBus())
+    reducer._dispatch(
+        {
+            "type": "beacon.command_input",
+            "payload": {
+                "command": "mimikatz",
+                "raw": "mimikatz sekurlsa::logonpasswords",
+                "correlation_id": "c-1",
+            },
+        }
+    )
+    episodes = ep_repo.list_episodes_for_engagement("eng-1")
+    assert len(episodes) == 1
+    assert episodes[0].command == "mimikatz sekurlsa::logonpasswords"
+
+
+def test_command_input_falls_back_to_the_command_verb_when_raw_is_absent(tmp_path):
+    # Hand-crafted fixtures / older traces may carry ``command`` without ``raw``;
+    # keep recording those rather than dropping the episode.
+    reducer, _, ep_repo = _reducer(tmp_path, EventBus())
+    reducer._dispatch(
+        {
+            "type": "beacon.command_input",
+            "payload": {"command": "seatbelt", "correlation_id": "c-1"},
+        }
+    )
+    episodes = ep_repo.list_episodes_for_engagement("eng-1")
+    assert len(episodes) == 1
+    assert episodes[0].command == "seatbelt"
 
 
 def test_command_input_does_not_mutate_working_memory(tmp_path):

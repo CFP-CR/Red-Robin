@@ -159,7 +159,11 @@ class WorkingMemoryReducer:
         """
         if self._episodic is None:
             return
-        command = str(payload.get("command") or "").strip()
+        # Store the full command line (``raw``: "mimikatz sekurlsa::logonpasswords"),
+        # not the CS verb (``command``: "mimikatz") — L5 narrates from these episodes,
+        # and the substance lives in the arguments. Fall back to ``command`` for
+        # older traces / hand-crafted fixtures that carry no ``raw``.
+        command = str(payload.get("raw") or payload.get("command") or "").strip()
         if not command:
             return
         try:
