@@ -1,10 +1,10 @@
 """Boot-time validation. Exits 2 on hard failure; prints WARN on degraded ok.
 
 Slice 3 of v0.1.x hardening closes a Phase-2 gap where the daemon would
-silently fall into ``_DegradedLayerB`` when API keys were missing. Operators
-must now explicitly opt in to running without LLM judgment via the
-``--allow-degraded`` CLI flag or ``REDROBIN_ALLOW_DEGRADED=1`` env var
-(both wire through to ``Settings.allow_degraded_layer_b``).
+silently degrade when API keys were missing. Operators must now explicitly
+opt in to running without the model via the ``--allow-degraded`` CLI flag or
+``REDROBIN_ALLOW_DEGRADED=1`` env var (both wire through to
+``Settings.allow_degraded_layer_b``).
 
 Callsites:
   - ``redrobin.cli.cmd_daemon_start`` calls with ``require_root_exists=True``
@@ -25,7 +25,8 @@ def validate_for_boot(settings: Settings, *, require_root_exists: bool = False) 
     """Validate Settings at daemon boot. SystemExit(2) on hard failure.
 
     Hard failures (must fix or pass --allow-degraded):
-    - ANTHROPIC_API_KEY missing (Layer B cannot judge)
+    - ANTHROPIC_API_KEY missing (the assistant, enricher, and summariser
+      cannot call the model)
     - VOYAGE_API_KEY missing (KB retrieval cannot embed)
     - REDROBIN_ROOT does not exist (only when require_root_exists=True;
       ``redrobin daemon start`` calls with this flag; lifespan in tests
@@ -33,7 +34,7 @@ def validate_for_boot(settings: Settings, *, require_root_exists: bool = False) 
 
     Soft warnings (printed to stderr, do not exit):
     - REDROBIN_ENGAGEMENT_SLUG set but engagement.yaml not found
-      -> wildcard scope; documented user-visible behavior
+      -> no engagement resolved; documented user-visible behavior
     """
     errors: list[str] = []
     warnings: list[str] = []
@@ -41,12 +42,14 @@ def validate_for_boot(settings: Settings, *, require_root_exists: bool = False) 
     if not settings.anthropic_api_key:
         if settings.allow_degraded_layer_b:
             warnings.append(
-                "ANTHROPIC_API_KEY missing — running with degraded Layer B (no LLM judgment)"
+                "ANTHROPIC_API_KEY missing — running degraded "
+                "(no assistant, enrichment, or summaries)"
             )
         else:
             errors.append(
-                "ANTHROPIC_API_KEY required for Layer B. Set it, or pass "
-                "--allow-degraded / REDROBIN_ALLOW_DEGRADED=1 to disable Layer B."
+                "ANTHROPIC_API_KEY required for the assistant/enricher/summariser. "
+                "Set it, or pass --allow-degraded / REDROBIN_ALLOW_DEGRADED=1 to "
+                "run degraded."
             )
     if not settings.voyage_api_key:
         if settings.allow_degraded_layer_b:
@@ -70,7 +73,7 @@ def validate_for_boot(settings: Settings, *, require_root_exists: bool = False) 
         if not eng_file.is_file():
             warnings.append(
                 f"REDROBIN_ENGAGEMENT_SLUG={settings.engagement_slug} but "
-                f"{eng_file} not found — using wildcard scope"
+                f"{eng_file} not found — no engagement resolved"
             )
 
     for w in warnings:

@@ -12,7 +12,9 @@ project. Here's how to work with us.
   the pattern).
 - **Adapter is the sole C2 boundary**: Red Robin core speaks the wire protocol
   only. C2-specific knowledge (REST API, Aggressor primitives, gRPC stubs)
-  lives entirely inside `adapters/<name>/`.
+  lives entirely inside `adapters/<name>/`. The adapter **captures** (observes
+  commands + output and publishes events); the core **advises**. An adapter
+  never gates or intercepts the operator's command path.
 
 ## Development setup
 
@@ -59,14 +61,6 @@ uv run pre-commit install
 - All new code requires tests.
 - Tests live in `tests/unit/` (pure unit) or `tests/integration/` (HTTP/integration).
 - Adapter tests live in `adapters/<name>/tests/`.
-
-## Adding a rule
-
-1. Create YAML in `rules/shared/<rule_id>.yaml` (or `rules/personal/` for
-   operator-private rules).
-2. Schema: `id`, `match.command`, `match.arg_pattern` (optional), `severity`
-   (INFO/WARN/DANGER), `reason`, optional `suggestions`, `sources`.
-3. Add a test in `tests/integration/test_bootstrap_rules.py` if it's a core rule.
 
 ## Adding an adapter
 

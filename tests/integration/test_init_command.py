@@ -19,7 +19,8 @@ def test_init_creates_structure(tmp_path):
         interactive=False,
     )
     assert rc == 0
-    assert (tmp_path / "rr" / "rules" / "shared").is_dir()
+    # No `rules/` — the OPSEC rule pack went with the pre-flight gate (2026-07-26).
+    assert not (tmp_path / "rr" / "rules").exists()
     assert (tmp_path / "rr" / "engagements" / "op-first" / "engagement.yaml").is_file()
     assert (tmp_path / "rr" / "adapters").is_dir()
     assert (tmp_path / "rr" / ".env").is_file()
@@ -60,15 +61,6 @@ def test_init_sets_strict_perms_on_dotenv(tmp_path):
     )
     mode = (target / ".env").stat().st_mode & 0o777
     assert mode == 0o600
-
-
-def test_init_creates_sample_rule(tmp_path):
-    target = tmp_path / "rr"
-    run_init(
-        root=target, anthropic_key="k", voyage_key="k", engagement_slug="op", interactive=False
-    )
-    rules = list((target / "rules" / "shared").rglob("*.yaml"))
-    assert len(rules) >= 1
 
 
 def test_init_interactive_refuses_non_tty(tmp_path, monkeypatch, capsys):

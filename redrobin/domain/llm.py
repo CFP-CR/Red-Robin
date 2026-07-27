@@ -47,7 +47,7 @@ class LLMProvider(ABC):
         Slice 13 splits the L5 sliding-window summary into its own block so
         cache invalidation stays orthogonal: the engagement summary changes
         rarely (engagement switch) while the recent summary changes every
-        ~25 verdicts (window boundary).
+        ~25 commands (window boundary).
 
         Empty strings / empty lists collapse their block away so the system
         array stays minimal.

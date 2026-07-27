@@ -73,54 +73,6 @@ async def test_beacon_initial_writes_session(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_opsec_block_verdict_appends_finding(tmp_path):
-    bus = EventBus()
-    repo = _new_repo(tmp_path, "eng-block")
-    _, task = await _start_reducer(bus, repo, "eng-block")
-
-    try:
-        await bus.publish(
-            {
-                "type": "opsec.verdict",
-                "payload": {
-                    "verdict": "BLOCK",
-                    "command": "mimikatz",
-                    "reason": "high signal",
-                    "beacon_id": "B-005",
-                },
-            }
-        )
-        for _ in range(50):
-            await asyncio.sleep(0.02)
-            findings = repo.load().findings
-            if findings:
-                break
-        findings = repo.load().findings
-        assert any(f.kind == "opsec_block" for f in findings)
-    finally:
-        await _drain(bus, task)
-
-
-@pytest.mark.asyncio
-async def test_opsec_allow_verdict_is_ignored(tmp_path):
-    bus = EventBus()
-    repo = _new_repo(tmp_path, "eng-allow")
-    _, task = await _start_reducer(bus, repo, "eng-allow")
-
-    try:
-        await bus.publish(
-            {
-                "type": "opsec.verdict",
-                "payload": {"verdict": "ALLOW", "command": "ls"},
-            }
-        )
-        await asyncio.sleep(0.1)
-        assert repo.load().findings == []
-    finally:
-        await _drain(bus, task)
-
-
-@pytest.mark.asyncio
 async def test_unknown_event_type_is_ignored(tmp_path):
     bus = EventBus()
     repo = _new_repo(tmp_path, "eng-unknown")

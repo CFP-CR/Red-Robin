@@ -1,10 +1,10 @@
 # Knowledge Base CLI
 
-Red Robin's knowledge base (KB) is a single per-operator vector index that
-Layer B retrieves from when reasoning about a verdict. The KB is content
-the *operator* curates — vault notes, prior engagement reports, exploit
-write-ups, MITRE technique pages. Anything an LLM would do better with at
-hand.
+Red Robin's knowledge base (KB) is a single per-operator vector index that the
+assistant retrieves from (its `kb_retrieve` tool) when it reasons about what
+you just ran or answers a question in the chat pane. The KB is content the
+*operator* curates — vault notes, prior engagement reports, exploit write-ups,
+MITRE technique pages. Anything an LLM would do better with at hand.
 
 The KB is built and managed via the `redrobin kb` subcommand group. As of
 v0.1, only `redrobin kb add` is wired end-to-end. The other commands
@@ -104,6 +104,6 @@ redrobin kb remove --tag TAG          # remove everything carrying a tag
 redrobin kb query "how do I dump LSASS without touching disk?" [--top-k 5]
 ```
 
-A debug-only retrieval probe — prints the same top-`k` chunks Layer B
+A debug-only retrieval probe — prints the same top-`k` chunks the assistant
 would see for a given prompt, useful when tuning your tags or sanity-
 checking what got indexed.

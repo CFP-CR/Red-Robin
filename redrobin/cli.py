@@ -241,8 +241,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         dest="allow_degraded",
         help=(
-            "Allow daemon to start without LLM keys (Layer B disabled). "
-            "Equivalent to REDROBIN_ALLOW_DEGRADED=1."
+            "Allow daemon to start without LLM keys (no assistant, enrichment, "
+            "or summaries; capture still works). Equivalent to REDROBIN_ALLOW_DEGRADED=1."
         ),
     )
     daemon_start.set_defaults(func=cmd_daemon_start)
@@ -290,7 +290,7 @@ def build_parser() -> argparse.ArgumentParser:
     new_eng.add_argument(
         "--summary",
         default=None,
-        help="Short engagement summary surfaced to Layer B",
+        help="Short engagement summary surfaced to the assistant",
     )
     new_eng.set_defaults(func=cmd_engagement_new)
 

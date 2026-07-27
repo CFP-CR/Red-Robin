@@ -60,6 +60,6 @@ def test_new_then_boot_yields_usable_scope(tmp_path, monkeypatch):
     with TestClient(app):
         assert app.state.engagement is not None
         assert app.state.scope_empty is False
-        scope = app.state.scope
-        assert scope.check(["10.10.0.5"]) is None  # in-scope -> PASS
-        assert scope.check(["8.8.8.8"]) is not None  # out-of-scope -> BLOCK
+        # The scope DATA survives on the loaded engagement (and is projected onto
+        # working memory for the assistant); only the synchronous checker is gone.
+        assert app.state.engagement.in_scope == ["10.10.0.0/16"]

@@ -14,16 +14,15 @@ This is the 30-minute tour of Red Robin for a developer joining the project.
 ```
 Red-Robin/
 ├── redrobin/                # main package
-│   ├── domain/              # business logic (events, opsec, rules, memory schemas) — mypy strict
-│   ├── application/         # use cases / orchestrators (Layer A, Layer B, verdict pipeline) — mypy strict
+│   ├── domain/              # business logic (events, assistant, chat, memory schemas) — mypy strict
+│   ├── application/         # use cases / orchestrators (assistant agent, enricher, WM reducer) — mypy strict
 │   ├── infrastructure/      # I/O concretes (DB, HTTP, LLM clients, filesystem) — mypy gradual
 │   ├── api/                 # FastAPI routes (HTTP entry points)
-│   └── tui/                 # prompt_toolkit TUI (panels, slash commands, inspector)
+│   └── tui/                 # Textual TUI (textual_ui/: panels, chat, inspector)
 ├── protocol/                # wire protocol v0.1 (schemas + fixtures + validator)
 ├── adapters/                # C2 adapters
-│   ├── cobaltstrike/        # CS adapter (.cna + Python connector)
+│   ├── cobaltstrike/        # CS adapter (.cna capture hook + Python REST connector)
 │   └── sliver-mock/         # synthetic Sliver event replayer
-├── rules/                   # YAML rule packs (Layer A bootstrap + passthrough whitelist)
 ├── migrations/              # async Alembic migrations
 ├── tests/                   # unit + integration tests
 └── docs/                    # human-facing docs
@@ -46,30 +45,45 @@ uv run redrobin daemon start &
 uv run redrobin doctor
 ```
 
-In another terminal:
+In another terminal, hand-feed the daemon a captured event — the same thing
+the `.cna` does for real:
 
 ```bash
-# Send a verdict request (Path 1 simulation)
-curl -X POST http://127.0.0.1:7777/v1/verdict/quick \
+curl -X POST http://127.0.0.1:7777/v1/events \
   -H "Authorization: Bearer $(cat ~/.redrobin/transport.token)" \
   -H "Content-Type: application/json" \
-  -d '{"bid": "b1", "command": "mimikatz", "raw": "mimikatz logonpasswords"}'
+  -d '{
+    "spec_version": "0.1.0",
+    "id": "evt_01HZXAB9MK2P6Q9TFGHJKRMNPQ",
+    "ts": "2026-07-26T14:32:00.000Z",
+    "source": {"adapter": "cobaltstrike", "version": "0.1.0", "engagement_id": "op-smoke"},
+    "event": {
+      "type": "beacon.command_input",
+      "bid": "bid_4291",
+      "operator": "alice",
+      "command": "shell",
+      "raw": "shell whoami /priv"
+    }
+  }'
 ```
 
-Expected: BLOCK verdict if bootstrap rules are loaded.
+Expected: `{"ok": true, "stored": true}` (`stored` is `false` when no
+engagement is active). The envelope is validated against
+`protocol/schemas/v0.1/`, appended to the engagement's `events.jsonl`, and
+republished on the event bus, so the reducer and the TUI both see it. Fixtures
+for every event type live in `protocol/fixtures/v0.1/valid/`.
 
 ## Where do I start?
 
 | If you want to... | Open this |
 |---|---|
-| Add a rule | `rules/shared/<new_rule>.yaml` |
 | Add an adapter | `adapters/<new_adapter>/` |
-| Touch the verdict pipeline | `redrobin/application/verdict_pipeline.py` + `verdict_pipeline_factory.py` |
-| Add a TUI panel | `redrobin/tui/panels/` |
-| Add a CLI command | `redrobin/cli.py` |
+| Change what the assistant says | `redrobin/application/agents/assistant/` (`agent.py` prompt, `triggers.py` speak/stay-quiet gate, `tools.py` KB + journal retrieval) |
+| Change what lands in working memory | `redrobin/application/working_memory_reducer.py` + `redrobin/application/agents/enricher/` |
+| Add a TUI panel | `redrobin/tui/textual_ui/panels.py` (+ `theme.tcss`) |
+| Add a CLI command | `redrobin/cli.py` + `redrobin/cli_helpers/` |
 | Add a new event type | `protocol/schemas/v0.1/events/` + `redrobin/domain/events.py` + fixtures + tests |
-| Debug a Layer B verdict | `redrobin/application/layer_b_engine.py` |
-| Tweak the .cna alias gate | `adapters/cobaltstrike/redrobin.cna` + `adapters/cobaltstrike/aliases/*.sleep` |
+| Tweak what the .cna captures | `adapters/cobaltstrike/redrobin.cna` (`on beacon_input`, `set BEACON_OUTPUT`, `on beacon_initial`) |
 
 ## Common gotchas
 
@@ -78,11 +92,17 @@ Expected: BLOCK verdict if bootstrap rules are loaded.
   `application/transport_auth.py`, `application/event_ingestion.py`).
 - **mypy strict failure on domain**: domain code must be fully typed.
   `infrastructure` is gradual.
-- **Aggressor alias `$2` is the first token**, not the full arg string. Use
-  the canonical `substr($0, strlen("<cmd> ")+1)` pattern (see Phase 1 spike
-  validation in `docs/aggressor-alias-args.md`).
+- **The `.cna` must stay passthrough.** It is a capture hook, not a gate:
+  no `alias` overrides, and `BEACON_OUTPUT` always returns `$2` unchanged.
+  Anything that can throw before that return suppresses the operator's
+  output — wrap it.
+- **CI never runs the `.cna`.** Aggressor changes are accepted by a live-beacon
+  operator smoke, not by the test suite. See `.claude/skills/smoke-test/`.
 - **API key in config.toml**: programmatically refused at startup. Use env
   vars only.
+- **The assistant is off by default** (`REDROBIN_ASSISTANT_ENABLED=1` to
+  opt in), so a daemon that captures happily but never speaks is usually
+  configuration, not a bug.
 
 ## Ask questions
 

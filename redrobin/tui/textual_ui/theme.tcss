@@ -1,10 +1,6 @@
 /* Centralized semantic tokens — referenced by function, not appearance.
    16-color-safe: widgets pair color with text + weight, so meaning survives
    non-truecolor terminals and color-blindness. Accent is reserved for focus. */
-$verdict-block: #f85149;
-$verdict-warn: #e3b341;
-$verdict-pass: #3fb950;
-$verdict-escalate: #58a6ff;
 $sev-high: #f0883e;
 $scope-out: #f85149;
 $status-ok: #3fb950;

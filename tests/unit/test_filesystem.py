@@ -27,8 +27,8 @@ def test_ensure_layout_creates_all_dirs(_isolated_redrobin_root):
     assert (root / "engagements").is_dir()
     assert (root / "engagements" / "archived").is_dir()
     assert (root / "kb-source").is_dir()
-    assert (root / "rules" / "shared").is_dir()
-    assert (root / "rules" / "personal").is_dir()
+    # No `rules/` — the OPSEC rule pack went with the pre-flight gate (2026-07-26).
+    assert not (root / "rules").exists()
 
 
 def test_ensure_layout_is_idempotent(_isolated_redrobin_root):
@@ -53,7 +53,7 @@ def test_ensure_layout_enforces_chmod_700_on_subdirs(_isolated_redrobin_root):
     from redrobin.infrastructure.filesystem import ensure_layout
 
     ensure_layout()
-    for sub in ["shared", "engagements", "kb-source", "rules", "rules/shared", "rules/personal"]:
+    for sub in ["shared", "engagements", "engagements/archived", "kb-source"]:
         mode = stat.S_IMODE((_isolated_redrobin_root / sub).stat().st_mode)
         assert mode == 0o700, f"{sub}: expected 0o700, got {oct(mode)}"
 

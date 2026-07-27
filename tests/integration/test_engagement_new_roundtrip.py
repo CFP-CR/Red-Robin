@@ -3,8 +3,8 @@ consumes WITHOUT losing scope.
 
 Root cause (verified live 2026-05-25): the writer emitted `id` + nested
 `scope.in_scope`; the loader reads top-level `slug`/`in_scope`, so scope was
-silently dropped -> empty -> ScopeEnforcer deny-all on every targeted command.
-This test pins the writer and loader to ONE schema.
+silently dropped -> the engagement loaded with empty scope. This test pins the
+writer and loader to ONE schema.
 """
 
 from __future__ import annotations

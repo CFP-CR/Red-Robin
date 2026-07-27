@@ -1,9 +1,11 @@
 # Red Robin — Claude Code Instructions
 
 Red Robin is an **operation-aware AI copilot behind your C2** for red-team operators: a Python
-daemon + Textual TUI + Cobalt Strike adapter. The OPSEC pre-flight gate (CS Aggressor `alias`
-override) is the first feature and the capture hook that feeds the assistant — not the whole
-product. Core is C2-agnostic; **adapters are the sole C2 boundary**.
+daemon + Textual TUI + Cobalt Strike adapter. It is **advisory-only**: the adapter captures the
+operator's commands and their output (`beacon.command_input` / `beacon.command_output` /
+`beacon.initial` → `POST /v1/events`) and the assistant advises in the TUI chat. Nothing intercepts
+the command path. Core is C2-agnostic — **the adapter captures, the core advises**; adapters are the
+sole C2 boundary.
 
 @CONTRIBUTING.md
 
@@ -33,8 +35,8 @@ product. Core is C2-agnostic; **adapters are the sole C2 boundary**.
 - Architecture spec: `docs/architecture-design.md` (v1.2 design; some dates historical).
 - Canonical wire API (event types, routes, enums, field names): `.claude/rules/wire-protocol.md`.
 - Deeper dev walkthrough: `docs/developer-onboarding.md`.
-- **Two unrelated "rules" dirs:** top-level `rules/` = Sigma/OPSEC Layer-A rules (product data);
-  `.claude/rules/` = Claude Code path-scoped instructions (tooling).
+- **`.claude/rules/`** = Claude Code path-scoped instructions (tooling). There is no product `rules/`
+  dir any more — the top-level Sigma/OPSEC pack went with the pre-flight gate (2026-07-26).
 
 <!-- Branching/PR flow lives in the imported CONTRIBUTING.md (single source of truth). Keep this file tight (<120 lines): move multi-step detail into .claude/rules/ or a skill, not here. -->
 

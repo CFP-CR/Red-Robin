@@ -4,7 +4,7 @@
     "manifest_version": "0.1.0",
     "name": "cs-aggressor",
     "version": "1.0.0",
-    "capabilities": {"preflight_block_console": true}
+    "capabilities": {"tui_dispatch": true, "output_observe": true}
   },
   "session_id": "ses_01HZX9KMXR1B0K3VABCDEFGHJK"
 }

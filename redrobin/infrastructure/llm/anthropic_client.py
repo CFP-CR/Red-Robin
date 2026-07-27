@@ -13,7 +13,7 @@ Structure of system blocks sent to Anthropic API:
                                         stable per session, swapped at boot)
   [3] cacheable_recent_summary         → cache_control: ephemeral 5min
                                         (L5 sliding-window compression,
-                                        slice 13; rolls over every ~25 verdicts)
+                                        slice 13; rolls over every ~25 commands)
   [4] dynamic_state                    → uncached (per-turn working memory)
 
 Empty values collapse their block so the system array stays minimal.
@@ -29,7 +29,7 @@ Cache invalidation rules:
 
 Slice 13 also adds :class:`AnthropicSummarizerClient` — a thin one-shot
 ``messages.create`` wrapper backed by the cheap Haiku-class summariser model.
-The L5 summariser writes uncached calls (one per ~25 verdicts) so reusing the
+The L5 summariser writes uncached calls (one per ~25 commands) so reusing the
 cached-block path here would just bypass every block.
 """
 

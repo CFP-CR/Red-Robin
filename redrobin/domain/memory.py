@@ -1,17 +1,17 @@
 """redrobin/domain/memory.py — Memory schemas per spec §4 Componente 3.
 
 5 memory layers:
-  L1 Long-term:    PromotedLesson (durable, cross-engagement, structured)
+  L1 Long-term:    Lesson (durable, cross-engagement, operator-correction record)
   L2 Working:      WorkingMemory (hosts, defenses, tools, kill_chain) — per-engagement JSON
-  L3 Episodic:     Episode (raw verdict log, per-engagement) — SQLite
+  L3 Episodic:     Episode (raw command-activity log, per-engagement) — SQLite
   L4 Tradecraft:   technique → bypass → detection graph — SQLite (deferred to v0.2 in v0.1)
   L5 Context:      sliding-window ContextSummary — in-memory + summary.txt
 
-Slice 12 removed the never-used ``Lesson`` (free-form L3 episodic record) and
-``Fact`` (free-form L1 long-term record) dataclasses. The promotion path
-described in spec §4 always emits structured ``PromotedLesson`` rows in v0.1;
-free-form variants will return in v0.2 if/when the LessonPromoter grows a
-free-text branch.
+Slice 12 removed the never-used ``Fact`` (free-form L1 long-term record)
+dataclass, and removing the pre-flight gate took ``PromotedLesson`` with it —
+that row shape was keyed by ``(command, verdict)`` and only the deleted
+automatic promoter ever wrote it. The assistant's ``capture_lesson`` tool is
+now the sole L1 writer, via ``Lesson``.
 """
 
 from __future__ import annotations
@@ -68,15 +68,15 @@ class Credential:
 class Finding:
     """Observation produced by the enrichment/reducer path.
 
-    ``kind`` is a short stable identifier (e.g., ``kerberos_ticket_observed``,
-    ``opsec_block``). ``summary`` is a human-readable one-liner. In the deltas
-    merge (``WorkingMemoryRepo.apply_deltas``) findings are deduped by
+    ``kind`` is a short stable identifier (e.g., ``kerberos_ticket_observed``).
+    ``summary`` is a human-readable one-liner. In the deltas merge
+    (``WorkingMemoryRepo.apply_deltas``) findings are deduped by
     ``(kind, summary, source_beacon_id)`` so re-emission / overlapping chunks
-    do not pile up duplicates. ``append_finding`` is kept for the BLOCK-verdict
-    audit stream (``_on_verdict`` writes through it; no dedup — every BLOCK
-    matters); ``apply_deltas`` is the dedup'd path for enrichment-derived
-    findings (since Plan B2 retired the regex producer, that is the only other
-    write path).
+    do not pile up duplicates; since Plan B2 retired the regex producer, the
+    enrichment path is the only writer. The un-dedup'd
+    ``WorkingMemoryRepo.append_finding`` lost its last caller when the pre-flight
+    gate's BLOCK-finding path was removed — it is retained as a tested repo API,
+    pending triage.
     """
 
     kind: str
@@ -147,47 +147,26 @@ class WorkingMemory:
 
 @dataclass(frozen=True)
 class Episode:
-    """Raw OPSEC verdict episode — one row per ``opsec.verdict`` event.
+    """One command the operator ran — the raw activity log L5 narrates from.
 
-    Episodes are the audit trail the ``LessonPromoter`` aggregates over: when
-    the same ``(command, verdict)`` pair recurs at or above threshold and the
-    verdict is BLOCK or WARN, a single ``PromotedLesson`` is upserted into
-    the long-term store so future LLM judgments can retrieve it from L1.
+    Sourced from ``beacon.command_input`` by the reducer. Before the pre-flight gate was
+    removed this was one row per ``opsec.verdict``; the gate fired on every command, so the
+    verdict stream was a de-facto command stream. The command stream is the real one.
     """
 
     id: int | None  # None until persisted
     engagement_id: str
     correlation_id: str
     command: str
-    verdict: str  # ALLOW | WARN | BLOCK | UNKNOWN
-    reason: str
-    created_at: datetime
-
-
-@dataclass(frozen=True)
-class PromotedLesson:
-    """L1 long-term record synthesised from recurring episodes.
-
-    Structured pattern record keyed by ``(command, verdict)`` and surfaced
-    cross-engagement for future judgments. Produced by ``LessonPromoter``
-    when ``EpisodicRepo`` shows a verdict pattern recurring at or above the
-    configured ``REDROBIN_PROMOTER_MIN_OCCURRENCES`` threshold.
-    """
-
-    id: int | None  # None until persisted
-    command: str
-    verdict: str  # BLOCK | WARN
-    summary: str
-    occurrence_count: int
     created_at: datetime
 
 
 @dataclass(frozen=True)
 class Lesson:
     """L1 operator-correction lesson (spec §6.D) — a context-scoped, NEVER-blanket
-    record captured when the operator corrects the assistant. Distinct from
-    ``PromotedLesson`` (the verdict-aggregation record keyed by command/verdict):
-    this is the operator-correction lesson-source (§10). ``scope`` is
+    record captured when the operator corrects the assistant, and since the
+    pre-flight gate's verdict-aggregation record was deleted, the only L1 row
+    shape left. This is the operator-correction lesson-source (§10). ``scope`` is
     ``"operator"`` (persists cross-engagement — cumulative) or ``"engagement"``
     (quarantined — read back only for its own engagement, so a honeypot fact never
     contaminates the next client). Provenance (``engagement_id``, ``created_at``)
@@ -208,8 +187,8 @@ class ContextSummary:
 
     Produced periodically by ``L5Summarizer`` once enough new episodes have
     accumulated (``window_size``). Persisted in :class:`ContextSummaryRepo`
-    and surfaced as a cached system block in Layer B's prompt so long
-    engagements stay coherent after the most recent verdicts roll off the
+    and surfaced as a cached system block in the assistant's prompt so long
+    engagements stay coherent after the most recent commands roll off the
     in-memory window.
     """
 

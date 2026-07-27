@@ -3,7 +3,7 @@
 Re-exports the infrastructure ``WorkingMemoryRepo`` (plus the ``WorkingMemory``
 domain type used to seed a fresh file) so the api layer can wire the reducer at
 daemon boot without violating the importlinter contract
-``no-direct-infra-from-presentation``. Mirrors ``rules_lifecycle.py``.
+``no-direct-infra-from-presentation``. Mirrors ``longterm_lifecycle.py``.
 """
 
 from __future__ import annotations

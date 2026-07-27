@@ -53,26 +53,10 @@ in_scope:
 out_of_scope:
   - bigcorp.com
 summary: |
-  Replace this with your engagement-specific OPSEC context. The summary
-  is injected as a cached system block into Layer B's LLM prompt so
-  retroactive verdicts reflect your specific posture (low-detection
-  priority, EDR vendor, prior tradecraft constraints, etc.).
+  Replace this with your engagement-specific OPSEC context (low-detection
+  priority, EDR vendor, prior tradecraft constraints, etc.) so it travels
+  with the engagement and is visible to whoever picks it up next.
 """
-
-_SAMPLE_RULE = """\
-id: rule-sample-lazagne
-description: Sample rule - block LaZagne credential dumping
-severity: DANGER
-match:
-  command: lazagne
-reason: LaZagne is loud - prefer in-memory creds extraction
-"""
-# Native Red Robin rules use ``RuleSeverity`` enum values
-# (INFO / WARN / DANGER) — not Sigma-style "high" / "critical". DANGER
-# maps to VerdictAction.BLOCK via SEVERITY_TO_ACTION, which is the
-# intent for the sample lazagne rule. Sigma-format rules (separate
-# ``detection`` block) use Sigma's ``level`` field — see
-# infrastructure/rules_loader.py:_SIGMA_LEVEL_TO_SEVERITY.
 
 
 def run_init(
@@ -115,7 +99,7 @@ def run_init(
             engagement_slug = ans
 
     # Layout
-    for sub in ("rules/shared", "engagements", "adapters"):
+    for sub in ("engagements", "adapters"):
         (root / sub).mkdir(parents=True, exist_ok=True)
     eng_dir = root / "engagements" / engagement_slug
     eng_dir.mkdir(parents=True, exist_ok=True)
@@ -124,11 +108,6 @@ def run_init(
     eng_file = eng_dir / "engagement.yaml"
     if not eng_file.exists():
         eng_file.write_text(_ENGAGEMENT_TEMPLATE.format(slug=engagement_slug))
-
-    # sample rule (idempotent)
-    sample_rule = root / "rules" / "shared" / "sample-lazagne.yaml"
-    if not sample_rule.exists():
-        sample_rule.write_text(_SAMPLE_RULE)
 
     # .env (idempotent + chmod 600)
     env_file = root / ".env"

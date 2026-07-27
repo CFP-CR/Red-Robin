@@ -1,10 +1,19 @@
-# Operator smoke — AI assistant (Tasks 2/4/6 #23/#25/#27 + #28 — the full assistant live surface)
+# Operator smoke — AI assistant (Tasks 2/4/6 #23/#25/#27 + #28 + gate removal — the full assistant live surface)
 
 The live surface (the assistant's advisories + confirms + answers in the Chat pane over a real CS beacon +
 the enricher/reducer over real output) is NOT CI-testable — this manual smoke is its
 only acceptance (skill **smoke-test**, `development-workflow.md` §5). Checkpoints are
-tagged by the unit that must pass now (`[Task 2]`, `[Task 4]`, `[Task 6]`, `[#28]`) or
-`[later task]` (deliberately NOT expected yet — do not fail the smoke on these).
+tagged by the unit that must pass now (`[Task 2]`, `[Task 4]`, `[Task 6]`, `[#28]`,
+`[gate removal]`) or `[later task]` (deliberately NOT expected yet — do not fail the
+smoke on these).
+
+> **Scope note (2026-07-26, pre-flight gate removal).** Red Robin is advisory-only: the
+> `.cna` observes and ships commands + output to the daemon, and the assistant answers in
+> the TUI Chat pane. Nothing is intercepted, nothing is blocked, and Red Robin prints
+> **nothing** in the beacon console. There are no verdicts and no verdict counters — the
+> only OPSEC signal is the assistant's `opsec` field on a recommendation
+> (INFO/WARN/DANGER/ESCALATE). The `[gate removal]` checkpoints below are the assistant-side
+> acceptance for that removal.
 
 ## Preconditions
 - Daemon built + running with `ANTHROPIC_API_KEY` and `VOYAGE_API_KEY` exported
@@ -117,11 +126,11 @@ live run as the Task 2/4 checkpoints.
 
 Prereq: assistant enabled (`REDROBIN_ASSISTANT_ENABLED=1`) with an ANTHROPIC key, and
 a live beacon that has already produced some engagement state (run at least the Task 2
-loot steps first, so the assistant has a picture to answer over). The Chat pane REPLACES
-the old Verdicts/Events pane in the CENTER of the TUI — press `c` to focus it, type in
-the Input, Enter to send. Assistant-authored lines render as `Red Robin  …`; the topbar
-verdict COUNT is unchanged. Batch these onto the same live run as the Task 2/4/6
-checkpoints.
+loot steps first, so the assistant has a picture to answer over). The Chat pane occupies
+the CENTER of the TUI — press `c` to focus it, type in the Input, Enter to send.
+Assistant-authored lines render as `Red Robin  …`; the topbar carries the engagement id +
+connection dot and nothing else (verdict counters went with the pre-flight gate — see
+Checkpoint V). Batch these onto the same live run as the Task 2/4/6 checkpoints.
 
 - **[#28] Checkpoint O — Ask (conversational Q&A):** type a question in the Chat pane
   (e.g. `what's my path to DA?`). EXPECT: your line echoes as the operator's, then a
@@ -149,6 +158,59 @@ checkpoints.
   survives a malformed frame — a bad/partial WS frame is dropped and the daemon receive
   loop / TUI worker keep running (the chat still sends + renders afterward). You should
   never be able to kill the socket from the chat.
+
+## [gate removal] Advisory-only — the pre-flight gate is gone (2026-07-26)
+
+Assistant-side acceptance for the pre-flight gate's removal: the adapter captures, the core
+advises, and the capture → enricher → assistant path is intact. Prereq: the Task 2
+preconditions (daemon + keys + TUI connected), a live CS beacon with `redrobin.cna` loaded,
+and the fixture planted (Setup above). Batch these onto the same live run.
+(The adapter-side acceptance — no interception, no dead routes —
+is `adapters/cobaltstrike/tests/test_cna_smoke.md` §1; do not duplicate it here.)
+
+- **[gate removal] Checkpoint T — a formerly-DANGER command just runs.** In the beacon
+  console, run the command the gate used to flag DANGER:
+  ```
+  mimikatz sekurlsa::logonpasswords
+  ```
+  EXPECT: it dispatches **immediately** — CS's own `Tasked beacon to run mimikatz ...`,
+  then real output. NO interception, NO prompt, no perceptible delay before the task is
+  sent, and **NO `[Red Robin]` line of any kind in the beacon console** — no `DANGER:`, no
+  `WARN:`, no `gate UNAVAILABLE`, no `Layer B`. Red Robin no longer speaks in the beacon
+  console at all; it speaks in the TUI Chat pane.
+- **[gate removal] Checkpoint U — capture → enricher → assistant survived.** Run a command
+  that produces real output, against the fixture:
+  ```
+  shell type "C:\Users\Public\RR-Smoke\db_backup.config"
+  ```
+  EXPECT, in the TUI (not the beacon console): (a) an advisory appears in the Chat pane
+  labeled `Red Robin · advisory`, carrying all 5 parts (as Checkpoint B); and (b) the
+  Working-Memory panel's counters advance on the `hosts N   creds N   findings N` line —
+  the `svc_reports` / SQL01 credential from this file lands in `creds` and the enricher's
+  extraction lands in `findings`. Both halves must pass: (a) proves the assistant still
+  reacts, (b) proves the enricher still fills working memory from captured output.
+- **[gate removal] Checkpoint V — the topbar has no verdict counters.** Read the TUI
+  topbar. EXPECT exactly `Red Robin · <engagement-slug> · ● connected` — engagement id and
+  connection state (green dot) and nothing else. There is NO verdict count, no
+  PASS/WARN/BLOCK/ESCALATE tally, and no Verdicts pane anywhere in the layout (the center
+  pane is Chat).
+- **[gate removal] Checkpoint W — the command trail persists.** After several commands,
+  inspect the engagement's episodic store:
+  ```bash
+  uv run --no-sync python tools/inspect_episodic.py ~/.redrobin/engagements/<slug>/episodic.db
+  ```
+  EXPECT: one `episodes` row per command you ran, no duplicates, and the real command verb
+  (not `?`). The table must have NO `verdict` / `reason` columns (they are dropped on open
+  from a legacy DB). Then leave the daemon running: once `REDROBIN_L5_WINDOW` episodes
+  (default 25) have accumulated, the summariser loop (every `REDROBIN_L5_INTERVAL_SEC`,
+  default 30 s) writes an L5 summary. Confirm one appears:
+  ```bash
+  uv run --no-sync python tools/inspect_episodic.py ~/.redrobin/context_summaries.db
+  ```
+  EXPECT: at least one `context_summaries` row for this engagement. (L5 summaries live in
+  the root-level `context_summaries.db`, NOT in `episodic.db` — they are cross-engagement
+  state. If you ran fewer than `REDROBIN_L5_WINDOW` commands, zero rows is correct, not a
+  failure — run more, or lower `REDROBIN_L5_WINDOW` for the test.)
 
 ## Explicitly out of scope (do NOT expect — later tasks)
 > The conversational Q&A + learning loop and the confirm-affordance visual are now DONE and

@@ -22,10 +22,13 @@ sha256sum junit-platform-console-standalone-1.10.0.jar
 
 ## json-20240303.jar
 
-Compact JSON parser (`org.json`). Used by `RedRobinEventStream` to decode
-WebSocket frames from the daemon's `/v1/adapters/events` endpoint. Same
-library `PyCobalt` vendors (`dcsync/pycobalt:aggressor/jars/json.jar`),
-so the pattern is established in the CS Aggressor community.
+Compact JSON parser (`org.json`). Was used by `RedRobinEventStream` to
+decode WebSocket frames; that class was deleted with the pre-flight gate, so
+this dependency has no remaining source consumer. It stays vendored only
+because the committed JAR has not been rebuilt yet and its bytecode still
+references it — retire both together. Same library `PyCobalt` vendors
+(`dcsync/pycobalt:aggressor/jars/json.jar`), so the pattern is established
+in the CS Aggressor community.
 
 **Source:** https://repo1.maven.org/maven2/org/json/json/20240303/json-20240303.jar
 

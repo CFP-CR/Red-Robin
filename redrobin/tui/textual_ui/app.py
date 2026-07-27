@@ -1,9 +1,8 @@
 """RedRobinApp — the Textual TUI client shell (Phase 1 foundation).
 
-Holds reactive ``snapshot``/``events`` updated by frame handlers, composes the
-layout (topbar + three panes + footer), and starts the
-WS worker on mount. Panel content is intentionally minimal here — Phase 2 fills
-the panes with DataTable/RichLog widgets.
+Holds the reactive ``snapshot`` updated by frame handlers, composes the layout
+(topbar + three panes + footer), and starts the WS worker on mount. Panel content
+is intentionally minimal here — Phase 2 fills the panes with DataTable widgets.
 """
 
 from __future__ import annotations
@@ -26,13 +25,7 @@ from redrobin.tui.textual_ui.commands import RedRobinCommands
 from redrobin.tui.textual_ui.frames import Registry
 from redrobin.tui.textual_ui.help_screen import HelpScreen
 from redrobin.tui.textual_ui.inspector import InspectorScreen
-from redrobin.tui.textual_ui.panels import (
-    MemoryPanel,
-    SessionsTable,
-    TopBar,
-    apply_verdict,
-    verdict_counts,
-)
+from redrobin.tui.textual_ui.panels import MemoryPanel, SessionsTable, TopBar
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +56,6 @@ class RedRobinApp(App):
     COMMANDS = App.COMMANDS | {RedRobinCommands}
 
     snapshot: reactive[dict] = reactive(dict)
-    events: reactive[list] = reactive(list)
     connection_state: reactive[str] = reactive("disconnected")
 
     def __init__(
@@ -103,20 +95,14 @@ class RedRobinApp(App):
         except (NoMatches, ScreenStackError):
             pass  # pre-mount (no screen yet) or widgets not mounted — compose seeds them
 
-    def watch_events(self, events: list) -> None:
-        """Re-render the header verdict counts whenever events change. The verdict
-        STREAM display was superseded by the Chat pane (#28); the topbar COUNT
-        survives — it reads app.events, still updated by the opsec.verdict handler."""
-        self._refresh_topbar()
-
     def _refresh_topbar(self) -> None:
-        """Re-render the header from current snapshot + connection state + verdict counts."""
+        """Re-render the header from the current snapshot + connection state."""
         try:
             bar = self.query_one("#topbar", TopBar)
         except (NoMatches, ScreenStackError):
             return
         engagement = self.snapshot.get("engagement_id") or "-"
-        bar.update_status(engagement, self.connection_state, verdict_counts(self.events))
+        bar.update_status(engagement, self.connection_state)
 
     def watch_connection_state(self, state: str) -> None:
         self._refresh_topbar()
@@ -208,13 +194,6 @@ class RedRobinApp(App):
 @REGISTRY.register("working_memory_snapshot")
 def _on_snapshot(app: "RedRobinApp", payload: dict) -> None:
     app.snapshot = payload  # reactive assignment → watch_snapshot fires
-
-
-@REGISTRY.register("opsec.verdict")
-def _on_verdict(app: "RedRobinApp", payload: dict) -> None:
-    # Reassign (not append) so watch_events fires; apply_verdict handles the
-    # Layer B in-place correction by correlation_id.
-    app.events = apply_verdict(app.events, payload)
 
 
 def main() -> None:
