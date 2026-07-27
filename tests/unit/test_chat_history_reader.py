@@ -120,7 +120,7 @@ def test_reader_returns_empty_string_when_the_repo_raises(tmp_path):
     class _BoomRepo:
         path = tmp_path / "chat_history.jsonl"
 
-        def tail(self, max_lines: int = 500):
+        def tail(self, max_lines: int = MAX_TAIL_LINES):
             raise OSError("unreadable")
 
     read = build_history_reader(_BoomRepo(), dialogue_max=10, volunteered_max=5)  # type: ignore[arg-type]
