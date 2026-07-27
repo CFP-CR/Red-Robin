@@ -5,11 +5,15 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.widgets import Input, RichLog, Static
 
+from redrobin.domain.events import Severity
 from redrobin.tui.textual_ui.chat import (
     ChatPane,
+    _DANGER,
     _PLACEHOLDER_CONFIRM,
     _PLACEHOLDER_IDLE,
+    _RISK_COLORS,
     _SPIN_FRAMES,
+    _SUCCESS,
     _thinking_text,
     format_answer,
     format_confirm_bar,
@@ -41,6 +45,33 @@ def test_format_resolution_confirmed_and_declined():
     assert "obj-1" in ok and "confirmed" in ok.lower()
     no = format_resolution("obj-1", False).plain
     assert "obj-1" in no and "declined" in no.lower()
+
+
+def _span_styles(t: Text) -> str:
+    """The styles a Rich Text carries, flattened — the only read-back for a renderer's
+    colours (Text exposes spans, not a per-character style map)."""
+    return " ".join(str(span.style) for span in t.spans)
+
+
+def test_confirm_bar_and_resolution_share_the_hoisted_palette():
+    # yes/confirmed is _SUCCESS, no/declined is _DANGER — both renderers draw from the one
+    # module palette rather than repeating the hex literals (issue #32).
+    bar = _span_styles(format_confirm_bar("Mark obj-1 COMPLETE?"))
+    assert _SUCCESS in bar and _DANGER in bar  # /y and /n
+    assert _SUCCESS in _span_styles(format_resolution("obj-1", True))
+    assert _DANGER in _span_styles(format_resolution("obj-1", False))
+
+
+def test_risk_colours_still_cover_the_whole_severity_enum():
+    # load-bearing for advisory rendering: the palette hoist must not drop or re-tint a
+    # risk band. Every Severity keeps a colour, and the four values are pinned.
+    assert set(_RISK_COLORS) == {s.value for s in Severity}
+    assert _RISK_COLORS == {
+        "INFO": "#3fb950",
+        "WARN": "#e3b341",
+        "DANGER": "#f85149",
+        "ESCALATE": "#58a6ff",
+    }
 
 
 def test_format_operator_echo_labels_you():
@@ -193,6 +224,26 @@ async def test_pending_not_consumed_when_send_fails():
 
 
 @pytest.mark.asyncio
+async def test_input_submitted_bubbles_from_the_input_up_to_the_pane():
+    # Every other input test calls on_input_submitted directly. This one drives the real
+    # keyboard path so the Submitted message has to bubble out of the #chat-bottom Vertical
+    # to reach ChatPane's handler — the wiring the operator actually uses.
+    async with _SendHarness(sent_result=True).run_test() as pilot:
+        pane = pilot.app.query_one("#events", ChatPane)
+        inp = pane.query_one("#chat-input", Input)
+        inp.focus()
+        await pilot.pause()
+        await pilot.press("h", "i")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert pilot.app.sent_msgs == [
+            {"type": "operator.question", "question_id": "opq-0", "text": "hi"}
+        ]
+        assert inp.value == ""  # the handler cleared the input
+        assert any("hi" in strip.text for strip in pane.query_one("#chat-log", RichLog).lines)
+
+
+@pytest.mark.asyncio
 async def test_pending_consumed_when_send_confirmed():
     # A confirmed send (True) consumes the pending it targeted.
     async with _SendHarness(sent_result=True).run_test() as pilot:
@@ -335,8 +386,48 @@ async def test_confirm_bar_reveals_on_question_and_hides_on_resolve():
         assert pane._pending == []
         assert bar.display is False
         assert inp.placeholder == _PLACEHOLDER_IDLE
-        # the echo ("/y") + the resolution trace both landed in the chat log
-        assert len(pane.query_one("#chat-log", RichLog).lines) >= 2
+        # the echo ("/y") + the durable resolution trace both landed in the chat log
+        written = [strip.text for strip in pane.query_one("#chat-log", RichLog).lines]
+        assert any("/y" in line for line in written)
+        assert any("obj-1 confirmed" in line for line in written)
+
+
+@pytest.mark.asyncio
+async def test_confirm_bar_restacks_to_the_next_pending():
+    # Stacked confirms: the bar always renders _pending[0]. Resolving the head must
+    # RE-RENDER the bar with the second pending (not hide it); only an empty queue hides.
+    reg = Registry()
+    register_chat(reg)
+    async with _SendHarness(sent_result=True).run_test() as pilot:
+        pane = pilot.app.query_one("#events", ChatPane)
+        bar = pane.query_one("#confirm-bar", Static)
+        inp = pane.query_one("#chat-input", Input)
+        for mid in ("obj-1", "obj-2"):
+            reg.dispatch(
+                target=pilot.app,
+                frame={
+                    "type": "operator.question",
+                    "payload": {
+                        "text": f"Mark {mid} COMPLETE?",
+                        "context_refs": [f"milestone:{mid}"],
+                        "source": "assistant",
+                    },
+                },
+            )
+        assert pane._pending == ["obj-1", "obj-2"]  # queued in arrival order
+        assert bar.display is True
+        assert "Mark obj-1 COMPLETE?" in str(bar.content)  # the head is what /y resolves
+        # resolve the head -> the bar re-renders with the NEXT pending, still revealed
+        await pane.on_input_submitted(Input.Submitted(inp, "/y"))
+        assert pane._pending == ["obj-2"]
+        assert bar.display is True
+        assert "Mark obj-2 COMPLETE?" in str(bar.content)
+        assert inp.placeholder == _PLACEHOLDER_CONFIRM  # still in confirm mode
+        # resolve the last -> the queue empties, the bar hides, the placeholder restores
+        await pane.on_input_submitted(Input.Submitted(inp, "/n"))
+        assert pane._pending == []
+        assert bar.display is False
+        assert inp.placeholder == _PLACEHOLDER_IDLE
 
 
 # ---- interactivity increment: the "thinking" spinner (assistant.thinking) ----
@@ -399,6 +490,20 @@ async def test_thinking_fast_cycle_no_flash():
         pane.stop_thinking()  # ends before 200ms -> cancels the timer, never reveals
         assert pane.query_one("#thinking-status", Static).display is False
         assert pane._think_timer is None
+
+
+@pytest.mark.asyncio
+async def test_reveal_thinking_refuses_once_the_cycle_ended():
+    # The race the cancel above cannot cover: the 200ms timer ALREADY fired, so its
+    # callback is in flight when the cycle ends. _reveal_thinking's own `_thinking <= 0`
+    # guard is the second line of defence — it must still refuse to reveal (no flash).
+    async with _ChatHarness().run_test() as pilot:
+        pane = pilot.app.query_one("#events", ChatPane)
+        status = pane.query_one("#thinking-status", Static)
+        pane._thinking = 0  # the cycle finished inside the 200ms window
+        pane._reveal_thinking()  # the already-fired timer's callback lands late
+        assert status.display is False  # never revealed
+        assert pane._spin_timer is None  # and no orphan animation interval was armed
 
 
 @pytest.mark.asyncio

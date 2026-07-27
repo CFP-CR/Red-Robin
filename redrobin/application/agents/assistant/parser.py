@@ -187,7 +187,8 @@ def parse_interpretation(raw: str) -> Interpretation | None:
     progress = max(0, min(100, progress))
     # A confirm is always ABOUT a specific objective/kill-chain id — without one it
     # can't be tracked/resolved, so an empty-id confirm downgrades to a soft auto-write
-    # (prevents an untrackable empty-id pending a plain operator answer could collide with).
+    # (prevents an untrackable empty-id pending that a plain operator answer could collide
+    # with).
     status = str(data.get("status") or "").strip()
     prompt = str(data.get("prompt") or "").strip()
     needs_confirm = bool(data.get("needs_confirm")) and bool(milestone_id)
