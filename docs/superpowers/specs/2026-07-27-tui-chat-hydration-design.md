@@ -114,6 +114,47 @@ A module constant, not a `Setting` — matching the precedent of `MAX_TAIL_LINES
 
 Textual constraint to respect: **8.2.7 has no `Static.renderable`.** The repo's accessors are `str(widget.content)` for `Static` and `Strip.text` for `RichLog` (see `test_app_reactive.py:22`).
 
+## Definition of Done
+
+Three tiers. The first two are machine-checkable; the third is the acceptance, because `.claude/rules/development-workflow.md` lists the Textual TUI as **live surface** — CI cannot exercise it.
+
+### 1. Behaviour (each item verifiable by someone who did not write it)
+
+- [ ] Connecting to `/v1/tui` yields a `chat_history` frame, **after** `working_memory_snapshot` and **before** any live event.
+- [ ] With a populated transcript, the frame carries the last **50** turns in file order (oldest first). A transcript longer than the window yields exactly 50; a shorter one yields all of them.
+- [ ] Each turn renders as one chat entry: `You` for `role == "operator"`, `Red Robin` otherwise, with a `· advisory` / `· heads-up` / `· confirm` suffix for those kinds.
+- [ ] A hydrated advisory shows its stored body (action + `why` / `opsec` / `conf`). The `opsec` line is **uncoloured** — this is the intended difference from live, not a defect.
+- [ ] **No separator, no dimming, no truncation marker.** The thread simply starts.
+- [ ] With `app.state.chat_history_repo` absent (the assistant is disabled — the default), the frame carries `turns: []` and the pane starts empty, with no error and no traceback.
+- [ ] A repo whose read raises still yields a successful connect with `turns: []`; the failure is logged.
+- [ ] **No regression:** Working Memory and Sessions still populate on connect, and live frames still render after hydration.
+
+### 2. Quality gates
+
+- [ ] Five CI gates green: `ruff check`, `ruff format --check`, `mypy redrobin/domain redrobin/application`, `lint-imports` (4/4 contracts), `pytest tests/`.
+- [ ] `pytest adapters/` green.
+- [ ] Test count reconciles exactly against the tests added — the arithmetic stated, not asserted.
+- [ ] TDD: every behavioural test was seen failing before its implementation.
+- [ ] Atomic conventional commits, no AI co-author trailer.
+- [ ] Coverage as listed under **Testing** above: the renderer across both roles and all five kinds, the handler's ordering, and the three integration cases (populated / no repo / raising repo).
+
+### 3. Operator acceptance (the only acceptance for the visible result)
+
+Run with the assistant enabled (`REDROBIN_ASSISTANT_ENABLED=1`) against the `vantage` engagement:
+
+- [ ] Open the TUI, ask the assistant something, get an answer. Quit with `q`. **Reopen the TUI — the exchange is there.**
+- [ ] The rehydrated thread reads as a conversation: no duplicated lines, no lines out of order, no visual noise between old and new.
+- [ ] Send a new message. It appends below the hydrated thread, in the same style.
+- [ ] With an advisory in the transcript, its body is present and legible.
+- [ ] The pane's scroll position is usable on open — the operator sees the most recent turns, not the top of the history.
+
+## Out of Done — explicitly not required to ship
+
+- Colouring a historical advisory's `opsec` value.
+- Any indication that the thread is truncated.
+- Scrollback beyond the 50-turn window, search, or paging.
+- Normalising the transcript's storage model (see below).
+
 ## Deliberately not in scope
 
 **The storage smell this exposes.** `ChatRecorder` persists a *view* (composed text) rather than the *data* (the advisory's fields), because the application layer cannot import the TUI renderer. Normalising that is a change to the transcript model and the assistant's reader — its own ticket, not this one.
