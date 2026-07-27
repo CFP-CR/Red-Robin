@@ -7,7 +7,7 @@ system so failures point at one cause, not three.
 |------|-------------------|------|---------------|
 | 1. Local smoke | Daemon boot, `/v1/events` ingestion, bus → reducer → working memory, TUI | ~10 min | Anthropic + Voyage keys |
 | 2. Sliver-Mock | Wire protocol end-to-end, adapter session lifecycle, scenario replay | ~15 min | none (no CS license needed) |
-| 3. CS local (no beacon) | `redrobin.cna` parses in Aggressor, handshake succeeds, adapter login works | ~30 min | CS Team Server + CS Client |
+| 3. CS local (no beacon) | `redrobin.cna` parses in Aggressor, handshake succeeds, console stays stock | ~30 min | CS Team Server + CS Client |
 | 4. CS full E2E | Both live paths: passthrough capture (no interception) + assistant advisory in the TUI | ~1-2 h | CS + lab with a live beacon |
 
 **Stop after Tier 1 if anything's red.** Don't escalate to a real CS test with
@@ -38,13 +38,15 @@ git checkout dev          # the git-flow integration branch (see CONTRIBUTING)
 git log --oneline -1
 
 uv sync --extra dev
-uv run pytest tests/ adapters/cobaltstrike/tests/ -q
+uv run pytest tests/ -q
+uv run pytest adapters/ -q
 ```
 
-Expected: `0 failed`. (Adapter tests under `adapters/*/tests/` are deliberately
-outside the CI `pytest tests/` run — Tier 0 adds them because the tiers below
-exercise the adapter.) If anything fails, stop and investigate before running
-any tier.
+Expected: `0 failed` from both. (They are two runs because CI runs them as two
+steps; `adapters/` currently holds Python tests for the Sliver-Mock adapter only
+— the CS adapter's `tests/` dir carries the manual `test_cna_smoke.md`
+checklist, which no `pytest` run can execute.) If anything fails, stop and
+investigate before running any tier.
 
 **Why `--extra dev`?** This project defines dev tools (`pytest`, `mypy`,
 `ruff`, `import-linter`, `pre-commit`, etc.) under `[project.optional-
@@ -85,7 +87,7 @@ Verify layout:
 Get-ChildItem $TEST_ROOT -Recurse -Name
 ```
 
-Must include: `.env`, `engagements\op-smoke\engagement.yaml`, `adapters\`.
+Must include: `.env`, `engagements\op-smoke\engagement.yaml`.
 
 There is no `rules\` directory. The Sigma/OPSEC rule pack died with the
 pre-flight gate — if you see one, it is left over from an older run against this
@@ -676,7 +678,7 @@ needs `java.net.http`. Install a modern JVM (e.g. Temurin 21) and reload.
 
 **If the handshake retries and fails** (`handshake attempt 1/3 failed` … then
 `handshake failed after 3 attempts`), the daemon is unreachable or the token is
-wrong. Fix Step 3.4 and **reload the script** — the retry loop does not resume
+wrong. Fix Step 3.2 and **reload the script** — the retry loop does not resume
 on its own.
 
 ### Step 3.4 — confirm the script registers no commands (no beacon needed)
@@ -696,7 +698,7 @@ mimikatz "sekurlsa::logonpasswords"
 **Without a beacon selected**, CS complains "no beacon selected" (or similar).
 That is the correct, stock behaviour — CS's own handler answered. What you must
 **not** see is any `[Red Robin]` line **in response to the command** (the two
-load-time lines from Step 3.5 are expected and unrelated), any gate/verdict
+load-time lines from Step 3.3 are expected and unrelated), any gate/verdict
 message, or any hint that the command was inspected before dispatch. If Red
 Robin speaks here, an alias override survived the gate removal and the `.cna`
 needs fixing.
@@ -744,8 +746,8 @@ guarantee that binds them:
    advice after the fact, not a decision before it.
 
 There is no TUI-dispatch path. The Textual client is a read-only WebSocket
-observer; the CS REST client still exposes `dispatch_console_command`, but
-nothing in `redrobin/` calls it.
+observer, and the daemon has no outbound path to the team server at all — the
+CS REST client was deleted in v0.1.x because nothing ever called it.
 
 ### Pre-reqs
 

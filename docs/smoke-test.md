@@ -45,7 +45,7 @@ uv run redrobin init `
 
 What this verifies:
 
-- `init` creates `./.rr/{engagements,adapters}/` and the
+- `init` creates `./.rr/engagements/` and the
   `engagements/op-smoke/engagement.yaml` placeholder.
 - `.env` written with the supplied keys (and `chmod 600` on POSIX).
 - Idempotent — re-running never clobbers your existing files.
@@ -66,16 +66,16 @@ Quick check (env-var presence only, no network — useful in CI):
 uv run redrobin doctor --quick
 ```
 
-Full probe (Anthropic, Voyage, every configured CS adapter):
+Full probe (live connectivity checks against Anthropic and Voyage):
 
 ```bash
 uv run redrobin doctor
 ```
 
 Expected: `[+] Doctor finished: OK` and exit code 0. If any probe fails, the
-output names which key/adapter — fix and retry. The daemon will start in
-degraded mode if any LLM key is missing; doctor surfaces the failure
-explicitly so the operator notices.
+output names the failing probe and its reason — fix and retry. The daemon
+will start in degraded mode if any LLM key is missing; doctor surfaces the
+failure explicitly so the operator notices.
 
 ## Step 3 — Start the daemon
 
@@ -248,14 +248,14 @@ tracebacks during shutdown.
 ## What this smoke test validates
 
 - `redrobin init` produces a working layout.
-- `doctor` connectivity probes reach Anthropic, Voyage, and any adapter.
+- `doctor` connectivity probes reach Anthropic and Voyage.
 - The structured banner reflects the resolved config.
 - The daemon lifespan boots its `start_*` helpers in order.
 - The capture path end-to-end: adapter → `POST /v1/events` → schema
   validation → `events.jsonl` → event bus → reducer → TUI.
 - The assistant is reachable and answers grounded in working memory.
-- Graceful shutdown drains background tasks before closing adapters and the
-  bus.
+- Graceful shutdown drains background tasks before cancelling the summariser
+  and closing the bus.
 - Operator-facing CLI commands (`init`, `doctor`, `daemon start/stop`, `tui`)
   all work end-to-end.
 

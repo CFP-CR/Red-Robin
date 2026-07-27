@@ -25,8 +25,8 @@ intercepted, blocked, or rewritten.
 - **5-layer memory system**: working memory (per-engagement), episodic (raw
   command activity), long-term (cross-engagement lessons), tradecraft graph
   (technique→bypass), and context management.
-- **Adapter pattern**: the daemon is C2-agnostic. CS adapter (Aggressor `.cna` +
-  Python REST client) is the v0.1 reference; Sliver-Mock ships for protocol
+- **Adapter pattern**: the daemon is C2-agnostic. The CS adapter (the Aggressor
+  `.cna`, capture-only) is the v0.1 reference; Sliver-Mock ships for protocol
   validation + demo; Sliver-Real committed for v0.1.1 (2026-06-22).
 - **Operator-owned data**: everything lives in `~/.redrobin/`. Zero teamserver
   footprint. API keys via env var only.
@@ -46,8 +46,8 @@ intercepted, blocked, or rewritten.
 ## Quick start
 
 `redrobin init` is the front door. It scaffolds `~/.redrobin/`, prompts for
-your API keys (hidden input), and drops a sample engagement. (The bearer
-token the TUI uses is minted on first daemon start.) Full walkthrough —
+your API keys (hidden input), and drops a sample engagement. (It also mints
+the bearer token the TUI and the `.cna` authenticate with.) Full walkthrough —
 including non-interactive use,
 the CS adapter, and smoke-test — in
 [`docs/operator-setup.md`](docs/operator-setup.md).
@@ -107,22 +107,30 @@ In Cobalt Strike Client → Scripts → Load → select
 Full spec at `docs/architecture-design.md` (~2600 lines).
 
 ```
-+-----------+      HTTP localhost      +-------------+      REST API     +-----------+
-| CS Client | -----------------------> | Red Robin   | <---------------- | CS Team   |
-| + .cna    |      captured commands   | daemon      |   state/dispatch  | Server    |
-+-----------+      + beacon output     +-------------+                   +-----------+
-                                           |
-                                           v
-                                       +-------+
-                                       |  TUI  | (WebSocket)
-                                       +-------+
++-----------+   CS-native (unchanged)  +-----------+
+| CS Client | -----------------------> | CS Team   |
+| + .cna    |                          | Server    |
++-----------+                          +-----------+
+      |
+      | HTTP localhost: captured commands + beacon output
+      v
++-------------+
+| Red Robin   |
+| daemon      |
++-------------+
+      |
+      v
+  +-------+
+  |  TUI  | (WebSocket)
+  +-------+
 ```
 
 The CS adapter is the sole C2 boundary. Red Robin core speaks the wire protocol
 only — it doesn't know about REST API endpoints, JWT, beacon IDs, etc. The
-`.cna` leg is one-way: it POSTs captured events to the daemon and nothing flows
-back to the beacon console. Everything the assistant has to say lands in the
-TUI.
+daemon never connects to the team server; only the CS Client does, over its own
+native channel. The `.cna` leg is one-way: it POSTs captured events to the
+daemon and nothing flows back to the beacon console. Everything the assistant
+has to say lands in the TUI.
 
 ## Status & roadmap
 

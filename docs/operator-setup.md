@@ -59,9 +59,9 @@ engagement YAML. What it creates:
 
 - `~/.redrobin/.env` — pinned env config (chmod 600 on POSIX).
 - `~/.redrobin/engagements/<slug>/engagement.yaml` — placeholder scope.
-
-`~/.redrobin/transport.token` (the bearer token the TUI and adapters
-authenticate with) is minted on first daemon start, not by `init`.
+- `~/.redrobin/transport.token` — the bearer token the TUI and adapters
+  authenticate with. Delete it and the next process that needs it
+  (`daemon start`, `redrobin tui`) mints a fresh one.
 
 See `docs/secrets-handling.md` for caveats on Git Bash, Windows ACLs, and
 the dotenv CWD-pin behavior. See `docs/operator-cli-conventions.md` for the
@@ -70,7 +70,7 @@ interactive vs non-interactive pattern.
 ## 3. `redrobin doctor`
 
 Full preflight — env vars, root layout, and real network probes against
-Anthropic, Voyage, and any configured CS adapter:
+Anthropic and Voyage:
 
 ```bash
 uv run redrobin doctor
@@ -392,8 +392,9 @@ working and the assistant switched off.
 uv run redrobin daemon stop
 ```
 
-Daemon shutdown drains background tasks, closes adapter sessions, and
-flushes the persistence queue before exit.
+Daemon shutdown drains in-flight background tasks, cancels the summariser,
+then closes the event bus and waits for the reducer, assistant and enricher
+to drain before exit.
 
 ## Troubleshooting
 
@@ -411,6 +412,13 @@ flushes the persistence queue before exit.
 - **TUI cannot authenticate.** Confirm `~/.redrobin/transport.token`
   exists and is readable by the TUI user. `redrobin init` creates it
   idempotently; deleting it forces a fresh token on next daemon start.
-- **Adapter handshake fails.** Run `redrobin doctor` — it probes every
-  configured adapter and prints the failure reason. Common causes:
-  teamserver unreachable, wrong password, SSL verification mismatch.
+- **Adapter handshake fails.** The `.cna` POSTs `/v1/adapters/connect` at
+  load time and retries 3 times before giving up. `redrobin doctor` does not
+  cover this path — it only probes Anthropic and Voyage. The three real
+  causes: `$REDROBIN_URL` in `redrobin.cna` points at the wrong host:port, or
+  the daemon is unreachable from the CS Client machine (the daemon never sees
+  the POST at all); the token mismatches, so the daemon answers 401 (the
+  `.cna` reads `~/.redrobin/transport.token`, which must be the same file the
+  daemon uses); or that token file is missing, in which case the script throws
+  FileNotFound on load. Fix, then **reload the script** — the retry loop does
+  not resume on its own. Full checklist in `TESTING.md` Tier 3.

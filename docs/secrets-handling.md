@@ -17,8 +17,9 @@ That file sits under `~/.redrobin/`, which `redrobin init` creates with
 Red Robin holds **no C2 credentials**. It never connects to a team server —
 the `.cna` runs inside the already-authenticated CS Client and only POSTs
 captured activity to the daemon. The one remaining Red-Robin-side credential
-on that channel is the bearer token in `~/.redrobin/transport.token`, minted
-on first daemon start.
+on that channel is the bearer token in `~/.redrobin/transport.token`, minted by
+`redrobin init` (and re-minted on demand by whichever process needs it next if
+you delete it).
 
 ## Rotation procedure
 
@@ -50,8 +51,8 @@ posted in a chat, copied to a logfile):
 2. **Check git history.** The `.gitignore` covers `.env`, but verify
    nothing slipped:
    ```bash
-   git log --all -p -S 'sk-ant-' -- ':!*.example.yaml'
-   git log --all -p -S 'ANTHROPIC_API_KEY=' -- ':!*.example.yaml'
+   git log --all -p -S 'sk-ant-'
+   git log --all -p -S 'ANTHROPIC_API_KEY='
    ```
    Any hit means the secret was committed at some point. Force-push won't
    help — assume the value is compromised forever and rely on the
