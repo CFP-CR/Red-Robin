@@ -8,7 +8,7 @@ Open the TUI mid-engagement and the Assistant Chat pane is **empty**, while Work
 
 This is a *display* gap, not a memory gap. The transcript is persisted by `ChatRecorder` and injected into the assistant's own context by `build_history_reader`, so the assistant **remembers** the conversation across a TUI restart — the operator just can't see it. `ChatPane` composes an empty `RichLog` and only appends frames that arrive after connect.
 
-The asymmetry is structural: on connect `tui_ws.py` sends exactly one replay frame, `working_memory_snapshot` (`tui_ws.py:76-78`). There is no equivalent for chat.
+The asymmetry is structural: on connect `tui_ws.py` sends exactly one replay frame, `working_memory_snapshot` (`tui_ws.py:76-80`). There is no equivalent for chat.
 
 ## Goal
 
@@ -48,7 +48,7 @@ No new facade, no new widget, no new pane, no new state.
 
 Type `chat_history`, payload `{"turns": [...]}`, each turn the `ChatTurn` fields already persisted: `ts`, `role`, `kind`, `text`, `correlation_id`. Sent immediately after `working_memory_snapshot`, before the live loop begins.
 
-Turns come from a single `repo.tail(max_lines=50)` — **not** a full `MAX_TAIL_LINES` read sliced afterwards. `tail` already returns the parseable turns among the last N raw lines, which is exactly the window wanted, and reading 50 lines instead of 2000 keeps the connect path cheap.
+Turns come from a single `repo.tail(max_lines=50)` (the constant is named `_HISTORY_LINES`, since it caps lines) — **not** a full `MAX_TAIL_LINES` read sliced afterwards. `tail` already returns the parseable turns among the last N raw lines, which is exactly the window wanted, and reading 50 lines instead of 2000 keeps the connect path cheap.
 
 Rendering uses `role`, `kind` and `text`. `ts` and `correlation_id` are carried because they are what a turn *is*, not because this feature reads them — `ts` is unused given the no-timestamp decision below, and `kind` already distinguishes `advisory` from `heads_up`, so `correlation_id` is not needed to pick the tag.
 
@@ -64,7 +64,7 @@ def format_history_turn(turn: dict) -> Text:
     ...
 ```
 
-The labelling rule already exists for the LLM slice (`application/chat/history.py:49`); this is the same rule in the TUI's voice. It is not a dispatch table — a speaker label plus the stored text.
+The labelling rule already exists for the LLM slice (`application/chat/history.py:49`); this is that rule in the TUI's voice, **widened by one kind** — the LLM slice tags only `VOLUNTEERED_KINDS`, while the pane also tags `confirm`, because on screen a confirm must not read as a plain answer. It is not a dispatch table — a speaker label plus the stored text.
 
 ## Decisions and their reasoning
 
@@ -94,11 +94,18 @@ Three options were weighed:
 
 ## Degraded behaviour
 
-`app.state.chat_history_repo` exists **only when the assistant is enabled** (`lifespan_helpers.py:424`) — and the assistant is off by default. So the missing-repo path is the common one, not a defensive edge case:
+`app.state.chat_history_repo` exists only when **both** `settings.assistant_enabled` is true and a working-memory repo was resolved (`lifespan_helpers.py:424-428`) — and the assistant is off by default. So the missing-repo path is the common one, not a defensive edge case:
 
 - No repo on `app.state` → send an empty `turns` list. Correct: with the assistant off nothing ever wrote a transcript.
 - Read failure → log, send an empty list. The pane starts empty, exactly today's behaviour.
+- A repo returning anything that is not a `ChatTurn` → the same empty list. The mapping to dicts sits **inside** the guard, because the endpoint's outer `try` catches only `WebSocketDisconnect`: anything else raised here closes the socket and drops the TUI into its reconnect loop.
 - Never block or fail the connect. A chat that cannot hydrate must not cost the operator their Working Memory and Sessions panes.
+
+## Reconnect
+
+The TUI auto-reconnects (`ws_worker.py:57` iterates `connect(...)` and continues on any exception), and every reconnect re-runs the endpoint from the top, re-sending both connect frames. The working-memory frame is idempotent because it **replaces** `app.snapshot`; the chat log is **append-only**, so an unguarded handler would re-append the whole thread on any ping timeout, daemon restart, or network blip.
+
+**Hydration is therefore one-shot per pane.** The known cost: turns recorded while the socket was down are not rendered on reconnect. They remain on disk and in the assistant's context, and restarting the TUI shows them. Rendering only turns newer than the last hydrated one was considered and rejected — a live-rendered turn carries no `ts` in the TUI, so the watermark could not be advanced for it, and the next reconnect would duplicate everything rendered live in between.
 
 ## Window
 
@@ -121,8 +128,9 @@ Three tiers. The first two are machine-checkable; the third is the acceptance, b
 ### 1. Behaviour (each item verifiable by someone who did not write it)
 
 - [ ] Connecting to `/v1/tui` yields a `chat_history` frame, **after** `working_memory_snapshot` and **before** any live event.
-- [ ] With a populated transcript, the frame carries the last **50** turns in file order (oldest first). A transcript longer than the window yields exactly 50; a shorter one yields all of them.
-- [ ] Each turn renders as one chat entry: `You` for `role == "operator"`, `Red Robin` otherwise, with a `· advisory` / `· heads-up` / `· confirm` suffix for those kinds.
+- [ ] With a populated transcript, the frame carries the parseable turns among the last **50 lines**, in file order (oldest first) — **at most** 50, and fewer if any of those lines is malformed, because `tail` caps lines and drops unparseable ones without backfilling.
+- [ ] Each turn renders with `You` for `role == "operator"` and `Red Robin` otherwise, plus a `· advisory` / `· heads-up` / `· confirm` suffix for those kinds. Dialogue occupies one line; an advisory body is multi-line by design.
+- [ ] **A reconnect does not duplicate the thread.** The TUI auto-reconnects and the daemon re-sends the frame on every connect, so hydration is one-shot per pane.
 - [ ] A hydrated advisory shows its stored body (action + `why` / `opsec` / `conf`). The `opsec` line is **uncoloured** — this is the intended difference from live, not a defect.
 - [ ] **No separator, no dimming, no truncation marker.** The thread simply starts.
 - [ ] With `app.state.chat_history_repo` absent (the assistant is disabled — the default), the frame carries `turns: []` and the pane starts empty, with no error and no traceback.
@@ -146,6 +154,7 @@ Run with the assistant enabled (`REDROBIN_ASSISTANT_ENABLED=1`) against the `van
 - [ ] The rehydrated thread reads as a conversation: no duplicated lines, no lines out of order, no visual noise between old and new.
 - [ ] Send a new message. It appends below the hydrated thread, in the same style.
 - [ ] With an advisory in the transcript, its body is present and legible.
+- [ ] **Restart the daemon with the TUI still open.** It reconnects on its own and the thread must NOT be re-appended — a quit-and-reopen check does not exercise this path.
 - [ ] The pane's scroll position is usable on open — the operator sees the most recent turns, not the top of the history.
 
 ## Out of Done — explicitly not required to ship
