@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 
 from redrobin.domain.chat import ChatTurn
 from redrobin.infrastructure.persistence.chat_history_repo import ChatHistoryRepo
@@ -60,6 +61,19 @@ def test_malformed_lines_are_skipped_and_neighbours_still_parse(tmp_path):
     repo = ChatHistoryRepo(path)
     turns = repo.tail()
     assert [t.text for t in turns] == ["keep me", "keep me"]  # 2 good, 3 skipped
+
+
+def test_well_formed_json_that_is_not_an_object_is_skipped_and_logged(tmp_path, caplog):
+    # `null` / a bare array / a number all parse as JSON but are not turns. Without a debug
+    # line a whole file of them would read as "no history" with nothing to explain it —
+    # the other three skip paths all log, so this one must too.
+    path = tmp_path / "chat_history.jsonl"
+    path.write_text('null\n[1, 2]\n"just a string"\n42\n', encoding="utf-8")
+    repo = ChatHistoryRepo(path)
+    with caplog.at_level(logging.DEBUG):
+        assert repo.tail() == []
+    assert "not a JSON object" in caplog.text
+    assert caplog.text.count("not a JSON object") == 4  # every skipped line, not just one
 
 
 def test_tail_honours_max_lines(tmp_path):
