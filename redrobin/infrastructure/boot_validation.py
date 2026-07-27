@@ -4,7 +4,7 @@ Slice 3 of v0.1.x hardening closes a Phase-2 gap where the daemon would
 silently degrade when API keys were missing. Operators must now explicitly
 opt in to running without the model via the ``--allow-degraded`` CLI flag or
 ``REDROBIN_ALLOW_DEGRADED=1`` env var (both wire through to
-``Settings.allow_degraded_layer_b``).
+``Settings.allow_degraded``).
 
 Callsites:
   - ``redrobin.cli.cmd_daemon_start`` calls with ``require_root_exists=True``
@@ -40,7 +40,7 @@ def validate_for_boot(settings: Settings, *, require_root_exists: bool = False) 
     warnings: list[str] = []
 
     if not settings.anthropic_api_key:
-        if settings.allow_degraded_layer_b:
+        if settings.allow_degraded:
             warnings.append(
                 "ANTHROPIC_API_KEY missing — running degraded "
                 "(no assistant, enrichment, or summaries)"
@@ -52,7 +52,7 @@ def validate_for_boot(settings: Settings, *, require_root_exists: bool = False) 
                 "run degraded."
             )
     if not settings.voyage_api_key:
-        if settings.allow_degraded_layer_b:
+        if settings.allow_degraded:
             warnings.append("VOYAGE_API_KEY missing — KB retrieval disabled")
         else:
             errors.append(

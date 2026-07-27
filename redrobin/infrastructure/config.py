@@ -107,8 +107,10 @@ class Settings(BaseSettings):
         default=600.0, alias="REDROBIN_ASSISTANT_PROACTIVE_MIN_INTERVAL_SEC"
     )
 
-    # Operator policy
-    allow_degraded_layer_b: bool = Field(default=False, alias="REDROBIN_ALLOW_DEGRADED")
+    # Operator policy. The env var name is operator-facing and frozen; the
+    # Python identifier was renamed off the deleted "Layer B" (the gate's LLM
+    # tier). Degraded now means "no assistant, enrichment or summaries".
+    allow_degraded: bool = Field(default=False, alias="REDROBIN_ALLOW_DEGRADED")
 
     @model_validator(mode="after")
     def _derive_paths(self) -> "Settings":

@@ -44,6 +44,20 @@ def test_settings_reads_env(monkeypatch, tmp_path):
     assert s.l5_interval_sec == 120.0
 
 
+def test_allow_degraded_env_var_maps_to_the_field(monkeypatch, tmp_path):
+    """``REDROBIN_ALLOW_DEGRADED`` is the operator-facing name and must not drift.
+
+    The Python identifier was renamed off the deleted "Layer B"; the env var it
+    is aliased to is documented in CLAUDE.md, TESTING.md, ``redrobin init``'s
+    .env template and every degraded-boot test, so it is frozen here.
+    """
+    monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path))
+    monkeypatch.delenv("REDROBIN_ALLOW_DEGRADED", raising=False)
+    assert Settings().allow_degraded is False
+    monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
+    assert Settings().allow_degraded is True
+
+
 def test_settings_typo_raises(monkeypatch, tmp_path):
     monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path))
     monkeypatch.setenv("REDROBIN_PORT", "eight thousand")
