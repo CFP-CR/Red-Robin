@@ -520,3 +520,222 @@ async def test_thinking_is_display_only_never_steals_input_focus():
         assert pane.query_one("#thinking-status", Static).can_focus is False
         assert pilot.app.focused is inp  # focus never left the input — the spinner is display-only
         pane.stop_thinking()  # tidy: stop the animation timer before teardown
+
+
+# ---- hydration on connect: the chat_history frame (#41) ----
+
+
+def test_format_history_turn_labels_the_operator():
+    from redrobin.tui.textual_ui.chat import format_history_turn
+
+    s = format_history_turn(
+        {"ts": "t", "role": "operator", "kind": "question", "text": "what is my path to DA?"}
+    ).plain
+    assert s.startswith("You")
+    assert "what is my path to DA?" in s
+    assert "·" not in s  # a plain question carries no provenance tag
+
+
+def test_format_history_turn_labels_the_assistant():
+    from redrobin.tui.textual_ui.chat import format_history_turn
+
+    s = format_history_turn(
+        {"ts": "t", "role": "assistant", "kind": "answer", "text": "you hold Administrator"}
+    ).plain
+    assert s.startswith("Red Robin")
+    assert "you hold Administrator" in s
+    assert "·" not in s
+
+
+def test_format_history_turn_tags_an_advisory_and_starts_its_body_on_a_new_line():
+    from redrobin.tui.textual_ui.chat import format_history_turn
+
+    s = format_history_turn(
+        {
+            "ts": "t",
+            "role": "assistant",
+            "kind": "advisory",
+            "text": "Enumerate 10.100.0.0/24\nwhy    you hold Administrator\nopsec  WARN",
+        }
+    ).plain
+    assert s.startswith("Red Robin · advisory")
+    # the multi-line body must not be jammed onto the label line
+    assert s.splitlines()[0].strip() == "Red Robin · advisory"
+    assert "opsec  WARN" in s
+
+
+def test_format_history_turn_does_not_colour_a_historical_opsec_value():
+    """Pins the spec decision, so nobody later 'restores' the colour by re-parsing.
+
+    The recorder flattens an advisory to text, so ``opsec_risk`` is not on disk. Adding
+    the colour back would mean scraping the stored string, or adding a field only
+    post-ship rows could carry.
+
+    KNOWN HOLE: ``_ACCENT`` is excluded because it is also the label's style, and it
+    happens to be ``_RISK_COLORS["ESCALATE"]`` — so an implementation that coloured an
+    ESCALATE line specifically would slip past. The realistic failure mode is re-parsing
+    WARN/DANGER, which this does catch.
+    """
+    from redrobin.tui.textual_ui.chat import _ACCENT, _DANGER, _RISK_COLORS, format_history_turn
+
+    t = format_history_turn(
+        {
+            "ts": "t",
+            "role": "assistant",
+            "kind": "advisory",
+            "text": "Dump LSASS\nwhy    you hold SeDebug\nopsec  DANGER",
+        }
+    )
+    styles = _span_styles(t)
+    assert "DANGER" in t.plain  # the value is still legible
+    assert _DANGER not in styles  # ...just not highlighted
+    assert all(colour not in styles for colour in _RISK_COLORS.values() if colour != _ACCENT)
+
+
+def test_format_history_turn_hyphenates_heads_up():
+    from redrobin.tui.textual_ui.chat import format_history_turn
+
+    s = format_history_turn(
+        {"ts": "t", "role": "assistant", "kind": "heads_up", "text": "beacons look stale"}
+    ).plain
+    assert "heads-up" in s
+    assert "heads_up" not in s  # the stored kind is snake_case; the label is not
+
+
+def test_format_history_turn_tags_a_confirm_on_one_line():
+    from redrobin.tui.textual_ui.chat import format_history_turn
+
+    s = format_history_turn(
+        {"ts": "t", "role": "assistant", "kind": "confirm", "text": "Mark obj-1 COMPLETE?"}
+    ).plain
+    assert s.startswith("Red Robin · confirm")
+    assert s.count("\n") == 0  # a confirm is one line, unlike an advisory body
+
+
+@pytest.mark.asyncio
+async def test_on_chat_history_appends_one_line_per_turn_in_order():
+    from redrobin.tui.textual_ui.chat import _on_chat_history
+
+    async with _ChatHarness().run_test() as pilot:
+        _on_chat_history(
+            pilot.app,
+            {
+                # ts deliberately SKEWED out of order, so payload order and stamp order
+                # disagree: a handler that sorted by ts would render second/third/first.
+                "turns": [
+                    {"ts": "t3", "role": "operator", "kind": "question", "text": "first"},
+                    {"ts": "t1", "role": "assistant", "kind": "answer", "text": "second"},
+                    {"ts": "t2", "role": "operator", "kind": "question", "text": "third"},
+                ]
+            },
+        )
+        rendered = [s.text for s in pilot.app.query_one("#chat-log", RichLog).lines]
+        # exactly one line per turn: no separator, no marker (spec decision)
+        assert len(rendered) == 3
+        assert "first" in rendered[0]
+        assert "second" in rendered[1]
+        assert "third" in rendered[2]  # order is the daemon's, not re-sorted
+
+
+@pytest.mark.asyncio
+async def test_on_chat_history_renders_a_multi_line_advisory_body():
+    from redrobin.tui.textual_ui.chat import _on_chat_history
+
+    async with _ChatHarness().run_test() as pilot:
+        _on_chat_history(
+            pilot.app,
+            {
+                "turns": [
+                    {
+                        "ts": "t1",
+                        "role": "assistant",
+                        "kind": "advisory",
+                        "text": "Enumerate the subnet\nwhy    you hold Administrator\nopsec  WARN",
+                    }
+                ]
+            },
+        )
+        rendered = [s.text for s in pilot.app.query_one("#chat-log", RichLog).lines]
+        joined = "\n".join(rendered)
+        assert "Red Robin · advisory" in joined
+        assert "opsec  WARN" in joined  # the body survives the trip through RichLog
+
+
+@pytest.mark.asyncio
+async def test_on_chat_history_tolerates_empty_and_malformed_payloads():
+    from redrobin.tui.textual_ui.chat import _on_chat_history
+
+    async with _ChatHarness().run_test() as pilot:
+        log = pilot.app.query_one("#chat-log", RichLog)
+        pane = pilot.app.query_one("#events", ChatPane)
+        _on_chat_history(pilot.app, {})  # no turns key: `for turn in None` would raise
+        _on_chat_history(pilot.app, {"turns": 42})  # non-iterable: the outer guard is load-bearing
+        assert len(log.lines) == 0
+        # A shapeless frame must NOT burn the one-shot: were the flag set before the shape
+        # check, one garbage frame on first connect would leave the pane permanently
+        # un-hydratable, so the real transcript arriving on reconnect would never render.
+        # This is also what keeps the two calls above live — they reach the shape check.
+        assert pane._hydrated is False
+        # one bad entry must not drop the good ones around it
+        _on_chat_history(
+            pilot.app,
+            {
+                "turns": [
+                    {"ts": "t", "role": "operator", "kind": "question", "text": "kept"},
+                    "junk",
+                ]
+            },
+        )
+        assert len(log.lines) == 1
+        assert "kept" in log.lines[0].text
+    # An empty list, by contrast, IS a hydration: the daemon said "the thread is empty" and
+    # that consumes the one-shot, exactly as the spec's "one-shot PER PANE" requires. Were it
+    # not consumed, a fresh engagement (empty transcript on first connect) would re-append
+    # everything rendered live once the first reconnect arrived — the very duplication the
+    # guard exists to stop. On its own pane so the flag reads unambiguously.
+    async with _ChatHarness().run_test() as pilot:
+        _on_chat_history(pilot.app, {"turns": []})
+        assert len(pilot.app.query_one("#chat-log", RichLog).lines) == 0
+        assert pilot.app.query_one("#events", ChatPane)._hydrated is True
+
+
+@pytest.mark.asyncio
+async def test_on_chat_history_hydrates_only_once_across_reconnects():
+    """The TUI auto-reconnects (ws_worker.py:57) and every reconnect re-sends the frame.
+
+    The chat log is append-only, so without a guard a ping timeout or a daemon restart
+    re-appends the whole thread below the live conversation.
+    """
+    from redrobin.tui.textual_ui.chat import _on_chat_history
+
+    payload = {
+        "turns": [
+            {"ts": "t1", "role": "operator", "kind": "question", "text": "only once"},
+            {"ts": "t2", "role": "assistant", "kind": "answer", "text": "indeed"},
+        ]
+    }
+    async with _ChatHarness().run_test() as pilot:
+        log = pilot.app.query_one("#chat-log", RichLog)
+        _on_chat_history(pilot.app, payload)
+        assert len(log.lines) == 2
+        _on_chat_history(pilot.app, payload)  # the reconnect replay
+        assert len(log.lines) == 2  # unguarded -> 4
+
+
+@pytest.mark.asyncio
+async def test_chat_history_is_registered_as_a_frame_type():
+    reg = Registry()
+    register_chat(reg)
+    assert reg.has_handler("chat_history")
+    async with _ChatHarness().run_test() as pilot:
+        handled = reg.dispatch(
+            target=pilot.app,
+            frame={
+                "type": "chat_history",
+                "payload": {
+                    "turns": [{"ts": "t", "role": "operator", "kind": "question", "text": "hi"}]
+                },
+            },
+        )
+        assert handled is True
+        assert len(pilot.app.query_one("#chat-log", RichLog).lines) == 1
