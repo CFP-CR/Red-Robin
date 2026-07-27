@@ -2,8 +2,8 @@
 
 Exercises the full operator journey through the new ``redrobin init`` entry
 point introduced in Slice 5: the init helper writes the on-disk layout
-(``engagements/<slug>/engagement.yaml``, ``adapters/``, ``.env``), the FastAPI
-lifespan picks it up through :class:`Settings`, every startup helper runs
+(``engagements/<slug>/engagement.yaml``, ``.env``), the FastAPI lifespan
+picks it up through :class:`Settings`, every startup helper runs
 end-to-end, and the startup banner reflects the resolved engagement.
 
 Migrates the prior Phase-2 manual env-var bootstrap to the new
@@ -59,8 +59,8 @@ def test_init_to_running_daemon_e2e(operator_setup, capfd):
     """Smoke: the init layout boots successfully through the lifespan.
 
     Confirms every Slice-8 helper ran (event bus, engagement, working memory,
-    enricher, assistant, adapters, summariser) and that the structured Slice-7
-    banner reached stderr.
+    enricher, assistant, summariser) and that the structured Slice-7 banner
+    reached stderr.
     """
     root = operator_setup
     app = create_app()

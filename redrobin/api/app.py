@@ -3,15 +3,13 @@
 The lifespan handler is a thin orchestrator over the ``_start_*`` helpers
 in :mod:`redrobin.api.lifespan_helpers`. Each helper owns a single
 startup concern (event bus, engagement, dedup keys, working memory +
-reducer, enricher, assistant, CS adapters, L5 summariser) and returns a
-close hook. The orchestrator calls them in order at startup and tears
-them down in the original well-tested order on shutdown.
+reducer, enricher, assistant, L5 summariser) and returns a close hook.
+The orchestrator calls them in order at startup and tears them down in
+the original well-tested order on shutdown.
 
 Slice 8 (v0.1.x hardening) was a pure refactor: the body was split out
 of this file without changing any resource creation or shutdown
-sequencing. Slice 10 reordered shutdown so background tasks drain
-BEFORE adapters close (fixes spurious "httpx client closed" errors when
-a fire-and-forget dispatch landed right before Ctrl+C).
+sequencing.
 """
 
 from __future__ import annotations
@@ -29,7 +27,6 @@ from redrobin.api.adapters_router import router as adapters_router
 from redrobin.api.auth import require_bearer
 from redrobin.api.events_router import router as events_router
 from redrobin.api.lifespan_helpers import (
-    start_adapters,
     start_assistant,
     start_dedup,
     start_engagement,
@@ -75,9 +72,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Start each subsystem. Order matters — see lifespan_helpers for the
     # contract of each helper. Close hooks are kept by name (not a list)
     # so the shutdown sequence in the ``finally`` block is explicit and
-    # each phase can be reordered independently. Slice 10 reordered the
-    # shutdown so background tasks drain before adapters close — see the
-    # ``finally`` block below for the current contract.
+    # each phase can be reordered independently — see the ``finally``
+    # block below for the current contract.
     _, close_bus = await start_event_bus(app, settings)
     await start_engagement(
         app, settings
@@ -88,21 +84,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _, close_wm = await start_working_memory(app, settings)
     _, close_enricher = await start_enricher(app, settings)
     _, close_assistant = await start_assistant(app, settings)
-    _, close_adapters = await start_adapters(app, settings)
     _, close_summarizer = await start_l5_summarizer(app, settings)
 
     logger.info(
-        "daemon lifespan startup complete: adapters=%d l5_interval=%.1fs",
-        len(app.state.cs_adapters),
+        "daemon lifespan startup complete: l5_interval=%.1fs",
         settings.l5_interval_sec,
     )
 
     # Slice 7 (v0.1.x hardening): structured startup banner. Surfaces the
-    # resolved config (engagement, adapters, secret key set/missing, L5
-    # tuning) at boot so operators can diagnose "why is it doing
-    # X" without diving into logs. Emitted to stderr so the daemon's stdout
-    # remains available for structured JSON output. Secret VALUES never
-    # appear — only the literal strings ``set`` / ``MISSING (degraded)``.
+    # resolved config (engagement, secret key set/missing, L5 tuning) at
+    # boot so operators can diagnose "why is it doing X" without diving
+    # into logs. Emitted to stderr so the daemon's stdout remains available
+    # for structured JSON output. Secret VALUES never appear — only the
+    # literal strings ``set`` / ``MISSING (degraded)``.
     try:
         _version = _pkg_version("redrobin")
     except PackageNotFoundError:
@@ -111,14 +105,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings=settings,
         engagement_name=(app.state.engagement.name if app.state.engagement is not None else None),
         version=_version,
-        adapter_names=list(app.state.cs_adapters.keys()),
         scope_empty=getattr(app.state, "scope_empty", False),
     )
     print(_banner, file=sys.stderr, flush=True)
 
     # Readiness. Every ``start_*`` helper above has returned, so the daemon is
     # fully wired: bus, engagement, working memory + reducer, enricher,
-    # assistant, adapters, summariser. This flag IS the definition of "ready" —
+    # assistant, summariser. This flag IS the definition of "ready" —
     # it replaces the pre-flight gate's definition (the Sigma hot-reload
     # watchdog being alive), which died with the gate.
     app.state.ready = True
@@ -129,15 +122,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Stop reporting ready the moment teardown begins — the close hooks
         # below dismantle the very subsystems readiness asserts are up.
         app.state.ready = False
-        # Slice 10 (v0.1.x hardening): reorder so background tasks drain
-        # BEFORE adapters close. The pre-Slice-10 order closed adapters
-        # first, which meant a fire-and-forget dispatch scheduled just before
-        # shutdown hit a closed httpx client and surfaced spurious errors in
-        # the logs. Now in-flight tasks finish (or get cancelled cleanly)
-        # while the CS REST clients are still alive.
-        #
-        # Each close hook is wrapped individually so one bad close doesn't
-        # prevent the rest from running — graceful shutdown is best-effort.
+        # Graceful, best-effort shutdown: each close hook is wrapped
+        # individually so one bad close doesn't prevent the rest from
+        # running.
         #
         # 1. Drain tracked fire-and-forget tasks. The 5s timeout balances
         #    "give an in-flight LLM call time to finish" against "don't hang
@@ -155,29 +142,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                         await asyncio.gather(*still_pending, return_exceptions=True)
             except Exception:
                 logger.exception("error draining background_tasks")
-        # 2. Close adapter REST clients now that no tracked task is still
-        #    using them. Failures during shutdown are swallowed — we'd
-        #    rather get to event_bus.close() cleanly than crash on a
-        #    half-open httpx socket.
-        try:
-            await close_adapters()
-        except Exception:
-            logger.exception("close_adapters failed")
-        # 3. Cancel the summariser loop. It runs independently of the bus and
+        # 2. Cancel the summariser loop. It runs independently of the bus and
         #    reducer; cancelling it before ``bus.close()`` avoids a tail
         #    summarisation racing the shutdown.
         try:
             await close_summarizer()
         except Exception:
             logger.exception("close_summarizer failed")
-        # 4. Close the bus — this broadcasts the sentinel to all subscribers
+        # 3. Close the bus — this broadcasts the sentinel to all subscribers
         #    including the reducer. The bus close is what signals reducer to exit
         #    after flushing any final episode write to the episodic DB.
         try:
             await close_bus()
         except Exception:
             logger.exception("close_bus failed")
-        # 5. Wait for the reducer to drain and exit cleanly.
+        # 4. Wait for the reducer to drain and exit cleanly.
         try:
             await close_wm()
         except Exception:

@@ -19,7 +19,6 @@ def format_banner(
     settings: Settings,
     engagement_name: str | None,
     version: str,
-    adapter_names: list[str],
     scope_empty: bool = False,
 ) -> str:
     """Return a multi-line banner summarising the resolved daemon config.
@@ -29,8 +28,6 @@ def format_banner(
         engagement_name: Friendly name of the active engagement, or None
             when no engagement is resolved.
         version: Daemon version string (``importlib.metadata.version``).
-        adapter_names: Logical names of every CS adapter the lifespan
-            successfully built (empty list when no adapters loaded).
 
     Returns:
         A newline-joined banner. Caller is responsible for printing to
@@ -60,7 +57,6 @@ def format_banner(
             "  Engagement: (none) - WARNING: state will NOT be isolated per "
             'engagement. Run "redrobin engagement use <slug>" first.'
         )
-    lines.append(f"  Adapters:   {', '.join(adapter_names) if adapter_names else '(none)'}")
     lines.append(f"  Anthropic:  {'set' if settings.anthropic_api_key else 'MISSING (degraded)'}")
     lines.append(f"  Voyage:     {'set' if settings.voyage_api_key else 'MISSING (degraded)'}")
     lines.append(f"  L5 window:  {settings.l5_window} (every {settings.l5_interval_sec}s)")
