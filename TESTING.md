@@ -7,7 +7,7 @@ system so failures point at one cause, not three.
 |------|-------------------|------|---------------|
 | 1. Local smoke | Daemon boot, `/v1/events` ingestion, bus → reducer → working memory, TUI | ~10 min | Anthropic + Voyage keys |
 | 2. Sliver-Mock | Wire protocol end-to-end, adapter session lifecycle, scenario replay | ~15 min | none (no CS license needed) |
-| 3. CS local (no beacon) | `redrobin.cna` parses in Aggressor, handshake succeeds, adapter login works | ~30 min | CS Team Server + CS Client |
+| 3. CS local (no beacon) | `redrobin.cna` parses in Aggressor, handshake succeeds, console stays stock | ~30 min | CS Team Server + CS Client |
 | 4. CS full E2E | Both live paths: passthrough capture (no interception) + assistant advisory in the TUI | ~1-2 h | CS + lab with a live beacon |
 
 **Stop after Tier 1 if anything's red.** Don't escalate to a real CS test with
@@ -38,13 +38,15 @@ git checkout dev          # the git-flow integration branch (see CONTRIBUTING)
 git log --oneline -1
 
 uv sync --extra dev
-uv run pytest tests/ adapters/cobaltstrike/tests/ -q
+uv run pytest tests/ -q
+uv run pytest adapters/ -q
 ```
 
-Expected: `0 failed`. (Adapter tests under `adapters/*/tests/` are deliberately
-outside the CI `pytest tests/` run — Tier 0 adds them because the tiers below
-exercise the adapter.) If anything fails, stop and investigate before running
-any tier.
+Expected: `0 failed` from both. (They are two runs because CI runs them as two
+steps; `adapters/` currently holds Python tests for the Sliver-Mock adapter only
+— the CS adapter's `tests/` dir carries the manual `test_cna_smoke.md`
+checklist, which no `pytest` run can execute.) If anything fails, stop and
+investigate before running any tier.
 
 **Why `--extra dev`?** This project defines dev tools (`pytest`, `mypy`,
 `ruff`, `import-linter`, `pre-commit`, etc.) under `[project.optional-
@@ -85,16 +87,18 @@ Verify layout:
 Get-ChildItem $TEST_ROOT -Recurse -Name
 ```
 
-Must include: `.env`, `engagements\op-smoke\engagement.yaml`, `adapters\`.
+Must include: `.env`, `engagements\op-smoke\engagement.yaml`.
 
 There is no `rules\` directory. The Sigma/OPSEC rule pack died with the
 pre-flight gate — if you see one, it is left over from an older run against this
 root.
 
-`transport.token` is NOT written by `init`; it is generated on first use by
-whichever process needs it (`daemon start`, `redrobin tui`). Expect it to appear
-after Step 1.2, not before — along with the rest of the layout the daemon
-creates on boot (`shared\`, `engagements\archived\`, `kb-source\`).
+`transport.token` will NOT appear under `$TEST_ROOT` yet — not because `init`
+never mints one, but because it mints it at `REDROBIN_ROOT` (defaulting to
+`~\.redrobin`), which `--root` does not override. Step 1.2 runs from
+`$TEST_ROOT`, where the `.env` `init` just wrote pins `REDROBIN_ROOT`, so the
+daemon mints `$TEST_ROOT\transport.token` there — along with the rest of the
+layout it creates on boot (`shared\`, `engagements\archived\`, `kb-source\`).
 
 ### Activate the venv (do this in EVERY terminal you open)
 
@@ -186,7 +190,6 @@ add `REDROBIN_ASSISTANT_ENABLED=1` to `$TEST_ROOT\.env`.
   Listening:  http://127.0.0.1:7777
   Root:       C:\Users\jcspi\redrobin-smoke
   Engagement: op-smoke
-  Adapters:   (none)
   Anthropic:  set
   Voyage:     set
   L5 window:  25 (every 30.0s)
@@ -300,8 +303,8 @@ redrobin tui `
 ```
 
 (`--connect-http` is accepted for CLI compatibility but unused — the Textual
-client is a read-only WebSocket observer. It never POSTs to the daemon over
-HTTP; operator chat messages go back up the same `/v1/tui` socket.)
+client never POSTs to the daemon over HTTP. Everything travels over the single
+`/v1/tui` socket: daemon frames down, and operator chat back up.)
 
 **Expect:**
 - 3 panes: **Sessions** (left), **Assistant Chat** (center), **Working Memory**
@@ -589,9 +592,12 @@ are you looking at a wire-protocol bug — the class Phase 2 had with
 ## Tier 3 — CS Local (Load `.cna`, No Live Beacon)
 
 **Goal:** validate that `adapters/cobaltstrike/redrobin.cna` parses cleanly in
-a real Aggressor Console, that its handshake against the daemon succeeds, and
-that the daemon's `cs_adapter_loader` can log in to your team server. **No
-beacon required.**
+a real Aggressor Console and that its handshake against the daemon succeeds.
+**No beacon required.**
+
+Red Robin never reaches out to the team server itself — the `.cna` is the only
+thing that talks to CS, and it only ever POSTs captured activity to the daemon.
+There is no adapter YAML and no daemon-side team server login to configure.
 
 ### Pre-reqs
 
@@ -604,58 +610,20 @@ beacon required.**
   `127.0.0.1:7777` works. If they're on different machines, you'll need to
   bind the daemon to `0.0.0.0` and open the port.
 
-### Step 3.1 — drop the CS adapter YAML
-
-```powershell
-$TEST_ROOT = "$env:USERPROFILE\redrobin-smoke"
-$adapterDir = "$TEST_ROOT\adapters"
-
-@"
-name: cs-main
-kind: cobaltstrike
-teamserver_url: https://YOUR-TS-IP:50050
-operator_user: YOUR-OPERATOR-USERNAME
-operator_password: YOUR-OPERATOR-PASSWORD
-verify_ssl: false
-"@ | Out-File -Encoding utf8 "$adapterDir\cs-main.yaml"
-```
-
-Replace the placeholders with real values. On POSIX you'd `chmod 600`; on
-Windows the file inherits your user's NTFS ACLs.
-
-### Step 3.2 — verify adapter probe
+### Step 3.1 — start the daemon
 
 ```powershell
 cd $TEST_ROOT
-uv run redrobin doctor
-```
-
-**Expect:** `Connectivity:` block now includes a line like:
-
-```
-  [OK ] cs-adapter(https://YOUR-TS-IP:50050)   234ms
-```
-
-If `[FAIL]`:
-- `HTTP 401` → operator user/password wrong in the YAML
-- `Connection refused` → wrong port or team server not running
-- `SSL: CERTIFICATE_VERIFY_FAILED` → flip `verify_ssl: false`
-- Connection timeout → firewall or wrong IP
-
-Fix until you get `[OK ]`. Don't proceed otherwise.
-
-### Step 3.3 — start daemon with CS adapter loaded
-
-```powershell
 uv run redrobin daemon start --host 0.0.0.0 --port 7777
 ```
 
 (`0.0.0.0` instead of `127.0.0.1` if your CS Client is on a different machine.)
 
-**Expect:** banner now shows `Adapters: cs-main`. Daemon log shows
-`cs_adapter loaded: name=cs-main url=https://YOUR-TS-IP:50050`.
+**Expect:** the Tier 1 startup banner, unchanged. Nothing CS-specific appears
+at boot — the daemon learns about the adapter only when the `.cna` handshakes
+in Step 3.3.
 
-### Step 3.4 — configure `redrobin.cna` URL and token
+### Step 3.2 — configure `redrobin.cna` URL and token
 
 **URL** — edit the Sleep global near the top of
 `adapters/cobaltstrike/redrobin.cna`:
@@ -686,7 +654,7 @@ Copy-Item "$env:USERPROFILE\redrobin-smoke\transport.token" `
 If that file is missing the `.cna` throws on load from the `FileReader` — a
 FileNotFound, not a Red Robin warning.
 
-### Step 3.5 — load `.cna` in Aggressor Console
+### Step 3.3 — load `.cna` in Aggressor Console
 
 In CS Client, with the team server connected:
 
@@ -712,10 +680,10 @@ needs `java.net.http`. Install a modern JVM (e.g. Temurin 21) and reload.
 
 **If the handshake retries and fails** (`handshake attempt 1/3 failed` … then
 `handshake failed after 3 attempts`), the daemon is unreachable or the token is
-wrong. Fix Step 3.4 and **reload the script** — the retry loop does not resume
+wrong. Fix Step 3.2 and **reload the script** — the retry loop does not resume
 on its own.
 
-### Step 3.6 — confirm the script registers no commands (no beacon needed)
+### Step 3.4 — confirm the script registers no commands (no beacon needed)
 
 The `.cna` contains **no `alias` definitions**. It hooks
 `on beacon_input`, `set BEACON_OUTPUT`, and `on beacon_initial` — all
@@ -732,7 +700,7 @@ mimikatz "sekurlsa::logonpasswords"
 **Without a beacon selected**, CS complains "no beacon selected" (or similar).
 That is the correct, stock behaviour — CS's own handler answered. What you must
 **not** see is any `[Red Robin]` line **in response to the command** (the two
-load-time lines from Step 3.5 are expected and unrelated), any gate/verdict
+load-time lines from Step 3.3 are expected and unrelated), any gate/verdict
 message, or any hint that the command was inspected before dispatch. If Red
 Robin speaks here, an alias override survived the gate removal and the `.cna`
 needs fixing.
@@ -744,10 +712,9 @@ fires when a command is actually tasked to a real beacon, which is Tier 4.
 
 | Check | Pass condition |
 |-------|----------------|
-| 3.2 doctor adapter probe | `[OK ]` |
-| 3.3 daemon banner | `Adapters: cs-main` |
-| 3.5 .cna load | No parse errors; `handshake OK` + `capture active` lines print |
-| 3.6 no interception | Console behaves exactly like stock CS; no `[Red Robin]` output in response to the command |
+| 3.1 daemon start | Banner prints; daemon listening on the chosen host:port |
+| 3.3 .cna load | No parse errors; `handshake OK` + `capture active` lines print |
+| 3.4 no interception | Console behaves exactly like stock CS; no `[Red Robin]` output in response to the command |
 
 **Common failure modes:**
 - `.cna` parse error on load → fix syntax in source, commit, reload
@@ -755,7 +722,7 @@ fires when a command is actually tasked to a real beacon, which is Tier 4.
   `$REDROBIN_URL` wrong, or network unreachable between CS Client machine and
   daemon
 - Daemon sees the POST but returns 401 → token mismatch; the `.cna` read a
-  different `transport.token` than the daemon is using (see Step 3.4)
+  different `transport.token` than the daemon is using (see Step 3.2)
 - `.cna` throws FileNotFound on load → `~\.redrobin\transport.token` is missing
 - A `[Red Robin]` gate/verdict message appears in the console → an alias
   override survived the gate removal. Stop and report; this is the exact
@@ -780,9 +747,11 @@ guarantee that binds them:
    TUI's Assistant Chat pane, with an `opsec_risk` of INFO/WARN/DANGER. It is
    advice after the fact, not a decision before it.
 
-There is no TUI-dispatch path. The Textual client is a read-only WebSocket
-observer; the CS REST client still exposes `dispatch_console_command`, but
-nothing in `redrobin/` calls it.
+There is no TUI-dispatch path. The Textual client cannot dispatch to a beacon —
+it sends only `operator.question` / `operator.answer` upstream — and the daemon
+has no outbound path to the team server at all. The CS REST client that once
+carried the gate's PASS-verdict dispatch was orphaned when the pre-flight gate
+was removed, and deleted in v0.1.x once nothing called it.
 
 ### Pre-reqs
 

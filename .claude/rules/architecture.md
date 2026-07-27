@@ -21,7 +21,7 @@ Layered Clean/DDD architecture; dependency direction enforced in CI by import-li
 ## Facade pattern
 
 `api`/`tui` reach infrastructure only via application facades: `application/*_lifecycle.py`
-(`cs_adapter_lifecycle`, `longterm_lifecycle`, `working_memory_lifecycle`) and
+(`longterm_lifecycle`, `working_memory_lifecycle`) and
 `application/transport_auth.py`. Never `from redrobin.infrastructure import ...` inside `api/` or `tui/`.
 
 ## Conventions

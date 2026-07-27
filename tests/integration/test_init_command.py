@@ -21,8 +21,10 @@ def test_init_creates_structure(tmp_path):
     assert rc == 0
     # No `rules/` — the OPSEC rule pack went with the pre-flight gate (2026-07-26).
     assert not (tmp_path / "rr" / "rules").exists()
+    # No `adapters/` — it only ever held YAML for the outbound CS REST client,
+    # which went with the dispatch removal. Capture needs no on-disk config.
+    assert not (tmp_path / "rr" / "adapters").exists()
     assert (tmp_path / "rr" / "engagements" / "op-first" / "engagement.yaml").is_file()
-    assert (tmp_path / "rr" / "adapters").is_dir()
     assert (tmp_path / "rr" / ".env").is_file()
     env = (tmp_path / "rr" / ".env").read_text()
     assert "ANTHROPIC_API_KEY=k1" in env

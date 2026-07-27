@@ -15,10 +15,8 @@ def test_banner_includes_resolved_paths(tmp_path, monkeypatch):
         settings=s,
         engagement_name="op-test",
         version="0.1.1",
-        adapter_names=["cs-main"],
     )
     assert "op-test" in banner
-    assert "cs-main" in banner
     assert str(tmp_path) in banner
     # Secrets MUST NEVER appear
     assert "k1" not in banner
@@ -33,7 +31,6 @@ def test_banner_shows_anthropic_key_status_not_value(monkeypatch):
         settings=s,
         engagement_name=None,
         version="0.1.1",
-        adapter_names=[],
     )
     assert "supersecret" not in banner
     assert "set" in banner.lower() or "MISSING" in banner
@@ -47,7 +44,6 @@ def test_banner_shows_missing_keys_as_missing(monkeypatch):
         settings=s,
         engagement_name=None,
         version="0.1.1",
-        adapter_names=[],
     )
     assert "MISSING" in banner  # for at least one key
 
@@ -60,7 +56,6 @@ def test_banner_warns_when_scope_empty(monkeypatch):
         settings=s,
         engagement_name="acme",
         version="0.1.1",
-        adapter_names=[],
         scope_empty=True,
     )
     assert "EMPTY" in banner
@@ -75,7 +70,6 @@ def test_banner_no_scope_warning_when_scoped(monkeypatch):
         settings=s,
         engagement_name="acme",
         version="0.1.1",
-        adapter_names=[],
         scope_empty=False,
     )
     assert "EMPTY" not in banner

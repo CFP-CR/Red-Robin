@@ -17,7 +17,6 @@ from pathlib import Path
 import pytest
 
 from redrobin.api.lifespan_helpers import (
-    start_adapters,
     start_assistant,
     start_dedup,
     start_engagement,
@@ -49,7 +48,6 @@ def test_each_helper_is_importable():
         start_working_memory,
         start_enricher,
         start_assistant,
-        start_adapters,
         start_l5_summarizer,
     ):
         assert callable(fn)
@@ -88,7 +86,6 @@ async def test_lifespan_still_works_end_to_end(tmp_path: Path, monkeypatch):
         assert app.state.episodic_repo is not None
         assert app.state.longterm_repo is not None
         assert app.state.summary_repo is not None
-        assert hasattr(app.state, "cs_adapters")
         assert hasattr(app.state, "summarizer_task")
         assert hasattr(app.state, "reducer_task")
         assert hasattr(app.state, "enricher_task")

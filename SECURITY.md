@@ -76,7 +76,10 @@ LUKS).
 The daemon's only outbound connections (per engagement, if enabled):
 - `api.anthropic.com` (LLM)
 - `api.voyageai.com` (embeddings)
-- `<teamserver>:50443` (CS REST API — for TUI dispatch + state recovery)
+
+The daemon never connects to the CS team server. The `.cna` runs inside the
+already-authenticated CS Client and only POSTs captured activity inbound to the
+daemon; there is no outbound C2 leg and no C2 credential on the Red Robin side.
 
 In v0.2 local mode, the Anthropic + Voyage endpoints are eliminated.
 

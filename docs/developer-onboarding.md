@@ -21,7 +21,7 @@ Red-Robin/
 │   └── tui/                 # Textual TUI (textual_ui/: panels, chat, inspector)
 ├── protocol/                # wire protocol v0.1 (schemas + fixtures + validator)
 ├── adapters/                # C2 adapters
-│   ├── cobaltstrike/        # CS adapter (.cna capture hook + Python REST connector)
+│   ├── cobaltstrike/        # CS adapter (.cna capture hook; capture-only, no dispatch)
 │   └── sliver-mock/         # synthetic Sliver event replayer
 ├── migrations/              # async Alembic migrations
 ├── tests/                   # unit + integration tests
@@ -31,8 +31,8 @@ Red-Robin/
 ## Run the test suite
 
 ```bash
-uv run pytest tests/ adapters/cobaltstrike/tests/
-uv run pytest adapters/sliver-mock/tests/  # separate run — different `tests` package
+uv run pytest tests/       # the CI suite
+uv run pytest adapters/    # adapter tests — a separate CI step
 ```
 
 ## Run the daemon locally

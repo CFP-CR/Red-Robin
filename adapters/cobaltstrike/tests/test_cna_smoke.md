@@ -203,13 +203,16 @@ The manifest is sent inline by `redrobin_handshake_with_retry` in `redrobin.cna`
 the daemon actually registered, not the file.
 
 - [ ] In the daemon log / adapter session store, confirm the registered manifest declares
-      exactly these capabilities — `tui_dispatch`, `output_observe`, `console_annotation`,
-      `emergency_kill_switch` all `true`, and `command_modification` `false`.
-- [ ] Confirm `events_emitted` lists the five capture types: `beacon.command_input`,
-      `beacon.command_output`, `host.observation`, `credential.observed`, `beacon.initial`.
-      (Known pre-existing divergence: `adapters/cobaltstrike/manifest.toml` still lists
-      `adapter.heartbeat` as its fifth entry instead of `beacon.initial`. Only the `.cna`'s
-      inline list is registered, so do NOT fail this step on that mismatch.)
+      `output_observe` `true` and everything else `false` — `tui_dispatch`,
+      `console_annotation`, `emergency_kill_switch` and `command_modification`. Observation
+      is the only capability this adapter has: the REST dispatch client was deleted, and
+      nothing writes to the beacon console (the `.cna` uses `println`, which goes to the
+      Aggressor script console, never `blog`/`berror`/`bprint`).
+- [ ] Confirm `events_emitted` lists exactly the three types the `.cna` emits:
+      `beacon.command_input`, `beacon.command_output`, `beacon.initial`. It must NOT list
+      `host.observation` or `credential.observed` (those come from other adapters) or
+      `adapter.heartbeat` (a liveness GET, not an emitted event; the periodic fork is
+      disabled pending #110). `manifest.toml` now declares the same three.
 - [ ] Confirm there is **no** `events_consumed` key — with the verdict WebSocket gone the
       adapter consumes nothing from the daemon; it only POSTs.
 

@@ -45,7 +45,6 @@ There is no `VerdictAction` — it went with the pre-flight gate (2026-07-26).
   probe used by the `.cna`. Do not confuse it with the session-bound `POST` above.
 - `WS /v1/tui` — daemon → TUI frames. Authenticated by a **`?token=` query param** (not a bearer
   header); mismatch closes with code 1008.
-- CS dispatch (adapter side): `POST /api/v1/beacons/{bid}/consoleCommand`.
 - Daemon default port **7777** (`REDROBIN_PORT`).
 
 ## Gotchas

@@ -8,10 +8,10 @@ order, collects the close hooks, and invokes them in reverse during
 shutdown.
 
 Started life as a mechanical extraction of the prior monolithic
-``lifespan()`` body; Slice 10 then reordered shutdown so background tasks
-drain before adapters close. Removing the synchronous OPSEC pre-flight
-gate retired three helpers (the verdict pipeline, the Sigma rules loader,
-and the lesson promoter) — what remains is the capture-and-advise path.
+``lifespan()`` body. Removing the synchronous OPSEC pre-flight gate
+retired three helpers (the verdict pipeline, the Sigma rules loader, and
+the lesson promoter); removing the outbound CS REST dispatch retired the
+adapter starter — what remains is the capture-and-advise path.
 """
 
 from __future__ import annotations
@@ -24,7 +24,6 @@ import yaml  # type: ignore[import-untyped]
 from fastapi import FastAPI
 
 from redrobin.application.config import Settings
-from redrobin.application.cs_adapter_lifecycle import build_adapter, load_adapter_configs
 from redrobin.application.dedup_keys import DedupKeys, DedupKeysRepo
 from redrobin.application.agents.assistant.assistant import Assistant
 from redrobin.application.agents.assistant.llm import build_agent_llm
@@ -260,38 +259,6 @@ async def start_engagement(app: FastAPI, settings: Settings) -> tuple[None, None
             )
 
     return None, None
-
-
-async def start_adapters(app: FastAPI, settings: Settings) -> tuple[dict[str, Any], CloseHook]:
-    """Load CS adapter YAML configs and build a logged-in CSRestClient each.
-
-    Slice 9 — closes gap #8: Phase 1 shipped the REST client but the
-    daemon never instantiated it. Failures are logged but do not abort
-    startup; the daemon is still useful without a live team server.
-
-    Close hook calls ``aclose()`` on every client. Failures during
-    shutdown are swallowed — we'd rather get to ``event_bus.close()``
-    cleanly than crash on a half-open httpx socket.
-    """
-    adapters_dir = settings.adapters_dir
-    assert adapters_dir is not None  # _derive_paths guarantees
-    app.state.cs_adapters = {}
-    for cfg in load_adapter_configs(adapters_dir):
-        try:
-            client = await build_adapter(cfg)
-            app.state.cs_adapters[cfg.name] = client
-            logger.info("cs_adapter loaded: name=%s url=%s", cfg.name, cfg.teamserver_url)
-        except Exception:
-            logger.exception("Failed to load CS adapter %s", cfg.name)
-
-    async def close() -> None:
-        for name, client in app.state.cs_adapters.items():
-            try:
-                await client.aclose()
-            except Exception:
-                logger.exception("error closing cs_adapter %s", name)
-
-    return app.state.cs_adapters, close
 
 
 async def start_l5_summarizer(app: FastAPI, settings: Settings) -> tuple[L5Summarizer, CloseHook]:
@@ -558,7 +525,6 @@ async def start_dedup(app: FastAPI, settings: Settings) -> tuple[DedupKeys, Clos
 
 __all__ = [
     "CloseHook",
-    "start_adapters",
     "start_assistant",
     "start_dedup",
     "start_engagement",

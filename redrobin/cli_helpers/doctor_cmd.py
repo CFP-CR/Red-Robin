@@ -11,11 +11,9 @@ import asyncio
 
 from redrobin.cli_helpers.doctor_probes import (
     probe_anthropic,
-    probe_cs_adapter,
     probe_voyage,
 )
 from redrobin.infrastructure.config import Settings
-from redrobin.infrastructure.cs_adapter_loader import load_adapter_configs
 from redrobin.infrastructure.filesystem import redrobin_root
 
 
@@ -23,9 +21,9 @@ def run_doctor(*, settings: Settings, quick: bool) -> int:
     """Run preflight checks; return 0 on OK, 1 on degraded/failures.
 
     Slice 6 (v0.1.x hardening): real connectivity probes against the Anthropic
-    API, Voyage API, and any configured CS adapter so the operator catches
-    network/credential failures during preflight instead of at first dispatch.
-    ``quick=True`` skips network probes for fast CI smoke tests.
+    API and Voyage API so the operator catches network/credential failures
+    during preflight instead of at first use. ``quick=True`` skips network
+    probes for fast CI smoke tests.
     """
     failures: list[str] = []
     print("[*] Red Robin doctor (preflight check)")
@@ -69,16 +67,6 @@ def run_doctor(*, settings: Settings, quick: bool) -> int:
             results.append(await probe_anthropic(api_key=settings.anthropic_api_key))
         if settings.voyage_api_key:
             results.append(await probe_voyage(api_key=settings.voyage_api_key))
-        if settings.adapters_dir is not None and settings.adapters_dir.is_dir():
-            for cfg in load_adapter_configs(settings.adapters_dir):
-                results.append(
-                    await probe_cs_adapter(
-                        teamserver_url=cfg.teamserver_url,
-                        operator_user=cfg.operator_user,
-                        operator_password=cfg.operator_password,
-                        verify_ssl=cfg.verify_ssl,
-                    )
-                )
         return results
 
     results = asyncio.run(run_probes())

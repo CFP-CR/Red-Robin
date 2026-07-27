@@ -8,7 +8,6 @@ import pytest
 from redrobin.cli_helpers.doctor_probes import (
     probe_anthropic,
     probe_voyage,
-    probe_cs_adapter,
 )
 
 
@@ -45,45 +44,8 @@ async def test_probe_voyage_ok():
 
 
 @pytest.mark.asyncio
-async def test_probe_cs_adapter_ok():
-    def handler(req: httpx.Request) -> httpx.Response:
-        if "/api/auth/login" in str(req.url):
-            return httpx.Response(200, json={"access_token": "tkn"})
-        return httpx.Response(404)
-
-    transport = httpx.MockTransport(handler)
-    result = await probe_cs_adapter(
-        teamserver_url="https://ts.example.com:50050",
-        operator_user="u",
-        operator_password="p",
-        verify_ssl=False,
-        transport=transport,
-    )
-    assert result.ok
-
-
-@pytest.mark.asyncio
 async def test_probe_anthropic_missing_key():
     """Missing API key returns ok=False with descriptive reason, no network call."""
     result = await probe_anthropic(api_key="", transport=None)
     assert not result.ok
     assert "not set" in result.reason.lower() or "missing" in result.reason.lower()
-
-
-@pytest.mark.asyncio
-async def test_probe_cs_adapter_network_failure():
-    """If transport raises (e.g., connection refused), probe returns ok=False with reason."""
-
-    def handler(req: httpx.Request) -> httpx.Response:
-        raise httpx.ConnectError("Connection refused")
-
-    transport = httpx.MockTransport(handler)
-    result = await probe_cs_adapter(
-        teamserver_url="https://ts.unreachable.local",
-        operator_user="u",
-        operator_password="p",
-        verify_ssl=False,
-        transport=transport,
-    )
-    assert not result.ok
-    assert result.reason  # non-empty

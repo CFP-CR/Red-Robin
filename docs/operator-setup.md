@@ -59,10 +59,9 @@ engagement YAML. What it creates:
 
 - `~/.redrobin/.env` — pinned env config (chmod 600 on POSIX).
 - `~/.redrobin/engagements/<slug>/engagement.yaml` — placeholder scope.
-- `~/.redrobin/adapters/` — where your adapter YAML goes (see §5).
-
-`~/.redrobin/transport.token` (the bearer token the TUI and adapters
-authenticate with) is minted on first daemon start, not by `init`.
+- `~/.redrobin/transport.token` — the bearer token the TUI and adapters
+  authenticate with. Delete it and the next process that needs it
+  (`daemon start`, `redrobin tui`) mints a fresh one.
 
 See `docs/secrets-handling.md` for caveats on Git Bash, Windows ACLs, and
 the dotenv CWD-pin behavior. See `docs/operator-cli-conventions.md` for the
@@ -71,7 +70,7 @@ interactive vs non-interactive pattern.
 ## 3. `redrobin doctor`
 
 Full preflight — env vars, root layout, and real network probes against
-Anthropic, Voyage, and any configured CS adapter:
+Anthropic and Voyage:
 
 ```bash
 uv run redrobin doctor
@@ -199,39 +198,19 @@ sqlite3 ~/.redrobin/episodic.db "SELECT * FROM episodes WHERE engagement_id='eng
 New engagements created after this change get their own clean DB at
 `~/.redrobin/engagements/<slug>/episodic.db`.
 
-## 5. Cobalt Strike adapter (optional)
+## 5. Cobalt Strike adapter
 
-Two independent pieces, and it's worth keeping them straight:
+The **`.cna`** is the whole adapter. Loaded in the CS Client, it observes what
+you type and what comes back and POSTs it to the daemon. It needs no YAML and
+no configuration beyond the daemon URL and bearer token — see "Cobalt Strike
+Client Java requirement" below for loading it.
 
-- The **`.cna`** is the capture hook. Loaded in the CS Client, it observes
-  what you type and what comes back and POSTs it to the daemon. It needs no
-  YAML — see "Cobalt Strike Client Java requirement" below for loading it.
-- The **adapter YAML** below configures the daemon's own REST client to the
-  team server. At startup the daemon logs that client in and reports it on the
-  `Adapters:` banner line, but **nothing in the daemon calls it yet** — there is
-  no TUI-dispatch path and no beacon-state recovery today. It is wired-but-unused
-  capability. Optional; skip it unless you want the login verified, because
-  capture works entirely without it.
-
-To wire the REST client, drop an adapter YAML:
-
-```bash
-cp adapters/cobaltstrike/cs-main.example.yaml ~/.redrobin/adapters/cs-main.yaml
-$EDITOR ~/.redrobin/adapters/cs-main.yaml
-chmod 600 ~/.redrobin/adapters/cs-main.yaml   # POSIX
-```
-
-Fields:
-
-- `name` — adapter instance label (any string).
-- `kind: cobaltstrike` — required; other `kind` values are silently skipped.
-- `teamserver_url` — e.g. `https://ts.example.com:50050`.
-- `operator_user` / `operator_password` — your CS team server credentials.
-- `verify_ssl: false` — typical for CS team servers using self-signed certs.
-
-The loader warns at boot if the file is group/world readable on POSIX. On
-Windows the loose-perms check is skipped; rely on NTFS ACLs. See
-`docs/secrets-handling.md`.
+There is nothing to configure on the daemon side. Red Robin never connects out
+to the team server: it has no REST client, no credentials, and no dispatch
+path. The adapter captures, the core advises. Earlier versions shipped a
+`cs-main.yaml` REST client that the pre-flight gate used to dispatch PASS
+verdicts to the beacon console; removing the gate left it uncalled, and it was
+deleted in v0.1.x as it contradicted the advisory-only design.
 
 ### Cobalt Strike Client Java requirement
 
@@ -414,8 +393,9 @@ working and the assistant switched off.
 uv run redrobin daemon stop
 ```
 
-Daemon shutdown drains background tasks, closes adapter sessions, and
-flushes the persistence queue before exit.
+Daemon shutdown drains in-flight background tasks, cancels the summariser,
+then closes the event bus and waits for the reducer, assistant and enricher
+to drain before exit.
 
 ## Troubleshooting
 
@@ -433,6 +413,13 @@ flushes the persistence queue before exit.
 - **TUI cannot authenticate.** Confirm `~/.redrobin/transport.token`
   exists and is readable by the TUI user. `redrobin init` creates it
   idempotently; deleting it forces a fresh token on next daemon start.
-- **Adapter handshake fails.** Run `redrobin doctor` — it probes every
-  configured adapter and prints the failure reason. Common causes:
-  teamserver unreachable, wrong password, SSL verification mismatch.
+- **Adapter handshake fails.** The `.cna` POSTs `/v1/adapters/connect` at
+  load time and retries 3 times before giving up. `redrobin doctor` does not
+  cover this path — it only probes Anthropic and Voyage. The three real
+  causes: `$REDROBIN_URL` in `redrobin.cna` points at the wrong host:port, or
+  the daemon is unreachable from the CS Client machine (the daemon never sees
+  the POST at all); the token mismatches, so the daemon answers 401 (the
+  `.cna` reads `~/.redrobin/transport.token`, which must be the same file the
+  daemon uses); or that token file is missing, in which case the script throws
+  FileNotFound on load. Fix, then **reload the script** — the retry loop does
+  not resume on its own. Full checklist in `TESTING.md` Tier 3.
