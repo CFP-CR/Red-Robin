@@ -37,7 +37,7 @@ Live tracker of **open work**. Resolved history + deep per-issue detail live in 
 - [ ] **#91** — rules loader fails on UTF-8 BOM → open with `utf-8-sig`.
 - [ ] **#109** — `.cna` handshake retry should distinguish network vs response-shape failure.
 - [ ] **#149** — reducer lands only `Host Name` from `systeminfo` (drops OS / domain / NIC IPs). → **superseded by Plan WM-AI-Enrichment**.
-- [ ] **#152** — beacon `/v1/verdict/quick` sends empty `source_event_id` → Layer B retro can't correlate to Layer A. `.cna` should mint a ULID per gated command.
+- [x] **#152** ✅ 2026-07-27 — beacon `/v1/verdict/quick` sends empty `source_event_id` → Layer B retro can't correlate to Layer A. `.cna` should mint a ULID per gated command. → **obsolete, not fixed**: the pre-flight gate removal (PR #36) deleted the `/v1/verdict/quick` route, Layer A/B and the whole gated-command path, so there is no correlation left to make. The `.cna` has zero `alias` overrides and only captures.
 
 ### Plan K · P3 · polish + tech-debt
 - [ ] **#148** — Events panel renders raw JSON, overflows into the WM column.

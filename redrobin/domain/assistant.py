@@ -4,7 +4,7 @@
 the tradecraft WHY, the OPSEC detection risk (reusing `Severity`), a calibrated
 confidence, and the grounding references. `to_payload` serializes it to a
 JSON-native dict for the `advisor.recommendation` bus event (mirrors
-`WorkingMemoryDeltas.to_payload` + `Envelope.to_dict`'s Severity handling).
+`WorkingMemoryDeltas.to_payload`).
 
 `AgentTool` is the provider-agnostic tool spec the assistant hands to the
 `AgentLLM` each cycle; the Anthropic Tool Runner adapts it (see
