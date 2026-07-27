@@ -3,6 +3,8 @@ carry the assistant knobs. Mirrors test_enricher.py::test_lifespan_starts_enrich
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 
@@ -98,6 +100,41 @@ async def test_lifespan_starts_assistant_with_journal_degraded(tmp_path, monkeyp
         assert not app.state.assistant_task.done()
     assert app.state.assistant_task.done()
     assert app.state.assistant_task.cancelled() is False
+
+
+@pytest.mark.asyncio
+async def test_shutdown_error_line_names_the_task_that_crashed(tmp_path, monkeypatch, caplog):
+    # start_assistant's close hook awaits the assistant AND the chat recorder under one
+    # asyncio.wait, and its error log is the ONLY place a LOOP-level crash in either surfaces
+    # (both loops swallow per-event exceptions). One line for two tasks is useless unless it
+    # says which one, so it must carry task.get_name().
+    from redrobin.application.agents.assistant.assistant import Assistant
+
+    async def _crash(self) -> None:
+        if self.on_started is not None:
+            self.on_started()  # let start_assistant's await return before we die
+        raise RuntimeError("loop-level crash")
+
+    monkeypatch.setattr(Assistant, "run", _crash)
+    monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path))
+    monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
+    monkeypatch.delenv("REDROBIN_ENGAGEMENT_SLUG", raising=False)
+    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
+    monkeypatch.setenv("REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json"))
+    monkeypatch.setenv("REDROBIN_ENGAGEMENT_ID", "eng-crash")
+    monkeypatch.setenv("REDROBIN_ASSISTANT_ENABLED", "1")  # so the chat recorder runs too
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
+
+    from redrobin.api.app import create_app
+
+    app = create_app()
+    with caplog.at_level(logging.ERROR):
+        async with app.router.lifespan_context(app):
+            pass
+
+    assert "task 'assistant' ended with an exception" in caplog.text
+    assert "loop-level crash" in caplog.text  # the traceback came along
 
 
 def test_settings_expose_proactive_knobs(monkeypatch):
