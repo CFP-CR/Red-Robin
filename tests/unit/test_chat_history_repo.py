@@ -37,9 +37,9 @@ def test_append_creates_parent_dirs_and_is_one_json_per_line(tmp_path):
     assert json.loads(lines[0])["text"] == "t1"
 
 
-def test_missing_file_yields_empty_list_and_exists_false(tmp_path):
+def test_missing_file_yields_empty_list(tmp_path):
+    # tail does its own missing-file check — there is no exists() to consult.
     repo = ChatHistoryRepo(tmp_path / "chat_history.jsonl")
-    assert repo.exists() is False
     assert repo.tail() == []
 
 

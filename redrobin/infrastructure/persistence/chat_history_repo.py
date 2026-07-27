@@ -8,6 +8,10 @@ there is no atomic whole-file replace.
 Reads are bounded: ``tail`` streams the file through a ``deque`` so memory is
 O(max_lines), never O(file). A malformed line — a truncated append, a missing field — is
 skipped so one bad entry cannot break the read. Neither method raises on a missing file.
+
+Two methods only. The spec asked for an ``exists()`` for parity with ``WorkingMemoryRepo``,
+but nothing ever called it (``tail`` does its own missing-file check, and the boot path
+never needs to seed this file the way it seeds working memory), so it was dropped.
 """
 
 from __future__ import annotations
@@ -84,9 +88,6 @@ class ChatHistoryRepo:
 
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path)
-
-    def exists(self) -> bool:
-        return self.path.exists()
 
     def append(self, turn: ChatTurn) -> None:
         """Append one turn as a single JSON line. Creates the parent dir if needed.
