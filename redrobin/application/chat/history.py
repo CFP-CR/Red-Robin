@@ -18,7 +18,7 @@ from redrobin.domain.chat import (
     select_context_turns,
 )
 from redrobin.infrastructure.persistence.chat_history_repo import (
-    _MAX_TAIL_LINES,
+    MAX_TAIL_LINES,
     ChatHistoryRepo,
 )
 
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # NOT small: an answer can run to ``assistant_max_tokens`` (~8 KB) and a question can be
 # an arbitrary paste (operators paste beacon output to ask "what is this?"). Without this
 # the injected slice would be byte-unbounded on EVERY reactive cycle. A module constant,
-# not a Setting (YAGNI — same call as ``_MAX_TAIL_LINES``).
+# not a Setting (YAGNI — same call as ``MAX_TAIL_LINES``).
 _MAX_TURN_CHARS = 800
 
 
@@ -71,7 +71,7 @@ def build_history_reader(
     def _read() -> str:
         try:
             # The cap is passed explicitly so saturation is observable below.
-            raw = repo.tail(max_lines=_MAX_TAIL_LINES)
+            raw = repo.tail(max_lines=MAX_TAIL_LINES)
             turns = select_context_turns(
                 raw, dialogue_max=dialogue_max, volunteered_max=volunteered_max
             )
@@ -80,13 +80,13 @@ def build_history_reader(
             # quota even though older dialogue exists on disk. Rare (the cap sits far above
             # the quotas) but silent, so make a real occurrence findable. Text is NEVER
             # logged — counts only.
-            if len(raw) >= _MAX_TAIL_LINES:
+            if len(raw) >= MAX_TAIL_LINES:
                 dialogue_selected = sum(1 for t in turns if t.kind in DIALOGUE_KINDS)
                 if dialogue_selected < dialogue_max:
                     logger.debug(
                         "chat history: tail cap hit (%d lines) and only %d/%d dialogue turns "
                         "selected — older dialogue is outside the read window",
-                        _MAX_TAIL_LINES,
+                        MAX_TAIL_LINES,
                         dialogue_selected,
                         dialogue_max,
                     )

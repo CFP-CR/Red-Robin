@@ -23,7 +23,8 @@ from redrobin.domain.chat import ChatTurn
 logger = logging.getLogger(__name__)
 
 # Memory safety valve for a pathologically long log: the read is O(max_lines), never
-# O(file) (~400 KB worst case at this value).
+# O(file). PUBLIC (exported below) because ``application.chat.history`` passes it to
+# ``tail`` explicitly so a saturated read is observable there.
 #
 # It bounds the READ, and through it the selection: the selector only ever sees these last
 # lines, so a tail SATURATED with one kind starves the other window's quota — e.g. 2000
@@ -32,7 +33,7 @@ logger = logging.getLogger(__name__)
 # far above both quotas (10 + 5 by default) so that needs a genuinely pathological tail;
 # ``build_history_reader`` logs a debug line if it ever happens. One file per engagement
 # spans daemon restarts, so this is a real (if unlikely) shape, not a theoretical one.
-_MAX_TAIL_LINES = 2000
+MAX_TAIL_LINES = 2000
 
 
 def _parse_line(raw: str) -> ChatTurn | None:
@@ -91,7 +92,7 @@ class ChatHistoryRepo:
         with self.path.open("a", encoding="utf-8", errors="replace") as fh:
             fh.write(line + "\n")
 
-    def tail(self, max_lines: int = _MAX_TAIL_LINES) -> list[ChatTurn]:
+    def tail(self, max_lines: int = MAX_TAIL_LINES) -> list[ChatTurn]:
         """The last ``max_lines`` parseable turns, oldest first. Missing file -> []."""
         if not self.path.exists():
             return []
@@ -105,4 +106,4 @@ class ChatHistoryRepo:
         return turns
 
 
-__all__ = ["ChatHistoryRepo"]
+__all__ = ["MAX_TAIL_LINES", "ChatHistoryRepo"]

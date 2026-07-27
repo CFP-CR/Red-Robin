@@ -100,6 +100,6 @@ def test_unicode_round_trips(tmp_path):
 def test_default_max_tail_lines_is_2000():
     # The cap bounds the read AND, through it, the selection — so it sits far above the two
     # context quotas (10 + 5) to keep a saturated tail from starving a window.
-    from redrobin.infrastructure.persistence.chat_history_repo import _MAX_TAIL_LINES
+    from redrobin.infrastructure.persistence.chat_history_repo import MAX_TAIL_LINES
 
-    assert _MAX_TAIL_LINES == 2000
+    assert MAX_TAIL_LINES == 2000
