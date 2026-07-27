@@ -63,7 +63,7 @@ def _parse_line(raw: str) -> ChatTurn | None:
         logger.debug("chat_history: skipped a malformed line")
         return None
     if not isinstance(data, dict):
-        logger.debug("chat_history: skipped a line whose JSON is not a JSON object")
+        logger.debug("chat_history: skipped a line that parsed but is not a JSON object")
         return None
     try:
         correlation_id = data.get("correlation_id")
