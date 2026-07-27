@@ -46,7 +46,6 @@ def test_new_then_boot_yields_usable_scope(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path / ".redrobin"))
-    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
     monkeypatch.setenv("REDROBIN_ENGAGEMENT_SLUG", "acme")
     from redrobin.cli import main

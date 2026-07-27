@@ -60,7 +60,6 @@ from redrobin.infrastructure.transport.bearer import get_or_create_token  # noqa
 
 @pytest.fixture()
 def app_client(tmp_path, monkeypatch):
-    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     app = create_app()
     with TestClient(app) as client:
         yield app, client

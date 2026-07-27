@@ -133,7 +133,6 @@ def _boot_env(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path))
     monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
     monkeypatch.delenv("REDROBIN_ENGAGEMENT_SLUG", raising=False)
-    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     monkeypatch.setenv("REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json"))
     monkeypatch.setenv("REDROBIN_ENGAGEMENT_ID", "eng-chat")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)

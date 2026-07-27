@@ -152,7 +152,6 @@ async def test_lifespan_starts_enricher_task(tmp_path, monkeypatch):
     monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path))
     monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
     monkeypatch.delenv("REDROBIN_ENGAGEMENT_SLUG", raising=False)
-    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     monkeypatch.setenv("REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json"))
     monkeypatch.setenv("REDROBIN_ENGAGEMENT_ID", "eng-enr")
     # No ANTHROPIC_API_KEY -> enricher boots in degraded mode (llm None), task still runs.

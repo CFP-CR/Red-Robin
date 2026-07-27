@@ -29,7 +29,6 @@ def test_heartbeat_endpoint(tmp_path, monkeypatch, _isolated_root):
     so the operator sees "daemon unreachable" warnings the moment the
     daemon goes away.
     """
-    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     app = create_app()
     with TestClient(app) as client:
         resp = client.get("/v1/adapter/heartbeat?adapter=cs-main")

@@ -152,7 +152,6 @@ async def test_lifespan_wires_summarizer(tmp_path: Path, monkeypatch: pytest.Mon
     monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path))
     monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
     monkeypatch.delenv("REDROBIN_ENGAGEMENT_SLUG", raising=False)
-    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     monkeypatch.setenv(
         "REDROBIN_WORKING_MEMORY_PATH",
         str(tmp_path / "working_memory.json"),

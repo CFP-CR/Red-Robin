@@ -234,7 +234,6 @@ def test_replay_endpoint_publishes_to_event_bus(tmp_path, monkeypatch):
     root = tmp_path / ".redrobin"
     root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("REDROBIN_ROOT", str(root))
-    monkeypatch.setenv("REDROBIN_RULES_DIR", str(root / "rules"))
     # Slice 3: opt into degraded Layer B explicitly. No API keys here.
     monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
 
@@ -272,7 +271,6 @@ def test_replay_endpoint_requires_auth(tmp_path, monkeypatch):
     root = tmp_path / ".redrobin"
     root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("REDROBIN_ROOT", str(root))
-    monkeypatch.setenv("REDROBIN_RULES_DIR", str(root / "rules"))
     # Slice 3: opt into degraded Layer B explicitly. No API keys here.
     monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
 
