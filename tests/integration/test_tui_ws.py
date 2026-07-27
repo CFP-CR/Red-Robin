@@ -1,17 +1,21 @@
-"""TUI WebSocket bridge — auth + initial snapshot.
+"""TUI WebSocket bridge — auth, the initial snapshot, and chat hydration.
 
-The echo loop tests were removed in Slice 3: the endpoint no longer echoes
-operator input. Bus-driven broadcasting is covered by
+Covers both connect frames the endpoint sends: ``working_memory_snapshot`` and, since
+#41, ``chat_history``. The echo loop tests were removed in Slice 3: the endpoint no
+longer echoes operator input. Bus-driven broadcasting is covered by
 ``test_tui_ws_broadcast.py``.
+
+Every connect-frame receive goes through ``receive_json_bounded`` — see that helper for
+why an unbounded ``receive_json`` would hang the session instead of failing a test.
 """
 
-import threading
-from typing import Any
+import logging
 
 import pytest
 from fastapi.testclient import TestClient
 
 from redrobin.api.app import create_app
+from tests.integration._ws_helpers import receive_json_bounded
 
 
 @pytest.fixture
@@ -35,30 +39,6 @@ def client(_isolated_root):
     # is populated — Slice 3 onwards the WS endpoint reads it on accept.
     with TestClient(create_app()) as client:
         yield client
-
-
-def _receive_json(ws, timeout: float = 5.0) -> Any:
-    """A BOUNDED ``ws.receive_json()``.
-
-    starlette's TestClient receives through a portal with no timeout, and after the app
-    returns its ``_run`` sleeps forever, so the stream never closes either. Without this,
-    a missing frame wedges the whole pytest session rather than failing a test — which
-    would make the RED step of this task unrunnable. ``pytest-timeout`` is not installed.
-    """
-    box: dict[str, Any] = {}
-
-    def _pull() -> None:
-        try:
-            box["frame"] = ws.receive_json()
-        except Exception as exc:  # the portal can be torn down under us on timeout
-            box["error"] = exc
-
-    thread = threading.Thread(target=_pull, daemon=True)
-    thread.start()
-    thread.join(timeout)
-    if "frame" not in box:
-        raise AssertionError(f"no frame within {timeout}s (last error: {box.get('error')!r})")
-    return box["frame"]
 
 
 def test_ws_rejects_wrong_token(client):
@@ -88,8 +68,8 @@ def test_ws_sends_chat_history_after_the_snapshot(client):
     assert not hasattr(client.app.state, "chat_history_repo")
     token = get_or_create_token()
     with client.websocket_connect(f"/v1/tui?token={token}") as ws:
-        first = _receive_json(ws)
-        second = _receive_json(ws)
+        first = receive_json_bounded(ws)
+        second = receive_json_bounded(ws)
     assert first["type"] == "working_memory_snapshot"
     assert second["type"] == "chat_history"
     assert second["payload"]["turns"] == []
@@ -117,8 +97,8 @@ def test_ws_chat_history_carries_the_full_turn_shape(client, tmp_path):
 
     token = get_or_create_token()
     with client.websocket_connect(f"/v1/tui?token={token}") as ws:
-        _receive_json(ws)  # working_memory_snapshot
-        frame = _receive_json(ws)
+        receive_json_bounded(ws)  # working_memory_snapshot
+        frame = receive_json_bounded(ws)
     turns = frame["payload"]["turns"]
     assert [t["text"] for t in turns] == ["hello", "enumerate the subnet"]  # oldest first
     # the frame carries the whole ChatTurn, not a subset (spec: the frame contract)
@@ -163,8 +143,8 @@ def test_ws_chat_history_reads_one_bounded_tail_of_the_most_recent_turns(client,
 
     token = get_or_create_token()
     with client.websocket_connect(f"/v1/tui?token={token}") as ws:
-        _receive_json(ws)
-        frame = _receive_json(ws)
+        receive_json_bounded(ws)
+        frame = receive_json_bounded(ws)
     assert repo.max_lines_seen == 50  # one bounded read, not a full read then a slice
     texts = [t["text"] for t in frame["payload"]["turns"]]
     assert len(texts) == 50
@@ -172,7 +152,7 @@ def test_ws_chat_history_reads_one_bounded_tail_of_the_most_recent_turns(client,
     assert texts[-1] == "turn-59"  # ...still oldest-first
 
 
-def test_ws_chat_history_survives_a_failing_repo(client):
+def test_ws_chat_history_survives_a_failing_repo(client, caplog):
     from redrobin.infrastructure.transport.bearer import get_or_create_token
 
     class _BoomRepo:
@@ -181,11 +161,17 @@ def test_ws_chat_history_survives_a_failing_repo(client):
 
     client.app.state.chat_history_repo = _BoomRepo()
     token = get_or_create_token()
-    with client.websocket_connect(f"/v1/tui?token={token}") as ws:
-        _receive_json(ws)
-        frame = _receive_json(ws)
+    with caplog.at_level(logging.ERROR):
+        with client.websocket_connect(f"/v1/tui?token={token}") as ws:
+            receive_json_bounded(ws)
+            frame = receive_json_bounded(ws)
     assert frame["type"] == "chat_history"
     assert frame["payload"]["turns"] == []
+    # The degradation must be VISIBLE. A bare ``except Exception: pass`` satisfies both
+    # assertions above, so without this the operator's only clue that the thread silently
+    # failed to hydrate would be an empty pane.
+    assert "could not read the chat transcript" in caplog.text
+    assert "transcript unreadable" in caplog.text  # logger.exception carried the traceback
 
 
 def test_ws_chat_history_survives_a_repo_returning_non_turns(client):
@@ -204,7 +190,7 @@ def test_ws_chat_history_survives_a_repo_returning_non_turns(client):
     client.app.state.chat_history_repo = _WrongShapeRepo()
     token = get_or_create_token()
     with client.websocket_connect(f"/v1/tui?token={token}") as ws:
-        _receive_json(ws)
-        frame = _receive_json(ws)
+        receive_json_bounded(ws)
+        frame = receive_json_bounded(ws)
     assert frame["type"] == "chat_history"
     assert frame["payload"]["turns"] == []
