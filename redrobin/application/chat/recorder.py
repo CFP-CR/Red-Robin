@@ -35,11 +35,14 @@ def advisory_text(payload: dict[str, Any]) -> str:
     The application layer cannot reuse the TUI renderer (import-linter: application
     never imports presentation), so this mirrors the operator-facing shape — the action
     plus why/opsec/conf — minus refs, which were dropped from the output on 2026-07-24.
-    Absent fields are omitted rather than rendered empty.
+    Absent fields are omitted rather than rendered empty. Every field is STRIPPED, matching
+    the dialogue path (``turn_for`` strips at extraction): these values come off a model
+    reply, so trailing newlines and indentation are routine, and an unstripped one would be
+    baked into the stored turn and re-injected into every later prompt.
     """
-    lines = [str(payload.get("suggested_action") or "")]
+    lines = [str(payload.get("suggested_action") or "").strip()]
     for label, key in (("why", "rationale"), ("opsec", "opsec_risk"), ("conf", "confidence")):
-        value = str(payload.get(key) or "")
+        value = str(payload.get(key) or "").strip()
         if value:
             lines.append(f"{label}    {value}")
     return "\n".join(line for line in lines if line)

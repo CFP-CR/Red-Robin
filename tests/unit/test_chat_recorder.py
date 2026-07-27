@@ -152,6 +152,23 @@ def test_advisory_text_omits_absent_fields():
     assert text == "do X"
 
 
+def test_advisory_text_strips_its_fields_like_dialogue_text():
+    # Dialogue text is stripped at extraction; the advisory body was composed raw, so a
+    # model reply with a trailing newline stored a turn whose first line ended in blank
+    # space and whose "why" carried the model's indentation.
+    text = advisory_text(
+        {
+            "suggested_action": "  Validate svc_reports\n",
+            "rationale": "\ta quiet bind ",
+            "opsec_risk": " WARN ",
+            "confidence": "high\n",
+        }
+    )
+    assert text == "Validate svc_reports\nwhy    a quiet bind\nopsec    WARN\nconf    high"
+    # whitespace-only fields drop out entirely rather than rendering an empty label
+    assert advisory_text({"suggested_action": "do X", "rationale": "   "}) == "do X"
+
+
 @pytest.mark.asyncio
 async def test_run_records_a_published_event_with_the_injected_clock(tmp_path):
     bus = EventBus()
