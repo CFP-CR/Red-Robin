@@ -23,16 +23,16 @@ def test_build_ws_url_no_token():
 def test_handle_raw_dispatches_valid_frame():
     reg = Registry()
     seen = {}
-    reg.register("opsec.verdict")(lambda t, p: seen.update(p))
+    reg.register("working_memory_snapshot")(lambda t, p: seen.update(p))
     target = _Target()
 
     ws_worker.handle_raw(
         target=target,
-        raw='{"type":"opsec.verdict","payload":{"verdict":"BLOCK"}}',
+        raw='{"type":"working_memory_snapshot","payload":{"current_phase":"recon"}}',
         registry=reg,
     )
 
-    assert seen == {"verdict": "BLOCK"}
+    assert seen == {"current_phase": "recon"}
 
 
 def test_handle_raw_ignores_bad_json():

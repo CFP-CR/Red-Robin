@@ -73,10 +73,7 @@ class Finding:
     (``WorkingMemoryRepo.apply_deltas``) findings are deduped by
     ``(kind, summary, source_beacon_id)`` so re-emission / overlapping chunks
     do not pile up duplicates; since Plan B2 retired the regex producer, the
-    enrichment path is the only writer. The un-dedup'd
-    ``WorkingMemoryRepo.append_finding`` lost its last caller when the pre-flight
-    gate's BLOCK-finding path was removed — it is retained as a tested repo API,
-    pending triage.
+    enrichment path is the only writer.
     """
 
     kind: str

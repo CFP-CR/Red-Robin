@@ -10,8 +10,7 @@ from redrobin.infrastructure.transport.bearer import get_or_create_token
 
 
 @pytest.fixture()
-def app_client(tmp_path, monkeypatch):
-    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
+def app_client():
     app = create_app()
     with TestClient(app) as client:
         yield app, client
@@ -33,11 +32,11 @@ def test_ws_forwards_published_event(app_client):
         ws.receive_json()  # discard snapshot
         client.portal.call(
             app.state.event_bus.publish,
-            {"type": "opsec.verdict", "payload": {"verdict": "ALLOW"}},
+            {"type": "working_memory_snapshot", "payload": {"current_phase": "recon"}},
         )
         evt = ws.receive_json()
-        assert evt["type"] == "opsec.verdict"
-        assert evt["payload"]["verdict"] == "ALLOW"
+        assert evt["type"] == "working_memory_snapshot"
+        assert evt["payload"]["current_phase"] == "recon"
 
 
 def test_two_ws_clients_both_receive(app_client):
@@ -51,12 +50,12 @@ def test_two_ws_clients_both_receive(app_client):
         ws_b.receive_json()  # snapshot
         client.portal.call(
             app.state.event_bus.publish,
-            {"type": "opsec.verdict", "payload": {"verdict": "BLOCK"}},
+            {"type": "working_memory_snapshot", "payload": {"current_phase": "lateral"}},
         )
         ea = ws_a.receive_json()
         eb = ws_b.receive_json()
-        assert ea["type"] == "opsec.verdict"
-        assert eb["type"] == "opsec.verdict"
+        assert ea["type"] == "working_memory_snapshot"
+        assert eb["type"] == "working_memory_snapshot"
         assert ea == eb
 
 

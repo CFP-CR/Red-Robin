@@ -413,9 +413,13 @@ uv run python adapters/sliver-mock/adapter.py `
 ```
 
 In terminal A you get one uvicorn access line per POST —
-`"POST /v1/events HTTP/1.1" 200 OK` — and nothing else per event: the reducer
-and the enricher print nothing on their success paths (the note under the Tier 2
-success criteria explains why). Be precise about what the reducer folds into working
+`"POST /v1/events HTTP/1.1" 200 OK` — plus, for each `beacon.command_output`
+that clears the enricher's trigger gate, one `enrichment ok: …` INFO line from
+`redrobin.application.agents.enricher.enricher` (the note under the Tier 2
+success criteria has the full reading). The reducer stays quiet: its only log
+calls are `logger.exception` on a failed event, an episodic write, or a
+milestone apply (`application/working_memory_reducer.py`), so a silent reducer
+is a healthy one. Be precise about what the reducer folds into working
 memory — it handles exactly four types: `beacon.initial` (sessions),
 `beacon.command_input` (an L3 episode, no working-memory change),
 `working_memory.deltas`, and `engagement.milestone`.
@@ -545,9 +549,26 @@ the full reason: the one command output names no host at all, the beacon's own
 host is separately grounded out of extraction, and the output carries no secret
 material for a credential to attach to.
 
-**The daemon prints no per-event confirmation that enrichment succeeded**, so
-don't go looking for one. To rule out "the enricher never ran at all," use the
-three things that *are* observable:
+**The daemon prints a per-event `enrichment ok` line on every completed
+extraction**, so terminal A is the first place to look. `redrobin daemon start`
+passes `log_config=build_uvicorn_log_config("info")` to uvicorn
+(`cli_helpers/daemon_cmd.py`), which adds a `redrobin` logger at INFO with its
+own timestamped stderr handler — so every `logger.info` under the `redrobin.*`
+tree reaches terminal A. The enricher's success path
+(`agents/enricher/enricher.py`, the `logger.info` just after it publishes
+`working_memory.deltas`) renders as:
+
+```
+<ts> INFO    redrobin.application.agents.enricher.enricher | enrichment ok: command=… beacon=… chunks=… deltas=… latency_ms=…
+```
+
+The line's *presence* is the signal, whatever `deltas=` reads — it proves the
+enricher ran a pass to completion on that output, which the empty
+`hosts`/`credentials` arrays cannot tell you on their own. Don't over-read the
+count: `deltas` sums hosts + credentials + findings + tools + defenses, so a
+non-zero value is possible here even with both arrays empty (Step 2.3). No such
+line at all means the enricher never got that far; the three gates below are
+what stop it:
 
 - **The key.** Step 2.1 starts the daemon without `--allow-degraded`. With
   `REDROBIN_ALLOW_DEGRADED` also unset, a missing `ANTHROPIC_API_KEY` makes
@@ -561,7 +582,9 @@ three things that *are* observable:
   Both go to stderr in terminal A, and the banner prints at every start. The
   banner and the enricher's LLM-client factory read the same
   `ANTHROPIC_API_KEY` environment variable, so `Anthropic:  set` means the
-  factory found a key too.
+  factory found a key too. The factory says so itself now — with no key,
+  `build_enricher_llm` (`agents/enricher/llm.py`) logs one INFO line at boot,
+  `WM enricher: ANTHROPIC_API_KEY missing — running degraded (no enrichment)`.
 - **`REDROBIN_ENRICHMENT_ENABLED=0`** also short-circuits `_enrich`, and
   neither the banner nor `doctor` reports it — the setting is passed to the
   enricher at boot and never echoed. Check the environment of the shell you
@@ -575,13 +598,11 @@ three things that *are* observable:
 **Do not read anything into the absence of `enrichment failed` either.** That
 message fires only on an LLM/network error or on output no chunk of which could
 be parsed (`enricher.py`'s `_emit_failed`, two call sites) — a missing key, a
-disabled enricher and a clean run that extracted nothing all produce no line at
-all, so its absence separates none of them. Its *presence* is meaningful, and
-it does reach terminal A: it is logged at ERROR, whereas the enricher's
-success-path line is `logger.info` and never prints. `redrobin daemon start`
-passes only `log_level="info"` to uvicorn, which configures uvicorn's own
-loggers; nothing sets a level or a handler for `redrobin.*`, so Red Robin's own
-modules sit at WARNING and their INFO lines are dropped.
+disabled enricher and a clean run that extracted nothing all produce no
+`enrichment failed` line, so its absence separates none of them. Its *presence*
+is meaningful (it is logged at ERROR, and one is a real alarm). Read it
+alongside `enrichment ok`, which is the line that *does* separate those cases:
+present means a completed pass, absent means the enricher never ran one.
 
 Only if `sessions` is ALSO empty (that path is deterministic and needs no LLM)
 are you looking at a wire-protocol bug — the class Phase 2 had with
@@ -981,11 +1002,13 @@ Either:
 - Enricher is short-circuited (no `ANTHROPIC_API_KEY`,
   `REDROBIN_ENRICHMENT_ENABLED=0`, or the LLM provider failed) — the reducer no
   longer regex-parses command output since Plan B2. Scan the daemon terminal for
-  `enrichment failed:` lines; they are logged at ERROR, so they do print, and one
-  is a real alarm. Their absence proves nothing, though — the no-key and disabled
-  paths return before any LLM call and log nothing per event (Tier 2's note under
-  the success criteria has the full reasoning). Confirm instead that the boot
-  banner read `Anthropic:  set` rather than `MISSING (degraded)`
+  `enrichment ok:` — one line per completed extraction, so its absence means the
+  enricher never ran. `enrichment failed:` (logged at ERROR) is the other half:
+  present means a real alarm, absent proves nothing on its own, because the
+  no-key and disabled paths return before any LLM call and log nothing per event
+  (Tier 2's note under the success criteria has the full reasoning). The boot
+  banner's `Anthropic:  set` vs `MISSING (degraded)` still separates the no-key
+  case at a glance
 
 ### The assistant never says anything in the chat pane
 

@@ -164,7 +164,8 @@ sub redrobin_sanitize_error {
 # S1ckB0y1337/Cobalt-Strike-CheatSheet. Audit pass 2 #2.4: &binfo("integrity")
 # is NOT a documented Aggressor key, so we MUST derive from the user string.
 # If a future CS release drops the " *" separator this check returns $null
-# (safe-fail — Sigma rules with IntegrityLevel: High simply don't fire).
+# (safe-fail — the consumer is beacon.initial's optional integrity_level field,
+# so the daemon simply records the session without one).
 # Distinguishing Medium/Low/System requires a beacon-side BOF (deferred to v0.2).
 sub redrobin_integrity_level {
     local('$u');

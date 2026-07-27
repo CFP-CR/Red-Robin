@@ -38,7 +38,6 @@ class Settings(BaseSettings):
 
     # Root and derived paths
     root: Path = Field(default_factory=_default_root, alias="REDROBIN_ROOT")
-    rules_dir: Path | None = Field(default=None, alias="REDROBIN_RULES_DIR")
     working_memory_path: Path | None = Field(default=None, alias="REDROBIN_WORKING_MEMORY_PATH")
     episodic_path: Path | None = Field(default=None, alias="REDROBIN_EPISODIC_PATH")
     longterm_path: Path | None = Field(default=None, alias="REDROBIN_LONGTERM_PATH")
@@ -51,9 +50,7 @@ class Settings(BaseSettings):
     engagement_slug: str | None = Field(default=None, alias="REDROBIN_ENGAGEMENT_SLUG")
     engagement_id: str = Field(default="eng-default", alias="REDROBIN_ENGAGEMENT_ID")
 
-    # Memory / promotion / summarizer tuning
-    promoter_interval_sec: float = Field(default=60.0, alias="REDROBIN_PROMOTER_INTERVAL_SEC")
-    promoter_min_occurrences: int = Field(default=3, alias="REDROBIN_PROMOTER_MIN_OCCURRENCES")
+    # Memory / summarizer tuning
     l5_window: int = Field(default=25, alias="REDROBIN_L5_WINDOW")
     l5_interval_sec: float = Field(default=30.0, alias="REDROBIN_L5_INTERVAL_SEC")
 
@@ -110,13 +107,13 @@ class Settings(BaseSettings):
         default=600.0, alias="REDROBIN_ASSISTANT_PROACTIVE_MIN_INTERVAL_SEC"
     )
 
-    # Operator policy
-    allow_degraded_layer_b: bool = Field(default=False, alias="REDROBIN_ALLOW_DEGRADED")
+    # Operator policy. The env var name is operator-facing and frozen; the
+    # Python identifier was renamed off the deleted "Layer B" (the gate's LLM
+    # tier). Degraded now means "no assistant, enrichment or summaries".
+    allow_degraded: bool = Field(default=False, alias="REDROBIN_ALLOW_DEGRADED")
 
     @model_validator(mode="after")
     def _derive_paths(self) -> "Settings":
-        if self.rules_dir is None:
-            self.rules_dir = self.root / "rules"
         if self.working_memory_path is None:
             self.working_memory_path = self.root / "working_memory.json"
         if self.episodic_path is None:
@@ -141,7 +138,6 @@ class Settings(BaseSettings):
         return v
 
     @field_validator(
-        "promoter_min_occurrences",
         "l5_window",
         "enrichment_min_output_chars",
         "enrichment_chunk_max_chars",
@@ -156,7 +152,6 @@ class Settings(BaseSettings):
         return v
 
     @field_validator(
-        "promoter_interval_sec",
         "l5_interval_sec",
         "assistant_cooldown_sec",
         "assistant_lull_sec",
