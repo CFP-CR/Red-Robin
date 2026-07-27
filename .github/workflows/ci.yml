@@ -27,4 +27,4 @@ jobs:
       - name: Pytest
         run: uv run pytest tests/ -v --tb=short
       - name: Pytest (adapters)
-        run: uv run pytest adapters/cobaltstrike/tests/ adapters/sliver-mock/tests/ -v --tb=short
+        run: uv run pytest adapters/ -v --tb=short
