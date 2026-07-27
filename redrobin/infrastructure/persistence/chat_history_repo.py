@@ -33,6 +33,15 @@ logger = logging.getLogger(__name__)
 # far above both quotas (10 + 5 by default) so that needs a genuinely pathological tail;
 # ``build_history_reader`` logs a debug line if it ever happens. One file per engagement
 # spans daemon restarts, so this is a real (if unlikely) shape, not a theoretical one.
+#
+# COST OF THE CAP, measured (2026-07-27, CPython 3.13 / Windows 11, warm page cache, a
+# realistic 2000-line transcript — mixed questions/answers/composed advisories, 534 KB):
+# ``tail`` medians 7.5 ms, p95 10.1 ms; at the pre-2026-07-25 cap of 500 it was 1.8 ms.
+# That read is SYNCHRONOUS on the event loop and runs once per reactive cycle, i.e. once
+# per beacon command — but the cycle it feeds is an LLM round-trip measured in SECONDS,
+# so ~7 ms is three orders of magnitude below the work it precedes. Left synchronous and
+# left at 2000 deliberately; revisit (thread-offload, or an in-process tail cache) only
+# if the cap grows again or a profile shows the loop stalling.
 MAX_TAIL_LINES = 2000
 
 
@@ -93,7 +102,12 @@ class ChatHistoryRepo:
             fh.write(line + "\n")
 
     def tail(self, max_lines: int = MAX_TAIL_LINES) -> list[ChatTurn]:
-        """The last ``max_lines`` parseable turns, oldest first. Missing file -> []."""
+        """The parseable turns among the last ``max_lines`` LINES, oldest first.
+
+        NOT "the last ``max_lines`` parseable turns": the cap bounds the lines READ, and
+        an unparseable line among them is dropped rather than backfilled, so the result
+        can be shorter than ``max_lines`` even on a much longer file. Missing file -> [].
+        """
         if not self.path.exists():
             return []
         with self.path.open("r", encoding="utf-8", errors="replace") as fh:
