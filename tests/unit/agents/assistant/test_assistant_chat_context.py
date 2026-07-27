@@ -130,6 +130,21 @@ async def test_cycle_survives_a_raising_history_reader():
 
 
 @pytest.mark.asyncio
+async def test_a_non_string_history_reader_degrades_to_the_placeholder():
+    # _read_history now mirrors the isinstance guard its sibling _seed_snapshot has. The
+    # wired producer (build_history_reader) always returns str, but the reader is an
+    # injected Callable — a list of turns would blow up inside the "\n".join that builds
+    # the prompt and cost the whole cycle, not just the conversation section.
+    bus = EventBus()
+    llm = _CapturingLLM()
+    a = _assistant(bus, llm, history_reader=lambda: ["[operator] path to DA?"])  # type: ignore[arg-type,return-value]
+    a._wm_snapshot = {"defenses_observed": ["CrowdStrike"]}
+    await a._safe_proactive("test")
+    assert llm.messages, "the cycle should still have run"
+    assert any("(no conversation yet)" in m for m in llm.messages)
+
+
+@pytest.mark.asyncio
 async def test_no_history_reader_emits_the_placeholder():
     # NOT "prior behaviour": before this feature the prompt had no conversation section at
     # all. With no reader wired the section is still emitted, carrying the placeholder.
