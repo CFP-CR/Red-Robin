@@ -149,10 +149,12 @@ async def test_on_chat_history_appends_one_line_per_turn_in_order():
         _on_chat_history(
             pilot.app,
             {
+                # ts deliberately SKEWED out of order, so payload order and stamp order
+                # disagree: a handler that sorted by ts would render second/third/first.
                 "turns": [
-                    {"ts": "t1", "role": "operator", "kind": "question", "text": "first"},
-                    {"ts": "t2", "role": "assistant", "kind": "answer", "text": "second"},
-                    {"ts": "t3", "role": "operator", "kind": "question", "text": "third"},
+                    {"ts": "t3", "role": "operator", "kind": "question", "text": "first"},
+                    {"ts": "t1", "role": "assistant", "kind": "answer", "text": "second"},
+                    {"ts": "t2", "role": "operator", "kind": "question", "text": "third"},
                 ]
             },
         )
@@ -192,12 +194,20 @@ async def test_on_chat_history_renders_a_multi_line_advisory_body():
 async def test_on_chat_history_tolerates_empty_and_malformed_payloads():
     from redrobin.tui.textual_ui.chat import _on_chat_history
 
+    # TWO harnesses, deliberately. `{"turns": []}` passes the shape check and so CONSUMES the
+    # one-shot; putting it first on a shared pane would make every later call in the same test
+    # return at the hydration guard, which is unpassable AND leaves the shape guard untested.
     async with _ChatHarness().run_test() as pilot:
         log = pilot.app.query_one("#chat-log", RichLog)
-        _on_chat_history(pilot.app, {"turns": []})
+        pane = pilot.app.query_one("#events", ChatPane)
         _on_chat_history(pilot.app, {})  # no turns key: `for turn in None` would raise
         _on_chat_history(pilot.app, {"turns": 42})  # non-iterable: the outer guard is load-bearing
         assert len(log.lines) == 0
+        # A shapeless frame must NOT burn the one-shot: were the flag set before the shape
+        # check, one garbage frame on first connect would leave the pane permanently
+        # un-hydratable, so the real transcript arriving on reconnect would never render.
+        # This is also what keeps the two calls above live — they reach the shape check.
+        assert pane._hydrated is False
         # one bad entry must not drop the good ones around it
         _on_chat_history(
             pilot.app,
@@ -210,6 +220,14 @@ async def test_on_chat_history_tolerates_empty_and_malformed_payloads():
         )
         assert len(log.lines) == 1
         assert "kept" in log.lines[0].text
+    # An empty list, by contrast, IS a hydration: the daemon said "the thread is empty" and
+    # that consumes the one-shot, exactly as "one-shot PER PANE" requires. Were it not
+    # consumed, a fresh engagement (empty transcript on first connect) would re-append
+    # everything rendered live once the first reconnect arrived.
+    async with _ChatHarness().run_test() as pilot:
+        _on_chat_history(pilot.app, {"turns": []})
+        assert len(pilot.app.query_one("#chat-log", RichLog).lines) == 0
+        assert pilot.app.query_one("#events", ChatPane)._hydrated is True
 
 
 @pytest.mark.asyncio
