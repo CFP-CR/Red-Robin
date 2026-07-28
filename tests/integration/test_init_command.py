@@ -118,7 +118,11 @@ def test_init_rejects_an_unsafe_slug_before_writing_anything(tmp_path):
     )
     assert rc == 2
     assert not target.exists(), "init must not write anything when the slug is invalid"
-    assert not (tmp_path.parent / "pwn").exists(), "the slug must not escape the root"
+    # Where the traversal actually lands: <root>/engagements/../../pwn resolves
+    # one level above <root>, i.e. tmp_path/pwn. (It was asserted against
+    # tmp_path.parent, pytest's per-session base dir, where it could never
+    # appear — a vacuous assertion in a test about a path escape.)
+    assert not (tmp_path / "pwn").exists(), "the slug must not escape the root"
 
 
 def test_init_sets_strict_perms_on_dotenv(tmp_path):
