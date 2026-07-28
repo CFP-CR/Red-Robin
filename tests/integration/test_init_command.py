@@ -92,6 +92,13 @@ def test_init_idempotent_does_not_overwrite_existing(tmp_path):
     assert rc == 0
     env = (target / ".env").read_text()
     assert "ANTHROPIC_API_KEY=orig" in env, "init must not overwrite existing .env"
+    # The active engagement is state, and re-running init must not clobber it
+    # either. An operator on op-a who re-runs `redrobin init` (default slug
+    # op-default) would otherwise be moved silently — the same class of bug as
+    # the .env slug pin this replaced, just from the other side.
+    assert EngagementService(root=target).current() == "op-a", (
+        "re-running init must not switch the operator's active engagement"
+    )
 
 
 def test_init_sets_strict_perms_on_dotenv(tmp_path):
