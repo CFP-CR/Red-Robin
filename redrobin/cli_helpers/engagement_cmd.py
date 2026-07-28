@@ -59,11 +59,13 @@ def run_new(
     print(f"[+] Created engagement {eng.slug}")
     print(f"[+] Edit {redrobin_root()}/engagements/{eng.slug}/engagement.yaml")
     if not eng.in_scope:
+        # Nothing is blocked -- the pre-flight gate was removed. Scope is projected
+        # onto working memory and the assistant reasons from it, so an empty scope
+        # means it advises with no target boundary, not that anything is stopped.
         print(
-            "[!] No in-scope targets set - targeted commands (jump/psexec/wmi/"
-            "winrm/link) will be BLOCKED as out-of-scope until you set scope. "
-            "Re-run with --in-scope <host/cidr>, or edit the engagement.yaml "
-            "above.",
+            "[!] No in-scope targets set - the assistant will advise without a target "
+            "boundary. Nothing is blocked: Red Robin is advisory-only. Re-run with "
+            "--in-scope <host/cidr>, or edit the engagement.yaml above.",
             file=sys.stderr,
         )
     return 0
