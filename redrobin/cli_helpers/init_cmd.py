@@ -40,6 +40,10 @@ REDROBIN_ENGAGEMENT_SLUG={slug}
 REDROBIN_L5_WINDOW=25
 REDROBIN_L5_INTERVAL_SEC=30
 
+# The assistant is off by default in code (it was dark-launched). You just gave
+# init your API keys, so it is on here. Set to 0 for a capture-only setup.
+REDROBIN_ASSISTANT_ENABLED=1
+
 REDROBIN_ALLOW_DEGRADED=0
 """
 

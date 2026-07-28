@@ -32,6 +32,21 @@ def test_init_creates_structure(tmp_path):
     assert "REDROBIN_ENGAGEMENT_SLUG=op-first" in env
 
 
+def test_init_enables_the_assistant(tmp_path):
+    """A fresh install must have a working assistant.
+
+    ``assistant_enabled`` defaults to False in code (the feature was
+    dark-launched), so an operator who followed the setup doc exactly got a TUI
+    whose chat pane never answered. The operator supplies the API keys during
+    ``init`` — wanting the assistant is the whole reason they ran it.
+    """
+    target = tmp_path / "rr"
+    run_init(
+        root=target, anthropic_key="k1", voyage_key="k2", engagement_slug="op", interactive=False
+    )
+    assert "REDROBIN_ASSISTANT_ENABLED=1" in (target / ".env").read_text()
+
+
 def test_init_idempotent_does_not_overwrite_existing(tmp_path):
     """Re-running init must not clobber existing .env or engagement.yaml."""
     target = tmp_path / "rr"
