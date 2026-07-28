@@ -40,7 +40,10 @@ def test_ws_forwards_published_event(app_client):
             app.state.event_bus.publish,
             {"type": "working_memory_snapshot", "payload": {"current_phase": "recon"}},
         )
-        evt = ws.receive_json()
+        # The post-publish read is the one that MUST be bounded: a connect-frame read can be
+        # satisfied by whatever frame does arrive, but if bus forwarding regresses then no
+        # frame can ever arrive here, so an unbounded receive hangs forever.
+        evt = receive_json_bounded(ws)
         assert evt["type"] == "working_memory_snapshot"
         assert evt["payload"]["current_phase"] == "recon"
 
@@ -62,8 +65,10 @@ def test_two_ws_clients_both_receive(app_client):
             app.state.event_bus.publish,
             {"type": "working_memory_snapshot", "payload": {"current_phase": "lateral"}},
         )
-        ea = ws_a.receive_json()
-        eb = ws_b.receive_json()
+        # Bounded for the same reason as the single-client test: a bus-forwarding regression
+        # leaves nothing to receive, and nothing in this repo would end the run.
+        ea = receive_json_bounded(ws_a)
+        eb = receive_json_bounded(ws_b)
         assert ea["type"] == "working_memory_snapshot"
         assert eb["type"] == "working_memory_snapshot"
         assert ea == eb
