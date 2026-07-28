@@ -96,6 +96,14 @@ async def tui_ws(websocket: WebSocket, token: str = Query(...)) -> None:
         # deliberately: if a yield point ever appears here, this way costs a visible,
         # harmless duplicate, whereas reading before subscribing would SILENTLY LOSE the
         # turn. Do not reverse it.
+        #
+        # Precisely: this is the better of two lossy orders, not a lossless one. ``ChatRecorder``
+        # is an INDEPENDENT bus consumer, so its append is not synchronous with the publish.
+        # Read-then-subscribe loses ALWAYS whatever is published in that window — absent from the
+        # file at read time, and no subscription yet to carry it live. Subscribe-then-read loses
+        # only the narrower case of a turn published just BEFORE the subscribe whose append the
+        # recorder has not flushed by the time we read here; the recorder still writes it, so the
+        # next connect hydrates it.
         if not await _send(
             websocket,
             {"type": "chat_history", "payload": await _build_chat_history(websocket.app)},
@@ -174,6 +182,14 @@ async def _build_chat_history(app) -> dict:
     endpoint's outer try catches only WebSocketDisconnect, so anything raised here would
     close the socket and drop the TUI into its reconnect loop. A chat that cannot hydrate
     must never cost the operator their Working Memory and Sessions panes.
+
+    EVERY reconnect re-runs this read and re-sends up to ``_HISTORY_LINES`` turns that the pane
+    then DISCARDS — hydration is one-shot per pane (``chat._on_chat_history``). Accepted: nothing
+    tells the daemon whether the pane is already hydrated (the inbound path carries only
+    ``_TUI_ALLOWED`` operator.* messages), and a ``ts`` watermark was rejected for the reasons in
+    the spec's Reconnect section. The cost is real, not zero: synchronous file I/O on the connect
+    path, and the same text crosses the socket again — including credentials the operator may have
+    pasted into a turn (``recorder.py`` never LOGS a turn's text for exactly that reason).
     """
     repo = getattr(app.state, "chat_history_repo", None)
     if repo is None:

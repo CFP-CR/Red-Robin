@@ -8,7 +8,7 @@ Open the TUI mid-engagement and the Assistant Chat pane is **empty**, while Work
 
 This is a *display* gap, not a memory gap. The transcript is persisted by `ChatRecorder` and injected into the assistant's own context by `build_history_reader`, so the assistant **remembers** the conversation across a TUI restart — the operator just can't see it. `ChatPane` composes an empty `RichLog` and only appends frames that arrive after connect.
 
-The asymmetry is structural: on connect `tui_ws.py` sends exactly one replay frame, `working_memory_snapshot` (`tui_ws.py:76-80`). There is no equivalent for chat.
+The asymmetry is structural: on connect `tui_ws.py` sends exactly one replay frame, `working_memory_snapshot` (`tui_ws.py:83-86`). There is no equivalent for chat.
 
 ## Goal
 
@@ -42,13 +42,15 @@ No new facade, no new widget, no new pane. The only new state is a single `ChatP
 
 ### Why no application-layer facade is needed
 
-`tui_ws.py` already reaches the working-memory repo through `app.state` without importing infrastructure (`tui_ws.py:135-139`). The chat repo is on `app.state` too — `lifespan_helpers.py:428` sets `app.state.chat_history_repo`. The same pattern applies, so the import-linter contract *"presentation never imports infrastructure directly"* holds with no new indirection. Turn dicts come from `dataclasses.asdict` (stdlib).
+`tui_ws.py` already reaches the working-memory repo through `app.state` without importing infrastructure (`tui_ws.py:166-170`). The chat repo is on `app.state` too — `lifespan_helpers.py:428` sets `app.state.chat_history_repo`. The same pattern applies, so the import-linter contract *"presentation never imports infrastructure directly"* holds with no new indirection. Turn dicts come from `dataclasses.asdict` (stdlib).
 
 ### Frame contract
 
 Type `chat_history`, payload `{"turns": [...]}`, each turn the `ChatTurn` fields already persisted: `ts`, `role`, `kind`, `text`, `correlation_id`. Sent immediately after `working_memory_snapshot`, before the live loop begins.
 
-Turns come from a single `repo.tail(max_lines=50)` (the constant is named `_HISTORY_LINES`, since it caps lines) — **not** a full `MAX_TAIL_LINES` read sliced afterwards. `tail` already returns the parseable turns among the last N raw lines, which is exactly the window wanted, and reading 50 lines instead of 2000 keeps the connect path cheap.
+Turns come from a single `repo.tail(max_lines=50)` (the constant is named `_HISTORY_LINES`, since it caps lines) — **not** a full `MAX_TAIL_LINES` read sliced afterwards. `tail` already returns the parseable turns among the last N raw lines, which is exactly the window wanted, and asking for 50 instead of 2000 keeps the connect path cheap.
+
+The saving is **parsing, not I/O**: `tail` streams the whole file through `deque(fh, maxlen=n)` (`chat_history_repo.py:114-115`), so the bytes read off disk are identical either way — only 50 lines instead of 2000 are then JSON-decoded. That is where the cost actually is, so the conclusion holds: the measurement in `chat_history_repo.py:41-48` puts the same 534 KB file at ~7.5 ms for 2000 lines and ~1.8 ms for 500.
 
 Rendering uses `role`, `kind` and `text`. `ts` and `correlation_id` are carried because they are what a turn *is*, not because this feature reads them — `ts` is unused given the no-timestamp decision below, and `kind` already distinguishes `advisory` from `heads_up`, so `correlation_id` is not needed to pick the tag.
 
@@ -105,13 +107,13 @@ The order is still kept, and deliberately — but the justification is forward-l
 
 ## Reconnect
 
-The TUI auto-reconnects (`ws_worker.py:57` iterates `connect(...)` and continues on any exception), and every reconnect re-runs the endpoint from the top, re-sending both connect frames. The working-memory frame is idempotent because it **replaces** `app.snapshot`; the chat log is **append-only**, so an unguarded handler would re-append the whole thread on any ping timeout, daemon restart, or network blip.
+The TUI auto-reconnects (`ws_worker.py:70` iterates `connect(...)` and continues on any exception), and every reconnect re-runs the endpoint from the top, re-sending both connect frames. The working-memory frame is idempotent because it **replaces** `app.snapshot`; the chat log is **append-only**, so an unguarded handler would re-append the whole thread on any ping timeout, daemon restart, or network blip.
 
 **Hydration is therefore one-shot per pane.** The known cost: turns recorded while the socket was down are not rendered on reconnect. They remain on disk and in the assistant's context, and restarting the TUI shows them. Rendering only turns newer than the last hydrated one was considered and rejected — a live-rendered turn carries no `ts` in the TUI, so the watermark could not be advanced for it, and the next reconnect would duplicate everything rendered live in between.
 
 ## Window
 
-The last **50 turns**, chronological. `select_context_turns`'s two-window rule is deliberately **not** reused: it exists so advisories cannot evict the dialogue thread from the model's prompt. For display, plain chronological order is what a chat client does and what the operator expects.
+The parseable turns among the last **50 lines** of the transcript, chronological — **at most** 50, and fewer if any of those lines is malformed, because `tail` caps lines and drops unparseable ones without backfilling. That is the distinction the constant's name carries (`_HISTORY_LINES`, not `_HISTORY_TURNS`). `select_context_turns`'s two-window rule is deliberately **not** reused: it exists so advisories cannot evict the dialogue thread from the model's prompt. For display, plain chronological order is what a chat client does and what the operator expects.
 
 A module constant, not a `Setting` — matching the precedent of `MAX_TAIL_LINES` and `_MAX_TURN_CHARS` (YAGNI until an operator asks to tune it).
 
@@ -163,8 +165,9 @@ Run with the assistant enabled (`REDROBIN_ASSISTANT_ENABLED=1`) against the `van
 
 - Colouring a historical advisory's `opsec` value.
 - Any indication that the thread is truncated.
-- Scrollback beyond the 50-turn window, search, or paging.
+- Scrollback beyond the hydrated window, search, or paging.
 - Normalising the transcript's storage model (see below).
+- **Making a hydrated `confirm` actionable.** It renders as a chat line tagged `· confirm` (`_TAGGED_KINDS`), which reads as Red Robin asking for a decision — a *live* confirm is not a chat line at all, it is the `#confirm-bar`. But **a hydrated confirm is historical text, not an actionable confirm.** Hydration does not repopulate `ChatPane._pending` / `_pending_prompts`, so `_refresh_confirm_bar` never runs — no confirm bar, idle placeholder — and `next_operator_message` (`chat.py:315`) treats `/y` as a confirm answer only while `pending` is non-empty. A `/y` typed at a hydrated confirm therefore goes out as an `operator.question` with the text `"/y"`, which the assistant answers as an ordinary chat message (only `operator.answer` reaches `resolve_confirm`) while the milestone stays pending. The transcript cannot repair it: a stored `ChatTurn` carries no milestone id — the confirm branch at `recorder.py:87` sets no `correlation_id`, and the row has no other ref field. The real fix is its own ticket: rehydrate the bar from the `working_memory_snapshot`'s `pending_milestones`, an existing field on a frame that already arrives on connect *before* `chat_history`. Recorded in `_on_chat_history`'s docstring so the next reader finds it.
 
 ## Deliberately not in scope
 

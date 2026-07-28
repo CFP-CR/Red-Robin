@@ -2,9 +2,9 @@
 
 A plain module, deliberately NOT a ``conftest.py``: an ordinary import is visible at the
 call site and changes fixture resolution for nothing else under ``tests/integration``.
-Pytest never collects it because the filename matches neither of the default ``python_files``
-patterns (``test_*.py`` / ``*_test.py``) and this repo sets no pytest config to widen them; the
-leading underscore is a readability convention marking it as support code, not the mechanism.
+Pytest does not pick it up in a directory scan because the filename matches neither of the default
+``python_files`` patterns (``test_*.py`` / ``*_test.py``) and this repo sets no pytest config to
+widen them; the leading underscore is a readability convention, not the mechanism.
 """
 
 from __future__ import annotations

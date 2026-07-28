@@ -353,6 +353,20 @@ def _on_chat_history(app: Any, payload: dict[str, Any]) -> None:
     the TUI, so the watermark could not be advanced for it, and the next reconnect would
     duplicate everything rendered live in between.
 
+    A hydrated ``confirm`` is HISTORICAL TEXT, NOT AN ACTIONABLE CONFIRM. It renders as a chat
+    line tagged ``· confirm`` (``_TAGGED_KINDS``), which reads as Red Robin asking for a decision
+    — a live confirm is not a chat line at all, it is the ``#confirm-bar``. But this handler does
+    not repopulate ``_pending`` / ``_pending_prompts``, so ``_refresh_confirm_bar`` never runs: no
+    confirm bar, idle placeholder. Worse, ``next_operator_message`` routes ``/y`` to a confirm
+    only while ``pending`` is non-empty, so a ``/y`` typed at a hydrated confirm goes out as an
+    ``operator.question`` whose text is ``"/y"``; the assistant answers it as chat (only
+    ``operator.answer`` reaches ``resolve_confirm``) and the milestone stays pending. It is not
+    repairable from the transcript: a stored ``ChatTurn`` carries no milestone id — the confirm
+    branch in ``recorder.py`` sets no ``correlation_id`` and the row has no other ref field. The
+    intended fix, ticketed separately, is to rehydrate the bar from the
+    ``working_memory_snapshot``'s ``pending_milestones`` (an existing field, and that frame
+    already arrives on connect BEFORE this one) rather than from the transcript.
+
     Order is the daemon's (file order, oldest first) — never re-sorted. A malformed entry
     is skipped rather than losing the whole thread: rendering nine of ten turns beats none.
     """
