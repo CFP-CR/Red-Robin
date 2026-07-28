@@ -139,8 +139,19 @@ def run_init(
     # who re-runs init (default slug op-default) must not be moved silently:
     # that is the same silent switch this fix exists to kill, from the other side.
     svc = EngagementService(root)
-    if svc.current() is None:
+    active = svc.current()
+    if active is None:
         svc.use(engagement_slug)
+    elif active != engagement_slug:
+        # Declining silently would be its own small version of the same bug: the
+        # operator asked for a slug, got the directory, and would have had no way
+        # to know the daemon will still resolve the other one.
+        print(
+            f"NOTE: {active} is already the active engagement, so {engagement_slug} "
+            f"was created but NOT activated. Run `redrobin engagement use "
+            f"{engagement_slug}` to switch.",
+            file=sys.stderr,
+        )
 
     # .env (idempotent + chmod 600)
     env_file = root / ".env"

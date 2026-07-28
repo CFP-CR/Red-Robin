@@ -72,7 +72,7 @@ def test_init_enables_the_assistant(tmp_path):
     assert "REDROBIN_ASSISTANT_ENABLED=1" in (target / ".env").read_text()
 
 
-def test_init_idempotent_does_not_overwrite_existing(tmp_path):
+def test_init_idempotent_does_not_overwrite_existing(tmp_path, capsys):
     """Re-running init must not clobber existing .env or engagement.yaml."""
     target = tmp_path / "rr"
     run_init(
@@ -98,6 +98,12 @@ def test_init_idempotent_does_not_overwrite_existing(tmp_path):
     # the .env slug pin this replaced, just from the other side.
     assert EngagementService(root=target).current() == "op-a", (
         "re-running init must not switch the operator's active engagement"
+    )
+    # ...but it must say so. Creating engagements/op-b and leaving the daemon on
+    # op-a without a word is a quieter version of the same surprise.
+    err = capsys.readouterr().err
+    assert "op-b" in err and "op-a" in err, (
+        "init must tell the operator the engagement it created was not activated"
     )
 
 
