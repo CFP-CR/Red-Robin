@@ -17,6 +17,7 @@ from textual.timer import Timer
 from textual.widgets import Input, RichLog, Static
 
 from redrobin.domain.assistant import OPERATOR_QUESTION_ID_PREFIX
+from redrobin.domain.chat import VOLUNTEERED_KINDS
 from redrobin.tui.textual_ui.frames import Registry
 
 # The pane's whole palette. Every colour in this module comes from here — the same green
@@ -32,6 +33,13 @@ _RISK_COLORS = {
     "DANGER": _DANGER,
     "ESCALATE": _ACCENT,
 }  # keys = the Severity enum (advisory rendering depends on all four)
+
+# A volunteered turn (advisory / heads-up) and a confirm carry their kind in the label:
+# the speaker alone does not say whether Red Robin was answering or speaking up. A plain
+# question or answer needs no tag. This WIDENS the LLM slice's rule in
+# application/chat/history.py, which tags only VOLUNTEERED_KINDS — a confirm needs
+# distinguishing from an answer on screen in a way the model does not need in prose.
+_TAGGED_KINDS = VOLUNTEERED_KINDS | {"confirm"}
 
 _PLACEHOLDER_IDLE = "Ask the assistant…  (/y or /n to a confirm)"
 _PLACEHOLDER_CONFIRM = "▶ Confirm pending — reply /y or /n"
@@ -61,6 +69,7 @@ class ChatPane(Container):
         self._think_timer: Timer | None = None  # the 200ms delayed-reveal handle
         self._spin_timer: Timer | None = None  # the glyph animation interval
         self._spin_i = 0
+        self._hydrated = False  # chat_history is replayed on every reconnect; render it once
 
     def compose(self) -> ComposeResult:
         log = RichLog(
@@ -239,6 +248,32 @@ def format_confirm_bar(question: str) -> Text:
     return t
 
 
+def format_history_turn(turn: dict[str, Any]) -> Text:
+    """One hydrated transcript turn as a chat line (spec 2026-07-27).
+
+    Deliberately the SAME shape as the live renderers — no dimming, no separator, no
+    "earlier" marker. The thread just starts, the way a chat client resumes.
+
+    One difference from live, and it is intended: a historical advisory's ``opsec``
+    value is not coloured. ``ChatRecorder`` flattens an advisory to text, so the
+    structured ``opsec_risk`` that drives ``_RISK_COLORS`` is not on disk. Colouring it
+    would mean either re-parsing the stored text (fragile) or adding a field that only
+    post-ship rows could carry (a history where some advisories are coloured and others
+    are not, which reads as a bug).
+    """
+    label = "You" if turn.get("role") == "operator" else "Red Robin"
+    kind = str(turn.get("kind") or "")
+    t = Text()
+    t.append(label, style=f"bold {_ACCENT}")
+    if kind in _TAGGED_KINDS:
+        t.append(f" · {kind.replace('_', '-')}", style=_MUTED)
+    # A volunteered body is the multi-line action/why/opsec/conf block, so it begins on
+    # its own line exactly as the live advisory does. Dialogue is one line after the label.
+    t.append("\n" if kind in VOLUNTEERED_KINDS else "  ")
+    t.append(str(turn.get("text") or ""))
+    return t
+
+
 def format_resolution(milestone_id: str, confirmed: bool) -> Text:
     """A durable one-line trace of a resolved confirm in the chat log (OD-1). The resulting
     milestone status shows in the Working-Memory panel; this records the operator's call."""
@@ -302,6 +337,51 @@ def _on_recommendation(app: Any, payload: dict[str, Any]) -> None:
         pane.append_line(format_recommendation(payload))
 
 
+def _on_chat_history(app: Any, payload: dict[str, Any]) -> None:
+    """Hydrate the pane from the transcript the daemon sends on connect.
+
+    ONE-SHOT. ``ws_worker`` auto-reconnects (``async for ws in connect(...)``), and every
+    reconnect re-runs the endpoint from the top and re-sends this frame. The working-memory
+    frame is idempotent because it REPLACES ``app.snapshot``; this log is append-only, so
+    without the guard a ping timeout would re-append the whole thread below the live
+    conversation.
+
+    Known limitation of one-shot: turns recorded while the socket was down are not
+    rendered on reconnect. They are on disk and in the assistant's own context, and the
+    operator sees them by restarting the TUI. Rendering only turns newer than the last
+    hydrated one was considered and rejected: a live-rendered turn carries no ``ts`` in
+    the TUI, so the watermark could not be advanced for it, and the next reconnect would
+    duplicate everything rendered live in between.
+
+    A hydrated ``confirm`` is HISTORICAL TEXT, NOT AN ACTIONABLE CONFIRM. It renders as a chat
+    line tagged ``· confirm`` (``_TAGGED_KINDS``), which reads as Red Robin asking for a decision
+    — a live confirm is not a chat line at all, it is the ``#confirm-bar``. But this handler does
+    not repopulate ``_pending`` / ``_pending_prompts``, so ``_refresh_confirm_bar`` never runs: no
+    confirm bar, idle placeholder. Worse, ``next_operator_message`` routes ``/y`` to a confirm
+    only while ``pending`` is non-empty, so a ``/y`` typed at a hydrated confirm goes out as an
+    ``operator.question`` whose text is ``"/y"``; the assistant answers it as chat (only
+    ``operator.answer`` reaches ``resolve_confirm``) and the milestone stays pending. It is not
+    repairable from the transcript: a stored ``ChatTurn`` carries no milestone id — the confirm
+    branch in ``recorder.py`` sets no ``correlation_id`` and the row has no other ref field. The
+    intended fix, ticketed separately, is to rehydrate the bar from the
+    ``working_memory_snapshot``'s ``pending_milestones`` (an existing field, and that frame
+    already arrives on connect BEFORE this one) rather than from the transcript.
+
+    Order is the daemon's (file order, oldest first) — never re-sorted. A malformed entry
+    is skipped rather than losing the whole thread: rendering nine of ten turns beats none.
+    """
+    pane = _chat(app)
+    if pane is None or pane._hydrated:
+        return
+    turns = payload.get("turns")
+    if not isinstance(turns, list):
+        return
+    pane._hydrated = True
+    for turn in turns:
+        if isinstance(turn, dict):
+            pane.append_line(format_history_turn(turn))
+
+
 def _on_answer(app: Any, payload: dict[str, Any]) -> None:
     if payload.get("source") == "operator":
         return  # our own echo fanned back — don't re-render
@@ -340,12 +420,14 @@ def register_chat(registry: Registry) -> None:
     registry.register("operator.question")(_on_question)
     registry.register("advisor.recommendation")(_on_recommendation)
     registry.register("assistant.thinking")(_on_thinking)
+    registry.register("chat_history")(_on_chat_history)
 
 
 __all__ = [
     "ChatPane",
     "format_answer",
     "format_confirm_bar",
+    "format_history_turn",
     "format_operator_echo",
     "format_recommendation",
     "format_resolution",

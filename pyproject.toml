@@ -55,6 +55,21 @@ packages = ["redrobin"]
 line-length = 100
 target-version = "py311"
 
+[tool.pytest.ini_options]
+# A hung test must END the run, not wedge it. Several suites here talk to a WebSocket
+# through starlette's TestClient, whose receive blocks on a memory stream with NO timeout
+# and whose _run sleeps forever after the app returns -- so a frame that never arrives
+# hangs the whole session rather than failing a test. pytest-timeout is not a dependency,
+# so this is the built-in equivalent.
+#
+# BOTH lines are required. faulthandler_timeout alone only DUMPS tracebacks and lets the
+# run keep hanging: faulthandler_exit_on_timeout is a separate ini that defaults to false
+# (see _pytest/faulthandler.py). The budget is PER TEST, not per session -- pytest arms it
+# in pytest_runtest_protocol, once per item -- and the whole suite of 735 runs in ~62s, so
+# 300s for a single test can only mean a hang, never a slow machine.
+faulthandler_timeout = 300
+faulthandler_exit_on_timeout = true
+
 [tool.mypy]
 python_version = "3.11"
 strict = true

@@ -16,6 +16,21 @@ from redrobin.tui.textual_ui.frames import Registry
 
 logger = logging.getLogger(__name__)
 
+# Inbound frame cap for the client socket. ``websockets`` defaults ``max_size`` to 1 MiB, while
+# NEITHER of the daemon's connect frames is bounded by bytes: ``chat_history`` is bounded by ITEM
+# COUNT only, carrying up to 50 whole turns verbatim (``tui_ws._HISTORY_LINES``), one of which can
+# be an arbitrary operator paste — ``application/chat/history.py``'s ``_MAX_TURN_CHARS`` clips
+# exactly that for the LLM slice and has no counterpart on this path — and
+# ``working_memory_snapshot`` is bounded by nothing at all on this path (``_build_initial_snapshot``
+# serialises the whole repo; ``cap_wm_snapshot`` is the assistant's LLM path, not the socket). One
+# was measured at 900 KB during the #41 audit. Over the cap the library closes the connection
+# with 1009 "message too big", ``ws_loop`` catches it and reconnects with NO backoff, the daemon
+# re-sends the same frame on the new connect, and the two hot-loop while that frame NEVER renders.
+# 16 MiB matches uvicorn's own ``ws_max_size`` default, i.e. the server end of this same socket.
+# EXPLICIT rather than ``None``: an unbounded client would let a broken or hostile daemon OOM the
+# TUI. Pinned by ``test_ws_loop_caps_inbound_frames_above_the_library_default``.
+_MAX_FRAME_BYTES = 16 * 1024 * 1024
+
 
 def build_ws_url(base: str, token: str | None) -> str:
     """Append ``?token=`` — the daemon authenticates /v1/tui via query param."""
@@ -54,7 +69,7 @@ async def ws_loop(
     full = build_ws_url(url, token)
     if set_state:
         set_state("connecting")
-    async for ws in connect(full, ping_interval=20, ping_timeout=20):
+    async for ws in connect(full, ping_interval=20, ping_timeout=20, max_size=_MAX_FRAME_BYTES):
         if set_state:
             set_state("connected")
         setattr(target, "_ws_send", ws.send)  # the app sends operator messages via this
