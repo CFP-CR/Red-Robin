@@ -21,7 +21,7 @@ def test_ws_sends_initial_snapshot(app_client):
     app, client = app_client
     token = get_or_create_token()
     with client.websocket_connect(f"/v1/tui?token={token}") as ws:
-        first = ws.receive_json()
+        first = receive_json_bounded(ws)
         assert first["type"] == "working_memory_snapshot"
         assert "payload" in first
 
@@ -76,7 +76,7 @@ def test_ws_initial_snapshot_carries_all_fields(app_client):
     app, client = app_client
     token = get_or_create_token()
     with client.websocket_connect(f"/v1/tui?token={token}") as ws:
-        first = ws.receive_json()
+        first = receive_json_bounded(ws)
         payload = first["payload"]
         for key in (
             "client",

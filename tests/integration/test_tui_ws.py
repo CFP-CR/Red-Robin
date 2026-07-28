@@ -56,7 +56,7 @@ def test_ws_accepts_correct_token_sends_initial_snapshot(client, _isolated_root)
 
     token = get_or_create_token()
     with client.websocket_connect(f"/v1/tui?token={token}") as ws:
-        msg = ws.receive_json()
+        msg = receive_json_bounded(ws)
         assert msg["type"] == "working_memory_snapshot"
 
 
