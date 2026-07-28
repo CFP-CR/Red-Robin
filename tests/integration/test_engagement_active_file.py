@@ -8,27 +8,16 @@ as a fallback in start_engagement.
 
 from __future__ import annotations
 
-import os
-
 import pytest
 from fastapi.testclient import TestClient
 
 from redrobin.api.app import create_app
 from redrobin.application.engagement_service import EngagementService
 
-
-@pytest.fixture()
-def restore_environ():
-    """Undo ``load_dotenv``'s permanent ``os.environ`` writes (issue #51).
-
-    Request it FIRST so it is set up first and therefore torn down LAST — the
-    snapshot then predates anything ``monkeypatch`` does and the restore is the
-    final word.
-    """
-    snapshot = dict(os.environ)
-    yield
-    os.environ.clear()
-    os.environ.update(snapshot)
+# One test here drives the CLI's dotenv load, which writes os.environ permanently
+# (issue #51). Cheap to apply module-wide, and it keeps the .env `init` writes
+# from configuring the rest of the session.
+pytestmark = pytest.mark.usefixtures("restore_environ")
 
 
 @pytest.fixture()
@@ -81,7 +70,7 @@ def test_env_var_overrides_active_file(isolated_root, monkeypatch):
         )
 
 
-def test_engagement_use_after_init_is_not_a_no_op(restore_environ, isolated_root, monkeypatch):
+def test_engagement_use_after_init_is_not_a_no_op(isolated_root, monkeypatch):
     """The operator journey: `init` -> `engagement use <other>` -> daemon boot.
 
     This is the whole-flow version of the guard above. `init` used to write

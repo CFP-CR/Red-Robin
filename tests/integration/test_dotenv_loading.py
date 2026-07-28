@@ -9,20 +9,12 @@ import sys
 import pytest
 
 
-@pytest.fixture(autouse=True)
-def _restore_environ():
-    """Undo every ``os.environ`` mutation these tests cause.
-
-    ``load_dotenv`` writes straight into ``os.environ`` and ``monkeypatch``
-    cannot undo a key it never saw (issue #51 — the suite's known
-    order-dependence). This module exists to call ``_load_env_for_cli``, so it
-    is the biggest single producer of that leak; snapshot/restore keeps it
-    contained here. It does NOT fix #51 for the rest of the suite.
-    """
-    snapshot = dict(os.environ)
-    yield
-    os.environ.clear()
-    os.environ.update(snapshot)
+# This module exists to call ``_load_env_for_cli``, so it is the single biggest
+# producer of the permanent ``os.environ`` writes tracked by issue #51 — including
+# the fake keys that used to be the ONLY thing supplying credentials to every
+# later daemon-booting test in CI. Restore after each test; the modules that were
+# living off that leak now pin REDROBIN_ALLOW_DEGRADED themselves.
+pytestmark = pytest.mark.usefixtures("restore_environ")
 
 
 def test_dotenv_not_loaded_at_import(monkeypatch, tmp_path):

@@ -2,6 +2,12 @@
 
 import pytest
 
+# Every test here goes through `cli.main`, which loads <cwd>/.env and <root>/.env
+# into os.environ permanently (issue #51). After the first `init`, that root .env
+# exists — and carries REDROBIN_ASSISTANT_ENABLED=1 — so without this the whole
+# rest of the session inherits it.
+pytestmark = pytest.mark.usefixtures("restore_environ")
+
 
 @pytest.fixture
 def _isolated_root(tmp_path, monkeypatch):

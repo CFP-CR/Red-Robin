@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
+import pytest
+
 from redrobin.application.engagement_loader import EngagementLoader
+
+# These tests run `redrobin init` and then further CLI commands, so the second
+# command loads the .env init just wrote into os.environ — permanently, without
+# this (issue #51). That .env now carries REDROBIN_ASSISTANT_ENABLED=1, which
+# would otherwise switch the assistant on for every later test in the session.
+pytestmark = pytest.mark.usefixtures("restore_environ")
 
 
 def test_cli_new_with_scope_flags_round_trips(tmp_path, monkeypatch):
