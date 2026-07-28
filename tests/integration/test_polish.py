@@ -11,6 +11,13 @@ from fastapi.testclient import TestClient
 from redrobin.api.app import create_app
 from redrobin.infrastructure.vector_store import VectorStore
 
+# The doctor tests below go through `cli.cmd_doctor`, which calls
+# `_load_env_for_cli` — so this module loads <cwd>/.env into os.environ
+# permanently, like the other four CLI-touching modules (issue #51). Run from a
+# checkout it leaked ten keys, the developer's real ANTHROPIC_API_KEY and
+# VOYAGE_API_KEY among them, into every module collected after it.
+pytestmark = pytest.mark.usefixtures("restore_environ")
+
 
 @pytest.fixture
 def _isolated_root(tmp_path, monkeypatch):
@@ -101,6 +108,11 @@ def test_doctor_exit_code_nonzero_on_failure(monkeypatch, tmp_path):
     """
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
+    # ...and keep them deleted: cmd_doctor calls _load_env_for_cli, which reloads
+    # them from <cwd>/.env. Run from a checkout that is a developer's own file,
+    # so the keys came straight back and this passed for the ROOT_EXISTS reason
+    # rather than the missing-key reason the docstring states.
+    monkeypatch.chdir(tmp_path)
     # Point REDROBIN_ROOT at a fresh tmp so the rules-dir check is the only
     # other potential failure surface, and we control it.
     monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path / ".redrobin"))
