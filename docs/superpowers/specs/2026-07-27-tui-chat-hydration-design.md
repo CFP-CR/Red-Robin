@@ -8,7 +8,7 @@ Open the TUI mid-engagement and the Assistant Chat pane is **empty**, while Work
 
 This is a *display* gap, not a memory gap. The transcript is persisted by `ChatRecorder` and injected into the assistant's own context by `build_history_reader`, so the assistant **remembers** the conversation across a TUI restart — the operator just can't see it. `ChatPane` composes an empty `RichLog` and only appends frames that arrive after connect.
 
-The asymmetry is structural: on connect `tui_ws.py` sends exactly one replay frame, `working_memory_snapshot` (`tui_ws.py:83-86`). There is no equivalent for chat.
+The asymmetry was structural: before this change, on connect `tui_ws.py` sent exactly one replay frame, `working_memory_snapshot` (now at `tui_ws.py:83-86`). There was no equivalent for chat.
 
 ## Goal
 

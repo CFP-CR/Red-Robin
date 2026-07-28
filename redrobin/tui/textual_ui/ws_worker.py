@@ -17,10 +17,12 @@ from redrobin.tui.textual_ui.frames import Registry
 logger = logging.getLogger(__name__)
 
 # Inbound frame cap for the client socket. ``websockets`` defaults ``max_size`` to 1 MiB, while
-# the daemon's connect frames are bounded by ITEM COUNT and never by bytes: ``chat_history``
-# carries up to 50 whole turns verbatim (``tui_ws._HISTORY_LINES``), one of which can be an
-# arbitrary operator paste — ``application/chat/history.py``'s ``_MAX_TURN_CHARS`` clips exactly
-# that for the LLM slice and has no counterpart on this path — and a ``working_memory_snapshot``
+# NEITHER of the daemon's connect frames is bounded by bytes: ``chat_history`` is bounded by ITEM
+# COUNT only, carrying up to 50 whole turns verbatim (``tui_ws._HISTORY_LINES``), one of which can
+# be an arbitrary operator paste — ``application/chat/history.py``'s ``_MAX_TURN_CHARS`` clips
+# exactly that for the LLM slice and has no counterpart on this path — and
+# ``working_memory_snapshot`` is bounded by nothing at all on this path (``_build_initial_snapshot``
+# serialises the whole repo; ``cap_wm_snapshot`` is the assistant's LLM path, not the socket). One
 # was measured at 900 KB during the #41 audit. Over the cap the library closes the connection
 # with 1009 "message too big", ``ws_loop`` catches it and reconnects with NO backoff, the daemon
 # re-sends the same frame on the new connect, and the two hot-loop while that frame NEVER renders.
