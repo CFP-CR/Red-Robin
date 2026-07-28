@@ -1,3 +1,10 @@
+> **HISTORICAL — do not read this as a description of Red Robin.** This is the
+> 2026 CFP draft, written against the v1.2 design. Its technical centrepiece —
+> the two-tier verdict protocol, the 28 Aggressor `alias` hooks, synchronous
+> BLOCK/WARN gating — **was removed on 2026-07-26**. Red Robin is advisory-only:
+> the adapter captures, the core advises, nothing intercepts. For what the tool
+> actually does, see the [README](../../README.md).
+
 # Red Robin: Don't Hack For Me, Hack With Me
 ## A Red Teamer's AI Companion for Real-Time Operational Guidance
 

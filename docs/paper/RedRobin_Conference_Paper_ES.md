@@ -1,3 +1,10 @@
+> **HISTÓRICO — no leer esto como una descripción de Red Robin.** Es el borrador
+> de CFP de 2026, escrito contra el diseño v1.2. Su pieza técnica central — el
+> protocolo de veredicto de dos capas, los 28 hooks `alias` de Aggressor, el
+> bloqueo síncrono BLOCK/WARN — **se eliminó el 2026-07-26**. Red Robin es
+> solo consultivo: el adaptador captura, el núcleo aconseja, nada intercepta.
+> Para lo que la herramienta hace hoy, ver el [README](../../README.md).
+
 # Red Robin: No Hackees Por Mí, Hackea Conmigo
 ## Un Compañero de IA en Tiempo Real para Operadores de Red Team
 
