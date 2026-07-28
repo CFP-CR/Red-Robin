@@ -101,6 +101,26 @@ def test_init_idempotent_does_not_overwrite_existing(tmp_path):
     )
 
 
+def test_init_rejects_an_unsafe_slug_before_writing_anything(tmp_path):
+    """The slug names a directory; validate it before creating one.
+
+    ``EngagementService`` applies ``validate_slug`` on every other engagement
+    command, but ``init`` used to ``mkdir`` the slug unchecked, so a traversal
+    slug escaped the root entirely and left an engagement nothing could activate.
+    """
+    target = tmp_path / "rr"
+    rc = run_init(
+        root=target,
+        anthropic_key="k",
+        voyage_key="k",
+        engagement_slug="../../pwn",
+        interactive=False,
+    )
+    assert rc == 2
+    assert not target.exists(), "init must not write anything when the slug is invalid"
+    assert not (tmp_path.parent / "pwn").exists(), "the slug must not escape the root"
+
+
 def test_init_sets_strict_perms_on_dotenv(tmp_path):
     if sys.platform == "win32":
         pytest.skip("POSIX perms")
