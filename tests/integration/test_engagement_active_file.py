@@ -14,6 +14,11 @@ from fastapi.testclient import TestClient
 from redrobin.api.app import create_app
 from redrobin.application.engagement_service import EngagementService
 
+# One test here drives the CLI's dotenv load, which writes os.environ permanently
+# (issue #51). Cheap to apply module-wide, and it keeps the .env `init` writes
+# from configuring the rest of the session.
+pytestmark = pytest.mark.usefixtures("restore_environ")
+
 
 @pytest.fixture()
 def isolated_root(tmp_path, monkeypatch):
@@ -62,6 +67,48 @@ def test_env_var_overrides_active_file(isolated_root, monkeypatch):
         assert app.state.engagement is not None
         assert app.state.engagement.slug == "env-pick", (
             "env var must override the persistent active-engagement file"
+        )
+
+
+def test_engagement_use_after_init_is_not_a_no_op(isolated_root, monkeypatch):
+    """The operator journey: `init` -> `engagement use <other>` -> daemon boot.
+
+    This is the whole-flow version of the guard above. `init` used to write
+    ``REDROBIN_ENGAGEMENT_SLUG`` into the .env it generates; the CLI loads that
+    .env at command entry, so the env var was set for every later command and
+    it OUTRANKS the ``.active_engagement`` marker — `redrobin engagement use`
+    wrote the marker and was then silently ignored, forever, for anyone who ran
+    the documented setup.
+    """
+    from redrobin.cli import _load_env_for_cli
+    from redrobin.cli_helpers.init_cmd import run_init
+
+    assert (
+        run_init(
+            root=isolated_root,
+            anthropic_key="k1",
+            voyage_key="k2",
+            engagement_slug="op-init",
+            interactive=False,
+        )
+        == 0
+    )
+
+    svc = EngagementService(root=isolated_root)
+    svc.new("op-second")
+    svc.use("op-second")
+
+    # What every `redrobin <cmd>` does at entry: load the .env init just wrote.
+    # Keep the assistant out of it — this test is about engagement resolution,
+    # and the generated .env now switches the assistant on.
+    monkeypatch.setenv("REDROBIN_ASSISTANT_ENABLED", "0")
+    _load_env_for_cli()
+
+    app = create_app()
+    with TestClient(app):
+        assert app.state.engagement is not None
+        assert app.state.engagement.slug == "op-second", (
+            "`engagement use` must win over whatever engagement `init` created"
         )
 
 

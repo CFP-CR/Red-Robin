@@ -30,6 +30,10 @@ def _isolated_root(tmp_path, monkeypatch):
     # what sits on app.state, so the boot state must not depend on suite order or on a
     # local .env.
     monkeypatch.setenv("REDROBIN_ASSISTANT_ENABLED", "0")
+    # Same reasoning for the boot gate: exits(2) without API keys, and these
+    # tests own the socket, not the LLM surface. Pin it rather than inheriting
+    # keys some earlier test leaked into os.environ (issue #51).
+    monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
     yield root
 
 

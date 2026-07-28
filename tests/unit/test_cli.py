@@ -2,6 +2,12 @@
 
 import pytest
 
+# Every test here goes through `cli.main`, which loads <cwd>/.env and <root>/.env
+# into os.environ permanently (issue #51). After the first `init`, that root .env
+# exists — and carries REDROBIN_ASSISTANT_ENABLED=1 — so without this the whole
+# rest of the session inherits it.
+pytestmark = pytest.mark.usefixtures("restore_environ")
+
 
 @pytest.fixture
 def _isolated_root(tmp_path, monkeypatch):
@@ -29,9 +35,16 @@ def test_cli_init_creates_layout_and_token(_isolated_root):
     assert (_isolated_root / "transport.token").exists()
 
 
-def test_cli_doctor_does_not_crash(_isolated_root, monkeypatch):
+def test_cli_doctor_does_not_crash(_isolated_root, monkeypatch, tmp_path):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
+    # ...and keep them deleted. `main` calls _load_env_for_cli, which loads
+    # <cwd>/.env - from the checkout that is a developer's own file, so the keys
+    # came straight back and doctor made real, billed POSTs to api.anthropic.com
+    # and api.voyageai.com. rc was then 1 for a connectivity reason, not the
+    # missing-key reason this test documents. An empty CWD makes it true again
+    # (with no keys, run_doctor skips the probes entirely).
+    monkeypatch.chdir(tmp_path)
     from redrobin.cli import main
 
     rc = main(["doctor"])

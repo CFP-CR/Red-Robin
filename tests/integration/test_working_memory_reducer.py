@@ -164,6 +164,15 @@ async def test_reducer_republishes_snapshot_after_mutation(tmp_path):
 
 @pytest.mark.asyncio
 async def test_lifespan_starts_reducer_task(tmp_path, monkeypatch):
+    # REDROBIN_ROOT first, and it is not optional. REDROBIN_WORKING_MEMORY_PATH
+    # below looks like enough isolation but is NOT: start_working_memory ignores
+    # that override whenever an engagement resolves, deriving the path from the
+    # engagement directory instead. With no root pinned, the engagement resolved
+    # was whatever the developer's ~/.redrobin/.active_engagement named — so this
+    # test merged its fake CORP\alice credential into a live engagement's
+    # working memory. Pinning the root also makes the degraded branch (which is
+    # what honours the override) deterministic instead of machine-dependent.
+    monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path))
     monkeypatch.setenv("REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json"))
     monkeypatch.setenv("REDROBIN_ENGAGEMENT_ID", "eng-test-001")
     monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
