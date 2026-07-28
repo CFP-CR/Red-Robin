@@ -60,6 +60,10 @@ from redrobin.infrastructure.transport.bearer import get_or_create_token  # noqa
 
 @pytest.fixture()
 def app_client(tmp_path, monkeypatch):
+    # Boot validation exits(2) without API keys, and these tests own the receive
+    # loop, not the LLM surface. Opt into degraded explicitly rather than
+    # depending on keys an earlier test leaked into os.environ (issue #51).
+    monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
     app = create_app()
     with TestClient(app) as client:
         yield app, client

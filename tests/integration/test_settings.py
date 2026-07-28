@@ -86,6 +86,10 @@ def test_settings_explicit_path_overrides_root_derivation(monkeypatch, tmp_path)
 @pytest.mark.asyncio
 async def test_app_state_has_settings(monkeypatch, tmp_path):
     monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path))
+    # Boot validation exits(2) without API keys. This test asserts on Settings +
+    # app.state, not on the LLM surface, so opt into degraded explicitly instead
+    # of depending on keys an earlier test leaked into os.environ (issue #51).
+    monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
     from redrobin.api.app import create_app
     from redrobin.infrastructure.config import Settings
 

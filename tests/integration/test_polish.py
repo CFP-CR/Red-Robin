@@ -16,6 +16,10 @@ from redrobin.infrastructure.vector_store import VectorStore
 def _isolated_root(tmp_path, monkeypatch):
     """Same isolation pattern as test_http_auth — points REDROBIN_ROOT at tmp."""
     monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path / ".redrobin"))
+    # Boot validation exits(2) without API keys; the heartbeat test boots the
+    # daemon and asserts nothing about the LLM surface. Opt in explicitly rather
+    # than depending on keys leaked by an earlier test (issue #51).
+    monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
     (tmp_path / ".redrobin").mkdir(parents=True, exist_ok=True)
     yield tmp_path / ".redrobin"
 
