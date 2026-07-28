@@ -6,7 +6,9 @@ import io
 import sys
 
 import pytest
+from dotenv import dotenv_values
 
+from redrobin.application.engagement_service import EngagementService
 from redrobin.cli_helpers.init_cmd import run_init
 
 
@@ -29,7 +31,30 @@ def test_init_creates_structure(tmp_path):
     env = (tmp_path / "rr" / ".env").read_text()
     assert "ANTHROPIC_API_KEY=k1" in env
     assert "VOYAGE_API_KEY=k2" in env
-    assert "REDROBIN_ENGAGEMENT_SLUG=op-first" in env
+
+
+def test_init_activates_the_engagement_it_creates_without_pinning_the_env_var(tmp_path):
+    """``init`` must not turn ``engagement use`` into a silent no-op.
+
+    ``REDROBIN_ENGAGEMENT_SLUG`` sits ABOVE the ``.active_engagement`` marker in
+    the daemon's resolution order (see ``start_engagement``), so an ``init``
+    that pinned the slug in ``.env`` meant every later ``redrobin engagement
+    use`` wrote the marker and silently lost. The env var keeps its documented
+    role as the explicit CI/test override; ``init`` uses the marker like every
+    other operator command does.
+    """
+    target = tmp_path / "rr"
+    run_init(
+        root=target,
+        anthropic_key="k1",
+        voyage_key="k2",
+        engagement_slug="op-first",
+        interactive=False,
+    )
+    # dotenv_values parses the file the way the CLI loads it, so the assertion
+    # is about what the .env DEFINES, not about the comment that explains why.
+    assert "REDROBIN_ENGAGEMENT_SLUG" not in dotenv_values(target / ".env")
+    assert EngagementService(root=target).current() == "op-first"
 
 
 def test_init_enables_the_assistant(tmp_path):

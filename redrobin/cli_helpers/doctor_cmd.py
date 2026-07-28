@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 
+from redrobin.application.engagement_service import EngagementService
 from redrobin.cli_helpers.doctor_probes import (
     probe_anthropic,
     probe_voyage,
@@ -29,7 +30,12 @@ def run_doctor(*, settings: Settings, quick: bool) -> int:
     print("[*] Red Robin doctor (preflight check)")
     print("Configuration:")
     print(f"  ROOT:               {settings.root}")
-    print(f"  ENGAGEMENT:         {settings.engagement_slug or '(none)'}")
+    # Same precedence the daemon uses (see api/lifespan_helpers.start_engagement):
+    # the explicit env override first, then the .active_engagement marker that
+    # `redrobin engagement use` writes. Reading only the env var made doctor
+    # report "(none)" for every operator who had simply never exported it.
+    engagement = settings.engagement_slug or EngagementService(settings.root).current()
+    print(f"  ENGAGEMENT:         {engagement or '(none)'}")
 
     # ANTHROPIC_API_KEY
     if settings.anthropic_api_key:

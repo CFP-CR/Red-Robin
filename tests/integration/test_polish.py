@@ -109,6 +109,37 @@ def test_doctor_exit_code_nonzero_on_failure(monkeypatch, tmp_path):
     assert rc != 0
 
 
+def test_doctor_reports_the_engagement_the_daemon_would_resolve(monkeypatch, tmp_path, capsys):
+    """doctor's ENGAGEMENT line must mirror ``start_engagement``'s precedence.
+
+    ``init`` no longer pins ``REDROBIN_ENGAGEMENT_SLUG`` (it outranked the
+    ``.active_engagement`` marker and made ``engagement use`` a no-op), and
+    doctor only ever read that env var — so without this fallback it would now
+    report ``(none)`` on every correctly-set-up install.
+    """
+    from redrobin.application.engagement_service import EngagementService
+    from redrobin.cli_helpers.doctor_cmd import run_doctor
+    from redrobin.infrastructure.config import Settings
+
+    root = tmp_path / ".redrobin"
+    monkeypatch.setenv("REDROBIN_ROOT", str(root))
+    monkeypatch.delenv("REDROBIN_ENGAGEMENT_SLUG", raising=False)
+    svc = EngagementService(root=root)
+    svc.new("op-marker")
+    svc.use("op-marker")
+
+    run_doctor(settings=Settings(), quick=True)
+    assert "op-marker" in capsys.readouterr().out
+
+    # ...and the env var still wins when it IS set (its documented role).
+    svc.new("op-override")
+    monkeypatch.setenv("REDROBIN_ENGAGEMENT_SLUG", "op-override")
+    run_doctor(settings=Settings(), quick=True)
+    out = capsys.readouterr().out
+    assert "op-override" in out
+    assert "op-marker" not in out
+
+
 def test_doctor_exit_code_zero_when_all_pass(monkeypatch, tmp_path):
     """Sanity: all checks green → rc == 0 so a healthy daemon doesn't flag.
 
