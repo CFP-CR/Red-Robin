@@ -54,9 +54,11 @@ somewhere else.
 
 - **Sessions** gains `WS-FINANCE-04.acme.local` / `acme\jdoe`. This leg is
   deterministic — no LLM involved.
-- `engagements/<slug>/events.jsonl` grows by one line per event. Nine lines for
-  this scenario, including the adapter connect/disconnect frames.
-- **Working Memory** gains a *finding* once the enricher has run (a few seconds):
+- `engagements/<slug>/events.jsonl` gains **seven lines** on a fresh engagement,
+  one per wire event. The adapter's connect and disconnect frames are not stored.
+- **Working Memory** gains a *finding* a few seconds later, once the enricher has
+  called out and back (about two seconds in practice — do not stop the daemon the
+  instant the replay finishes or you will race it):
 
   ```
   findings: [{"kind": "domain_admin_membership",
