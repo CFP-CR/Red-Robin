@@ -36,16 +36,42 @@ from dotenv import load_dotenv
 
 
 def _load_env_for_cli() -> None:
-    """Load .env (if present) from CWD only with safe precedence.
+    """Load the CWD .env and the root .env, with safe precedence.
 
-    SECURITY: Pin to Path.cwd() / ".env" — python-dotenv's default behavior
+    Precedence, highest to lowest:
+
+      1. explicit shell env vars (``export FOO=bar``)
+      2. ``<cwd>/.env``
+      3. ``<root>/.env`` — the file ``redrobin init`` writes
+
+    ``override=False`` on both loads is what produces it, provided they run in
+    that order: the first writer of a key wins, and neither ever clobbers the
+    shell.
+
+    Loading the root .env is what makes the documented first-run flow work.
+    ``redrobin init`` writes its .env into the root it creates (``~/.redrobin``
+    by default), so a CWD-only load left every later command run from the
+    checkout reporting ``ANTHROPIC_API_KEY: MISSING`` / ``ENGAGEMENT: (none)``
+    while silently operating on the DEFAULT root.
+
+    The root is resolved only AFTER the CWD load because ``REDROBIN_ROOT`` may
+    itself be declared in ``<cwd>/.env``; with none set anywhere it falls back
+    to the same default the rest of the code uses (``Settings.root``, via
+    ``redrobin_root()``).
+
+    SECURITY: both paths are pinned exactly — python-dotenv's default behavior
     walks PARENT directories looking for .env, which can silently pick up an
     operator's home-directory .env when run from a customer subdirectory
-    (cross-engagement secret leak). Always anchor to the current working dir.
-
-    Precedence: explicit env vars (export FOO=bar) WIN over .env values.
+    (cross-engagement secret leak). ``<root>/.env`` is not a walk: it is the
+    operator's own root, the file the tool itself wrote.
     """
     load_dotenv(dotenv_path=Path.cwd() / ".env", override=False)
+    # Deferred import (matches every cmd_* below): keeps `redrobin --help` off
+    # the Settings/pydantic import path. filesystem.redrobin_root() resolves
+    # Settings lazily, so it sees whatever the CWD load just put in os.environ.
+    from redrobin.infrastructure.filesystem import redrobin_root
+
+    load_dotenv(dotenv_path=redrobin_root().expanduser() / ".env", override=False)
 
 
 def cmd_init(args: argparse.Namespace) -> int:
