@@ -11,7 +11,13 @@ from tests.integration._ws_helpers import receive_json_bounded
 
 
 @pytest.fixture()
-def app_client(monkeypatch):
+def app_client(tmp_path, monkeypatch):
+    # ISOLATE THE ROOT FIRST. This fixture enters the lifespan, which writes
+    # working_memory.json + episodic.db under Settings().root — with no
+    # REDROBIN_ROOT that is the operator's real ~/.redrobin, and since
+    # start_engagement falls back to the .active_engagement marker, the write
+    # lands in whichever engagement they are actually running.
+    monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path))
     # Boot validation exits(2) without API keys, and these tests own the socket,
     # not the LLM surface. Opt into degraded explicitly rather than depending on
     # keys an earlier test leaked into os.environ (issue #51) — in CI, where no
