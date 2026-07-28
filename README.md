@@ -93,9 +93,7 @@ Beacon console. Everything the assistant has to say lands in the TUI.
 - [Contributing](CONTRIBUTING.md) — architecture rules, commit conventions, PR flow.
 - [Testing](TESTING.md) — the CI gates and the live-Beacon acceptance smokes.
 - [Security model](SECURITY.md)
-- [Architecture design spec](docs/architecture-design.md) — the v1.2 design
-  record. Historical: it predates the removal of the pre-flight gate and
-  describes behaviour Red Robin no longer has.
+- [Architecture](docs/architecture-design.md) — how the system is shaped, and why.
 
 ## Help and maintainers
 

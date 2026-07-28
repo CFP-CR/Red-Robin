@@ -32,7 +32,8 @@ sole C2 boundary.
 
 ## Layout & pointers
 
-- Architecture spec: `docs/architecture-design.md` (v1.2 design; some dates historical).
+- Architecture: `docs/architecture-design.md` — how the system is shaped and why (explanation,
+  not reference). The v1.2 design spec it replaced is in git history.
 - Canonical wire API (event types, routes, enums, field names): `.claude/rules/wire-protocol.md`.
 - Deeper dev walkthrough: `docs/developer-onboarding.md`.
 - **`.claude/rules/`** = Claude Code path-scoped instructions (tooling). There is no product `rules/`

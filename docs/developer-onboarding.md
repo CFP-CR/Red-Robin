@@ -26,9 +26,9 @@ Red-Robin/
 
 Architecture rules and the layering contracts CI enforces are in
 [CONTRIBUTING.md](../CONTRIBUTING.md). The canonical wire API — event types,
-routes, enums, field names — is `.claude/rules/wire-protocol.md`. The v1.2 design
-spec is `architecture-design.md`, kept as a historical record: it predates the
-removal of the pre-flight gate and describes behaviour that no longer exists.
+routes, enums, field names — is `.claude/rules/wire-protocol.md`. For why the
+system is shaped this way, read [architecture-design.md](architecture-design.md)
+first.
 
 ## Run the tests
 
