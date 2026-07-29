@@ -226,6 +226,10 @@ daemon stopped (pid=42940)
 ## Next
 
 - **Attach Cobalt Strike:** [adapters/cobaltstrike/README.md](../adapters/cobaltstrike/README.md).
+- **Another C2 (Sliver, Havoc, ...):** _planned, not built yet._ The daemon is
+  C2-agnostic and speaks only the wire protocol, so a new C2 is a new adapter
+  under `adapters/<name>/` and nothing on this page changes. See
+  [Adding an adapter](../CONTRIBUTING.md#adding-an-adapter).
 - **Verify the capture path without a Beacon:** [smoke-test.md](smoke-test.md).
 - **Feed the knowledge base:** [kb-cli.md](kb-cli.md).
 
