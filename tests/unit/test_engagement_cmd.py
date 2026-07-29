@@ -28,7 +28,11 @@ def test_run_new_warns_when_no_scope(tmp_path, capsys, monkeypatch):
     assert rc == 0
     err = capsys.readouterr().err
     assert "scope" in err.lower()
-    assert "BLOCKED" in err
+    # The warning must describe what an empty scope actually costs -- the assistant
+    # advising with no target boundary -- and must NOT claim anything is blocked.
+    # Red Robin is advisory-only since the pre-flight gate was removed.
+    assert "advisory-only" in err
+    assert "BLOCKED" not in err
 
 
 def test_run_new_no_warn_when_scoped(tmp_path, capsys, monkeypatch):

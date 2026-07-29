@@ -1,24 +1,24 @@
 # Operator setup
 
-First-time setup walkthrough. Clone, init, daemon up, TUI connected, smoke
-test — roughly 10 minutes if you have your API keys handy.
+First run, start to finish: a daemon capturing, a TUI connected, and an
+assistant that answers. About ten minutes with your API keys to hand.
 
-## Prereqs
+This is the learning path. Once you know it, [configuration.md](configuration.md)
+is the reference for everything you can tune.
 
-- **Python 3.11+** (3.12 recommended; the test matrix runs against 3.11 + 3.12).
-- **`uv`** — the project uses `uv sync` for dependency install.
-  Install via [astral.sh/uv](https://docs.astral.sh/uv/getting-started/installation/).
-- **Anthropic API key** (`ANTHROPIC_API_KEY`) — the assistant, the enricher and
-  the summariser all need it. You can still start the daemon with
-  `--allow-degraded` for a capture-only setup (events are still received,
-  persisted and reduced into working memory; nothing talks back).
-- **Voyage AI API key** (`VOYAGE_API_KEY`) — KB retrieval returns empty without
-  it.
-- **Cobalt Strike license** — optional. Only required if you intend to load
-  the CS adapter; the daemon runs fine without any adapter for protocol
-  testing.
+## Before you start
 
-## 1. Clone and install
+- **Python 3.11+** and **[`uv`](https://docs.astral.sh/uv/getting-started/installation/)**.
+- An **Anthropic API key**. Without it the assistant, the enricher and the
+  summariser are all off.
+- A **Voyage API key**. Without it knowledge-base retrieval returns nothing.
+- Cobalt Strike is **not** required to complete this walkthrough.
+
+Run every command from the repo checkout. `uv run` finds the project from there,
+and the CLI loads `<root>/.env` on top of `<cwd>/.env`, so you never have to `cd`
+into `~/.redrobin`.
+
+## 1. Install
 
 ```bash
 git clone https://github.com/CFP-CR/Red-Robin.git
@@ -26,51 +26,39 @@ cd Red-Robin
 uv sync --all-extras
 ```
 
-`uv sync` materializes `.venv/` and installs the project plus dev extras
-(pytest, ruff, mypy, lint-imports). The `redrobin` CLI becomes available
-under `uv run redrobin ...`.
+## 2. Initialise
 
-## 2. `redrobin init`
-
-Interactive (recommended on Windows Terminal or PowerShell, any POSIX shell):
+Name the engagement now — `init` creates and activates it, and getting it right
+here saves a daemon restart later.
 
 ```bash
-uv run redrobin init
+uv run redrobin init --engagement-slug acme-q2-2026
 ```
 
-You will be prompted for:
+It prompts for both API keys with hidden input, then writes:
 
-- `ANTHROPIC_API_KEY` (hidden input via `getpass`).
-- `VOYAGE_API_KEY` (hidden input).
-- Engagement slug (defaults to `op-default`).
+| Path | What it is |
+| --- | --- |
+| `~/.redrobin/.env` | your keys and daemon settings (chmod 600 on POSIX) |
+| `~/.redrobin/engagements/acme-q2-2026/engagement.yaml` | placeholder scope, yours to edit |
+| `~/.redrobin/.active_engagement` | marks that engagement active |
+| `~/.redrobin/transport.token` | bearer token for the TUI and the `.cna` |
 
-Non-interactive (CI, Git Bash, `< file` redirect):
+`init` is idempotent: re-running never overwrites an existing `.env`,
+`engagement.yaml`, or active engagement.
+
+**On Git Bash / MSYS2, use the non-interactive form.** Python's `getpass` cannot
+guarantee hidden input there, so `init` warns and may hang on the prompt:
 
 ```bash
 uv run redrobin init \
   --non-interactive \
   --anthropic-key "sk-ant-..." \
   --voyage-key "pa-..." \
-  --engagement-slug op-smoke
+  --engagement-slug acme-q2-2026
 ```
 
-`init` is idempotent — re-running never clobbers your existing `.env` or
-engagement YAML. What it creates:
-
-- `~/.redrobin/.env` — pinned env config (chmod 600 on POSIX).
-- `~/.redrobin/engagements/<slug>/engagement.yaml` — placeholder scope.
-- `~/.redrobin/transport.token` — the bearer token the TUI and adapters
-  authenticate with. Delete it and the next process that needs it
-  (`daemon start`, `redrobin tui`) mints a fresh one.
-
-See `docs/secrets-handling.md` for caveats on Git Bash, Windows ACLs, and
-the dotenv CWD-pin behavior. See `docs/operator-cli-conventions.md` for the
-interactive vs non-interactive pattern.
-
-## 3. `redrobin doctor`
-
-Full preflight — env vars, root layout, and real network probes against
-Anthropic and Voyage:
+## 3. Check the setup
 
 ```bash
 uv run redrobin doctor
@@ -80,346 +68,188 @@ uv run redrobin doctor
 [*] Red Robin doctor (preflight check)
 Configuration:
   ROOT:               /home/operator/.redrobin
-  ENGAGEMENT:         op-smoke
+  ENGAGEMENT:         acme-q2-2026
   ANTHROPIC_API_KEY:  set
   VOYAGE_API_KEY:     set
   ROOT_EXISTS:        yes (/home/operator/.redrobin)
 
 Connectivity:
-  [OK ] anthropic                         310ms
-  [OK ] voyage                            180ms
+  [OK ] anthropic                        1510ms
+  [OK ] voyage                            768ms
 [+] Doctor finished: OK
 ```
 
-Quick preflight — env presence only, no network calls (useful in CI):
+Exit code 0 is a pass. **`set` only means the variable is populated** — the
+`Connectivity` block is what proves the key works. An expired or revoked key
+still reads `set` and fails below it:
 
-```bash
-uv run redrobin doctor --quick
+```
+Connectivity:
+  [FAIL] anthropic                         789ms  HTTP 401
+  [OK ] voyage                            763ms
+[+] Doctor finished: DEGRADED (command capture still works)
 ```
 
-Exit code 0 means OK. Exit code 1 means DEGRADED — capture and working
-memory still work, but the assistant may be disabled or KB retrieval may
-come back empty. The output names each missing piece so you know what to
-fix.
+That footer is softer than the situation: `DEGRADED` and exit code 1 mean the
+assistant, enricher, summariser and KB retrieval are all off. Only capture and
+working-memory persistence survive. Fix the key in `~/.redrobin/.env` and re-run.
 
-## 4. Engagement YAML
+`uv run redrobin doctor --quick` skips the network probes — fine for CI, useless
+for catching a dead key.
 
-`init` drops a placeholder. Edit it for your engagement:
+## 4. Describe the engagement
+
+The daemon reads this file once at startup, and the assistant reasons from it.
+An engagement with no scope and no summary produces generic advice.
 
 ```bash
-$EDITOR ~/.redrobin/engagements/op-smoke/engagement.yaml
+$EDITOR ~/.redrobin/engagements/acme-q2-2026/engagement.yaml
 ```
-
-Minimal shape:
 
 ```yaml
-slug: op-smoke
-name: op-smoke
+slug: acme-q2-2026
+name: Acme Q2 2026 internal
+client: Acme Corp
+
 in_scope:
-  - corp.local
+  - corp.acme.local
   - 10.10.0.0/16
 out_of_scope:
   - bigcorp.com
   - 10.99.0.0/16
+
 summary: |
-  Internal red team against ACME Corp. EDR is SentinelOne; AV is Defender.
-  Working hours only; no destructive actions. Prior tradecraft constraints:
-  no Mimikatz binary on disk, no LSASS dumping by name.
+  Internal red team. EDR is CrowdStrike Falcon on servers, Defender on
+  workstations. Working hours only, no destructive actions. No Mimikatz
+  binary on disk and no LSASS dumping by name.
+
+rules_of_engagement:
+  - No destructive actions or DoS
+  - Working hours only (08:00-18:00 CST)
+  - Notify the client POC before any domain-wide change
+
+objectives:
+  - id: obj_1
+    goal: Compromise the domain controller
+    priority: high
+  - id: obj_2
+    goal: Access the finance fileshare
+    priority: medium
 ```
 
-Scope rules: `in_scope` and `out_of_scope` accept hostnames, suffix
-patterns, and CIDRs. `out_of_scope` wins on conflict. Scope is **context,
-not enforcement** — Red Robin projects it into working memory so the
-assistant can tell you when you look like you're drifting out of bounds;
-it cannot stop the command. `summary` is injected as a cached system block
-into the assistant's prompt, so anything you put there shapes its
-reasoning.
+Every field is optional and every field is used. See
+[configuration.md](configuration.md#engagementyaml) for what each one does.
 
-To create additional engagements:
+**Scope is context, not enforcement.** Red Robin projects it into working memory
+so the assistant can tell you when you look like you are drifting out of bounds.
+It cannot stop a command.
+
+## 5. Start the daemon
 
 ```bash
-uv run redrobin engagement new acme-q2-2026 --client "Acme Corp"
-uv run redrobin engagement use acme-q2-2026
+uv run redrobin daemon start
 ```
 
-### Engagement isolation and persistence layout
+This shell blocks. The banner goes to stderr:
 
-After `redrobin engagement use <slug>`, the daemon stores per-engagement
-state under `~/.redrobin/engagements/<slug>/`:
+```
+======================================================================
+  Red Robin v0.1.0
+======================================================================
+  Listening:  http://127.0.0.1:7777
+  Root:       /home/operator/.redrobin
+  Engagement: Acme Q2 2026 internal
+  Anthropic:  set
+  Voyage:     set
+  L5 window:  25 (every 30.0s)
+======================================================================
+```
 
-- `engagement.yaml` — scope, objectives, kill-chain status (operator-edited)
-- `working_memory.json` — live host/credential/finding/session facts
-- `events.jsonl` — the raw captured wire events, append-only
-- `episodic.db` — one row per command the operator ran (sourced from
-  `beacon.command_input`)
+Check `Engagement` names the one you meant and neither key says
+`MISSING (degraded)`. To run capture-only with no keys at all, add
+`--allow-degraded`.
 
-Each engagement is isolated: switching engagements never mixes hosts,
-credentials, or command history between them. The daemon resolves the
-active engagement at startup with this precedence:
+## 6. Connect the TUI
 
-1. `REDROBIN_ENGAGEMENT_SLUG` env var (explicit override, primarily for
-   CI/tests)
-2. `~/.redrobin/.active_engagement` (written by `redrobin engagement use`)
-3. None — degraded mode
-
-**Degraded mode** (no engagement active): the daemon writes to root paths
-`~/.redrobin/{working_memory.json, episodic.db}` and tags all episodes
-with `engagement_id="eng-default"`. The daemon banner emits a clear
-warning when this happens — state won't be persisted per-engagement.
-This mode primarily exists for tests and dev scripts; production operators
-should always activate an engagement first.
-
-**Cross-engagement state** (shared, NOT per-engagement):
-
-- `~/.redrobin/longterm.db` — long-term lessons, written when the assistant
-  captures one (there is no automatic promoter)
-- `~/.redrobin/context_summaries.db` — L5 sliding-window summaries
-- `~/.redrobin/shared/` — anything explicitly meant to span engagements
-
-The corresponding env vars (`REDROBIN_LONGTERM_PATH`,
-`REDROBIN_SUMMARY_PATH`) are still honored — those repos are
-cross-engagement by design (long-term tradecraft + context spans
-engagements).
-
-**Env-var caveat:** when an engagement is active, the daemon ignores
-`REDROBIN_WORKING_MEMORY_PATH` and `REDROBIN_EPISODIC_PATH`. Paths are
-derived from the engagement directory unconditionally. Setting those
-env vars only takes effect in degraded mode.
-
-**Historical data (pre-2026-05-24):** episodic rows accumulated before
-the per-engagement isolation change live at `~/.redrobin/episodic.db`
-tagged `engagement_id="eng-default"`. They are not auto-migrated to
-per-engagement DBs. To query historical data:
+In a second terminal, **from the checkout, with `--no-sync`**:
 
 ```bash
-sqlite3 ~/.redrobin/episodic.db "SELECT * FROM episodes WHERE engagement_id='eng-default' ORDER BY id DESC LIMIT 20"
+uv run --no-sync redrobin tui
 ```
 
-New engagements created after this change get their own clean DB at
-`~/.redrobin/engagements/<slug>/episodic.db`.
-
-## 5. Cobalt Strike adapter
-
-The **`.cna`** is the whole adapter. Loaded in the CS Client, it observes what
-you type and what comes back and POSTs it to the daemon. It needs no YAML and
-no configuration beyond the daemon URL and bearer token — see "Cobalt Strike
-Client Java requirement" below for loading it.
-
-There is nothing to configure on the daemon side. Red Robin never connects out
-to the team server: it has no REST client, no credentials, and no dispatch
-path. The adapter captures, the core advises. Earlier versions shipped a
-`cs-main.yaml` REST client that the pre-flight gate used to dispatch PASS
-verdicts to the beacon console; removing the gate left it uncalled, and it was
-deleted in v0.1.x as it contradicted the advisory-only design.
-
-### Cobalt Strike Client Java requirement
-
-Red Robin's Aggressor script (`redrobin.cna`) requires **Java 11+** on the CS
-Client side. CS 4.12 bundles OpenJDK 17 in its standard launcher per
-[Fortra Java dependency docs](https://www.cobaltstrike.com/help-java-dependency),
-so operators on stock CS launches are automatically on a supported JVM.
-
-**No JVM flags required.** All HTTP work happens inside a Java helper JAR
-(`adapters/cobaltstrike/jars/redrobin-aggressor-http-1.0.2.jar`) loaded by
-the .cna via `URLClassLoader`. Sleep reflection targets only our public
-`com.redrobin.aggressor.RedRobinHttp` class — never `jdk.internal.*` or
-`sun.*` — so JVM access checks pass on stock launches.
-
-**Launch CS Client via the official launcher** (no manual `java -jar`):
+The `--no-sync` is not optional while the daemon is running. Plain `uv run`
+re-syncs the environment first, and on Windows it cannot replace the running
+`redrobin.exe`:
 
 ```
-cobaltstrike.exe              # Windows
-./cobaltstrike-client         # Linux/Mac
+error: failed to remove file `...\.venv\Scripts\redrobin.exe`:
+The process cannot access the file because it is being used by another process. (os error 32)
 ```
 
-**JAR co-location:** the .cna expects `redrobin-aggressor-http-1.0.2.jar`
-in a sibling `jars/` directory. If you cloned the Red-Robin repo, the
-layout is already correct:
+That is `uv` behaviour, not Red Robin's. `--no-sync` skips the re-sync.
+
+Three panes: **Sessions** (live Beacons), **Assistant Chat** (where every piece
+of advice appears), **Working Memory** (hosts, credentials, findings,
+objectives). `c` focuses the chat, `i` opens the inspector, `?` shows the keymap,
+`q` quits. The token is read from `~/.redrobin/transport.token` automatically.
+
+## 7. Confirm the assistant answers
+
+Press `c` and ask it something about the engagement — *"what is the scope of this
+engagement and what EDR am I up against?"* You should get an answer built from
+the `engagement.yaml` you just wrote:
 
 ```
-adapters/cobaltstrike/
-├── redrobin.cna
-└── jars/
-    ├── redrobin-aggressor-http-1.0.2.jar
-    └── json-20240303.jar
+**In-scope:** corp.acme.local domain and 10.10.0.0/16 network
+**Out-of-scope:** bigcorp.com domain and 10.99.0.0/16 network - avoid entirely.
+...
+**EDR / defenses observed:** None logged yet.
 ```
 
-If you copy the .cna elsewhere, also copy the `jars/` directory next to
-it (relative path `./jars/redrobin-aggressor-http-1.0.2.jar`).
+That round trip proves the whole chain: TUI socket, engagement load, assistant,
+and your Anthropic key.
 
-**Troubleshooting:**
+**Unprompted silence is correct.** The assistant is deliberately selective and
+speaks on its own only when it judges something material. A direct question is
+the deterministic check.
 
-- If the .cna fails to load with `Java ... detected. Red Robin requires
-  Java 11+` in the Script Console, your CS Client JVM is older than 11.
-  Upgrade to a modern JDK (Temurin 17 or 21).
-- If the .cna fails with `ClassNotFoundException: com.redrobin.aggressor.RedRobinHttp`,
-  the JAR is missing or misplaced. Verify the sibling-jars layout above.
-
-**Historical note:** Earlier Red Robin versions documented an
-`--add-opens` JVM flag workaround. That is no longer needed as of the
-2026-05-17 JAR helper refactor — see
-`docs/superpowers/specs/2026-05-17-cna-jar-helper-design.md` for the
-architecture rationale.
-
-### What the `.cna` does (and does not) do
-
-The `.cna` is a **capture hook only**. It installs no `alias` overrides, so
-your beacon console behaves exactly like stock Cobalt Strike — nothing is
-intercepted, delayed, blocked or rewritten, and Red Robin prints no verdict
-line into the beacon console.
-
-Three capture surfaces, all passthrough-safe:
-
-| Aggressor hook       | Wire event               |
-| -------------------- | ------------------------ |
-| `on beacon_input`    | `beacon.command_input`   |
-| `set BEACON_OUTPUT`  | `beacon.command_output` (always returns `$2` unchanged) |
-| `on beacon_initial`  | `beacon.initial` (plus a load-time backfill for beacons already checked in) |
-
-Each is POSTed to `POST /v1/events` on the daemon. The leg is **one-way**:
-nothing flows from the daemon back to the CS Client. Everything the assistant
-has to say arrives in the TUI's Assistant Chat pane, on its own clock —
-unprompted when it judges something material, or on demand when you ask.
-
-Two console lines confirm the script is live:
-
-```
-[Red Robin] handshake OK; session=ses_...
-[Red Robin] .cna loaded; capture active (observe-only, no interception).
-```
-
-**There is no periodic heartbeat today.** The 30-second `fork{}` that would poll
-`/v1/adapter/heartbeat` is commented out in `redrobin.cna` (Sleep's `fork()` cannot
-see `$REDROBIN_HTTP`; re-enabling it needs the `lambda(...)` rewrite tracked as
-#110). Do not expect capture loss to announce itself on a timer.
-
-What you get instead: every capture POST that fails warns immediately in the CS
-event log, so you learn the daemon is down on the **next command you type** —
-
-```
-[Red Robin] daemon connection refused at http://127.0.0.1:7777 — is the daemon running?
-```
-
-If you are idle, you will not be told. Check the daemon terminal if in doubt.
-
-The captured command history is on disk per engagement — useful when you want
-the record rather than the chat:
+## 8. Stop
 
 ```bash
-uv run python tools/inspect_episodic.py
+uv run --no-sync redrobin daemon stop
 ```
 
-(Helper lives at `tools/inspect_episodic.py` in the repo. It defaults to
-`~/.redrobin/episodic.db`; pass an explicit path to inspect a per-engagement DB,
-e.g. `uv run python tools/inspect_episodic.py ~/.redrobin/engagements/<slug>/episodic.db`.)
-
-## 6. Start the daemon
-
-```bash
-uv run redrobin daemon start --host 127.0.0.1 --port 7777
+```
+daemon stopped (pid=42940)
 ```
 
-The startup banner prints to stderr — look for the `Anthropic: set` and
-`Voyage: set` lines. If either says `MISSING (degraded)`, the banner also
-tells you what's disabled.
+## Next
 
-**The assistant is dark-launched — off unless you ask for it.** Capture,
-persistence and working memory all run either way, but the chat pane stays
-mute until you opt in:
-
-```bash
-REDROBIN_ASSISTANT_ENABLED=1 uv run redrobin daemon start
-```
-
-(or add `REDROBIN_ASSISTANT_ENABLED=1` to `~/.redrobin/.env`, which `init`
-does not write for you).
-
-To run without LLM keys at all (capture + working memory only, no assistant):
-
-```bash
-uv run redrobin daemon start --allow-degraded
-```
-
-To stop:
-
-```bash
-uv run redrobin daemon stop
-```
-
-## 7. TUI
-
-In a second shell:
-
-```bash
-uv run redrobin tui \
-  --connect-ws ws://127.0.0.1:7777/v1/tui \
-  --connect-http http://127.0.0.1:7777
-```
-
-Defaults match those flag values, so `uv run redrobin tui` alone works for
-the default daemon address. The TUI reads `~/.redrobin/transport.token`
-automatically.
-
-Three panes: **Sessions** (live beacons), **Assistant Chat** (the copilot —
-this is where all advice appears), **Working Memory** (hosts, credentials,
-findings, objectives). `c` focuses the chat, `i` opens the inspector, `?`
-shows help, `q` quits.
-
-## 8. Smoke test
-
-With the daemon and TUI up and the `.cna` loaded, run something harmless in
-a beacon console — `whoami` will do. Within a second or two:
-
-- **Sessions** shows the beacon.
-- **Working Memory** picks up the host/user facts the output reveals.
-- **Assistant Chat** may or may not say anything. Silence is correct
-  behaviour, not a failure: the assistant is deliberately selective and
-  speaks only when it judges something material. To force a round-trip, type
-  a question into the chat pane (`c` to focus) — e.g. *"what do you know
-  about this host?"* — and you should get an answer citing working memory.
-
-Nothing appears in the beacon console, and nothing you type there is delayed
-or blocked. That is the intended behaviour: **the adapter captures, the core
-advises.**
-
-If the chat pane stays silent even when asked, check two things: that the
-daemon was started with `REDROBIN_ASSISTANT_ENABLED=1`, and that the banner
-does not say `Anthropic: MISSING (degraded)`. Either one leaves capture
-working and the assistant switched off.
-
-## 9. Stop
-
-```bash
-uv run redrobin daemon stop
-```
-
-Daemon shutdown drains in-flight background tasks, cancels the summariser,
-then closes the event bus and waits for the reducer, assistant and enricher
-to drain before exit.
+- **Attach Cobalt Strike:** [adapters/cobaltstrike/README.md](../adapters/cobaltstrike/README.md).
+- **Another C2 (Sliver, Havoc, ...):** _planned, not built yet._ The daemon is
+  C2-agnostic and speaks only the wire protocol, so a new C2 is a new adapter
+  under `adapters/<name>/` and nothing on this page changes. See
+  [Adding an adapter](../CONTRIBUTING.md#adding-an-adapter).
+- **Verify the capture path without a Beacon:** [smoke-test.md](smoke-test.md).
+- **Feed the knowledge base:** [kb-cli.md](kb-cli.md).
 
 ## Troubleshooting
 
-- **`redrobin doctor` reports DEGRADED.** Re-run `redrobin init` — it
-  rewrites `.env` only when the file does not exist, so if `.env` already
-  has a missing or stale key, edit `.env` directly and re-run doctor.
-- **Daemon startup banner missing.** The banner prints to stderr. If you
-  redirected stderr, you won't see it. Re-run without redirection.
-- **`REDROBIN_ROOT not set` or paths under the wrong directory.** Check
-  that you are running `redrobin` from a CWD that contains a `.env` (the
-  `_load_env_for_cli` helper pins to `Path.cwd() / ".env"` and does NOT
-  walk parent directories — see `docs/secrets-handling.md`).
-- **Daemon won't bind to the port.** Default `127.0.0.1:7777`. Pass
-  `--host` / `--port` if you need a different bind address.
-- **TUI cannot authenticate.** Confirm `~/.redrobin/transport.token`
-  exists and is readable by the TUI user. `redrobin init` creates it
-  idempotently; deleting it forces a fresh token on next daemon start.
-- **Adapter handshake fails.** The `.cna` POSTs `/v1/adapters/connect` at
-  load time and retries 3 times before giving up. `redrobin doctor` does not
-  cover this path — it only probes Anthropic and Voyage. The three real
-  causes: `$REDROBIN_URL` in `redrobin.cna` points at the wrong host:port, or
-  the daemon is unreachable from the CS Client machine (the daemon never sees
-  the POST at all); the token mismatches, so the daemon answers 401 (the
-  `.cna` reads `~/.redrobin/transport.token`, which must be the same file the
-  daemon uses); or that token file is missing, in which case the script throws
-  FileNotFound on load. Fix, then **reload the script** — the retry loop does
-  not resume on its own. Full checklist in `TESTING.md` Tier 3.
+- **`os error 32` from `uv run`.** The daemon holds `redrobin.exe`. Use
+  `uv run --no-sync`.
+- **`doctor` says `set` but the assistant never answers.** Read the
+  `Connectivity` block, not the `set` lines. A 401 there means the key is
+  expired or revoked.
+- **Banner says `Engagement:` is the wrong one.** The daemon resolves the
+  engagement once, at startup. Run `redrobin engagement use <slug>` and restart
+  the daemon — see
+  [configuration.md](configuration.md#switching-engagements) for what happens if
+  you do not.
+- **No banner at all.** It goes to stderr. If you redirected stderr you will not
+  see it.
+- **TUI cannot authenticate.** Confirm `~/.redrobin/transport.token` exists and
+  is readable. Delete it and restart the daemon to mint a fresh one — then
+  reload the `.cna`, which reads the same file.
+- **Daemon will not bind.** Default is `127.0.0.1:7777`; pass `--host` / `--port`
+  to change it. Note the banner prints the values from `.env`, not the flags, so
+  it will still say `7777` if you overrode the port on the command line.
