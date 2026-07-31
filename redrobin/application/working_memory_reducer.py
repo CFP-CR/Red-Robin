@@ -7,12 +7,13 @@ only by its own integration test.
 Event dispatch table (canonical wire types from ``redrobin/domain/events.py``):
 
 * ``beacon.initial``         → upsert a ``Session`` keyed by ``bid``.
-* ``opsec.verdict``          → when ``verdict == "BLOCK"``, append a finding.
+* ``beacon.command_input``   → append an L3 ``Episode`` (raw activity log). Mutates no
+  working-memory field, so the snapshot is deliberately NOT re-emitted.
 * ``working_memory.deltas``  → merge an enrichment deltas batch via
   ``WorkingMemoryRepo.apply_deltas`` (single writer; provenance system-supplied).
 
 ``beacon.command_output`` is consumed by the LLM enricher
-(``redrobin/application/enrichment/enricher.py``), a separate bus consumer that
+(``redrobin/application/agents/enricher/enricher.py``), a separate bus consumer that
 publishes ``working_memory.deltas`` — the reducer no longer parses it.
 
 All other event types are silently ignored. Repo helpers are synchronous JSON
@@ -38,7 +39,6 @@ from typing import Any
 
 from redrobin.application.event_bus import EventBus
 from redrobin.domain.memory import (
-    Finding,
     Session,
     WorkingMemoryDeltas,
     working_memory_to_snapshot,
@@ -63,8 +63,8 @@ class WorkingMemoryReducer:
         self._repo = repo
         self._engagement_id = engagement_id
         # Slice 10: optional Episodic store. When provided, every
-        # ``opsec.verdict`` event is appended as an Episode so the
-        # ``LessonPromoter`` has a full audit trail to aggregate over.
+        # ``beacon.command_input`` event is appended as an Episode so the L5
+        # summariser has a full audit trail to compress.
         self._episodic = episodic_repo
         # Optional callback invoked once the reducer has subscribed and is ready
         # to consume events. Tests use this to avoid sleep-based races; production
@@ -118,11 +118,16 @@ class WorkingMemoryReducer:
         if etype == "beacon.initial":
             self._on_beacon_initial(payload)
             return True
-        elif etype == "opsec.verdict":
-            self._on_verdict(payload)
-            return True
+        elif etype == "beacon.command_input":
+            # L3 activity log. Returns False: no working-memory field changed, so the
+            # reducer must NOT broadcast a full snapshot for every command.
+            self._on_command_input(payload)
+            return False
         elif etype == "working_memory.deltas":
             self._on_enrichment_deltas(payload)
+            return True
+        elif etype == "engagement.milestone":
+            self._on_milestone(payload)
             return True
         # else: silently ignore — the bus is fan-out, not all events are for us.
         return False
@@ -144,40 +149,31 @@ class WorkingMemoryReducer:
         )
         self._repo.upsert_session(session)
 
-    def _on_verdict(self, payload: dict[str, Any]) -> None:
-        verdict = payload.get("verdict", "UNKNOWN")
-        command = payload.get("command", "?")
-        reason = payload.get("reason", "")
-        beacon_id_raw = payload.get("beacon_id")
-        beacon_id = str(beacon_id_raw) if beacon_id_raw is not None else None
+    def _on_command_input(self, payload: dict[str, Any]) -> None:
+        """Record one Episode per beacon command — the raw activity log L5 narrates from.
 
-        # Slice 10: every verdict (not only BLOCK) becomes an Episode so the
-        # promoter sees full operator activity. Failures here must not crash
-        # the reducer — the working-memory finding path below is more
-        # important for live operators.
-        if self._episodic is not None:
-            try:
-                self._episodic.record(
-                    engagement_id=self._engagement_id,
-                    correlation_id=str(payload.get("correlation_id", "") or ""),
-                    command=str(command),
-                    verdict=str(verdict),
-                    reason=str(reason),
-                )
-            except Exception:
-                logger.exception("episodic record failed for verdict=%s", verdict)
-
-        # Finding append still only fires on BLOCK — the working-memory
-        # findings stream is a curated operator-visible audit list, not a
-        # full event log.
-        if verdict != "BLOCK":
+        Replaces the verdict stream as L3's source: the gate happened to fire on every
+        command, so ``opsec.verdict`` was a de-facto command stream; ``beacon.command_input``
+        is the real one and needs no LLM. Never raises — a failed episode write must not
+        stop the reducer.
+        """
+        if self._episodic is None:
             return
-        finding = Finding(
-            kind="opsec_block",
-            summary=f"Blocked command: {command} — {reason}",
-            source_beacon_id=beacon_id,
-        )
-        self._repo.append_finding(finding)
+        # Store the full command line (``raw``: "mimikatz sekurlsa::logonpasswords"),
+        # not the CS verb (``command``: "mimikatz") — L5 narrates from these episodes,
+        # and the substance lives in the arguments. Fall back to ``command`` for
+        # older traces / hand-crafted fixtures that carry no ``raw``.
+        command = str(payload.get("raw") or payload.get("command") or "").strip()
+        if not command:
+            return
+        try:
+            self._episodic.record(
+                engagement_id=self._engagement_id,
+                correlation_id=str(payload.get("correlation_id") or ""),
+                command=command,
+            )
+        except Exception:
+            logger.exception("episodic record failed for command=%s", command)
 
     def _on_enrichment_deltas(self, payload: dict[str, Any]) -> None:
         """Merge an enrichment deltas batch. Provenance is taken from the
@@ -189,6 +185,22 @@ class WorkingMemoryReducer:
             payload, source_beacon_id=str(src) if src is not None else None
         )
         self._repo.apply_deltas(deltas)
+
+    def _on_milestone(self, payload: dict[str, Any]) -> None:
+        """Interpretation write (spec §6.C) — the assistant proposes, the reducer
+        (single writer) applies. Never crashes the reducer."""
+        try:
+            self._repo.apply_milestone(
+                phase=str(payload.get("phase") or ""),
+                milestone_id=str(payload.get("milestone_id") or ""),
+                status=str(payload.get("status") or ""),
+                progress_pct=int(payload.get("progress_pct") or 0),
+                pending=bool(payload.get("pending")),
+                drop=bool(payload.get("drop")),
+                prompt=str(payload.get("prompt") or ""),
+            )
+        except Exception:
+            logger.exception("reducer: engagement.milestone apply failed")
 
 
 __all__ = ["WorkingMemoryReducer"]

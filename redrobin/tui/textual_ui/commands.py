@@ -27,7 +27,7 @@ def command_specs(app: "App") -> list[tuple[str, Callable[[], None], str]]:
     return [
         ("Inspector — full engagement state", app.action_inspect, "Open the Inspector modal"),
         ("Focus Sessions", _focus("#sessions-table"), "Focus the Sessions pane"),
-        ("Focus Verdicts / Events", _focus("#events-log"), "Focus the Verdicts/Events pane"),
+        ("Focus Assistant Chat", _focus("#chat-input"), "Focus the Assistant Chat input"),
         ("Focus Working Memory", _focus("#memory-panel"), "Focus the Working Memory pane"),
         ("Keymap help", app.action_help, "Show the keymap overlay"),
     ]

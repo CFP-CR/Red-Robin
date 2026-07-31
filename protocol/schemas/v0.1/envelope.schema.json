@@ -46,7 +46,6 @@
             "beacon.command_output",
             "host.observation",
             "credential.observed",
-            "opsec.verdict",
             "operator.question",
             "operator.answer",
             "engagement.milestone",

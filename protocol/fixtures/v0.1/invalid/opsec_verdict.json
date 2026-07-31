@@ -1,8 +1,0 @@
-{
-  "type": "opsec.verdict",
-  "source_event_id": "evt_01HZX9KXXR8QF3T2ABCDEFGHJK",
-  "severity": "CRITICAL",
-  "reason": "some reason",
-  "rule_id": null,
-  "suggestions": []
-}

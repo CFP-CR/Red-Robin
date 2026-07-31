@@ -1,75 +1,62 @@
-# Red Robin — Security Model
+# Security model
 
-## Threat model summary
+Red Robin is **advisory-only**: the adapter captures, the core advises. Nothing
+the daemon does can stop a command from reaching the teamserver, so every
+mitigation here is detective or contextual, never preventive.
 
-Full T1-T11 threat model in `docs/architecture-design.md` §6.
+## Threat model
 
-**In scope:**
-- T1: Operator laptop compromise (chmod 700/600, disk encryption recommendation)
-- T2: API key exfiltration (env-var only — config.toml refuses api_key)
-- T3: Adapter spoofing (bearer token in chmod 600 file)
-- T4: Rules YAML poisoning (file permissions + hash-checking roadmap)
-- T5: KB poisoning (operator-curated only; no auto-fetch)
-- T6: LLM hallucination (Layer A deterministic floor; citations required)
-- T7: Daemon crash (events.jsonl write-ahead log; snapshot+replay)
-- T8: Network unavailable (graceful degradation to Layer A only)
-- T9: ROE violation (scope_enforcer Stage 1 — out_of_scope hosts trigger BLOCK)
-- T10: Sensitive data to Anthropic/Voyage (documented; v0.2 local mode opt-in)
-- T11: Per-operator gate scope (Aggressor architectural limit — team SOP mitigation)
+| # | Threat | Where it stands |
+|---|---|---|
+| T1 | Operator laptop compromise | `~/.redrobin/` is `chmod 700` and `.env` `chmod 600` on POSIX; nothing is hardened on Windows. Full-disk encryption is the real control. |
+| T2 | API key exfiltration | Keys come from the environment or `~/.redrobin/.env` only. Never logged. |
+| T3 | Adapter spoofing | Bearer token in `~/.redrobin/transport.token`, `chmod 600`. |
+| T4 | Engagement YAML poisoning | `summary`, scope and ROE from `engagement.yaml` are injected into the assistant's prompt. Whoever can write that file shapes its reasoning. File permissions are the only control. |
+| T5 | KB poisoning | Operator-curated only; nothing is auto-fetched. |
+| T6 | LLM hallucination | Advisory-only. Nothing the model says reaches the teamserver; the operator types every command. |
+| T7 | Daemon crash | `events.jsonl` is an append-only write-ahead record; state is rebuilt by replay. |
+| T8 | Network unavailable | The assistant goes quiet. Capture, persistence and working memory keep running. |
+| T9 | ROE violation | Scope is context, not enforcement. `in_scope` / `out_of_scope` are projected into working memory so the assistant can flag drift; it cannot stop the command. |
+| T10 | Sensitive data sent to Anthropic / Voyage | Documented and accepted. Captured command output is sent to the enricher and the assistant. |
+| T11 | Coverage gaps | Red Robin only ever sees what a CS Client running the `.cna` observes. Team SOP is the mitigation. |
 
-**Out of scope:**
-- Compromised operator (intentional misuse)
-- Compromised Anthropic/Voyage (supply chain)
-- CS Client compromise
+**Out of scope:** a compromised operator acting intentionally, a compromised
+Anthropic or Voyage, and CS Client compromise.
 
-## API key handling
+## API keys
 
-API keys are loaded **only** from environment variables:
-- `ANTHROPIC_API_KEY` — required for Layer B LLM judge
-- `VOYAGE_API_KEY` — required for KB embeddings
-
-The config loader **programmatically refuses** any `api_key` field in
-`config.toml`. Attempting to put a key there raises `ValueError` at daemon
-startup with a clear error message.
-
-If you ever see an API key checked into git, `.gitignore` patterns are not
-enough — rotate the key immediately.
+Loaded from the environment or `~/.redrobin/.env` — `ANTHROPIC_API_KEY` for the
+assistant, enricher and summariser; `VOYAGE_API_KEY` for KB embeddings. Red
+Robin reads no TOML or YAML config for secrets. Rotation and leak response:
+[docs/secrets-handling.md](docs/secrets-handling.md).
 
 ## File permissions
 
-Enforced at daemon startup via `redrobin/infrastructure/filesystem.py`:
+Enforced on POSIX only (`redrobin/infrastructure/filesystem.py`):
 
-| Path | Permission |
+| Path | Mode |
 |---|---|
-| `~/.redrobin/` | 700 |
+| `~/.redrobin/` and its `shared/`, `engagements/`, `kb-source/` subdirectories | 700 |
+| `~/.redrobin/.env` | 600 (at `init`) |
 | `~/.redrobin/transport.token` | 600 |
-| `~/.redrobin/redrobin.log` | 600 |
-| `~/.redrobin/engagements/<slug>/events.jsonl` | 600 |
-| `~/.redrobin/shared/longterm.db` | 600 |
-| `~/.redrobin/engagements/<slug>/episodic.db` | 600 |
-| `~/.redrobin/config.toml` | 600 |
 
-Windows permission model differs — Red Robin does not enforce chmod on
-Windows. Operators should use full-disk encryption (BitLocker / FileVault /
-LUKS).
+Nothing else is chmod'ed, and **nothing at all is enforced on Windows** — the
+calls are skipped there. Databases, `events.jsonl` and working-memory JSON
+inherit the 700 on their parent directory and no more. Use full-disk encryption.
 
 ## Network footprint
 
-The daemon's only outbound connections (per engagement, if enabled):
-- `api.anthropic.com` (LLM)
-- `api.voyageai.com` (embeddings)
-- `<teamserver>:50443` (CS REST API — for TUI dispatch + state recovery)
+The daemon's only outbound connections are `api.anthropic.com` (LLM) and
+`api.voyageai.com` (embeddings), and only when the corresponding key is set.
 
-In v0.2 local mode, the Anthropic + Voyage endpoints are eliminated.
+It never connects to the CS team server. The `.cna` runs inside the
+already-authenticated CS Client and only POSTs captured activity inbound to the
+daemon. There is no outbound C2 leg and no C2 credential on the Red Robin side.
 
-## Reporting vulnerabilities
+## Reporting a vulnerability
 
-For security-sensitive issues, please email security@red-robin.io
-(or open a GitHub Security Advisory if the repo is public).
-For non-sensitive bugs, open a GitHub issue.
+Email security@red-robin.io, or open a GitHub Security Advisory if the repo is
+public. Non-sensitive bugs go to GitHub Issues.
 
-## Disclosure timeline
-
-This is a v0.1 project. We don't have a formal CVE process yet. We will
-acknowledge reports within 7 days and aim to fix critical issues within 30
-days.
+This is a v0.1 project with no formal CVE process. We acknowledge reports within
+7 days and aim to fix critical issues within 30.

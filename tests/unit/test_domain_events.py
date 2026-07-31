@@ -7,7 +7,6 @@ from ulid import ULID
 from redrobin.domain.events import (
     BeaconCommandInputEvent,
     Envelope,
-    OpsecVerdictEvent,
     Severity,
     Source,
 )
@@ -59,30 +58,13 @@ def test_envelope_to_dict_with_session_id():
     assert d["source"]["adapter_session_id"] == "ses_01HZX9KMXR1B0K3VABCDEFGHJK"
 
 
-def test_opsec_verdict_severity_enum():
+def test_severity_enum_values():
+    """``Severity`` survives the gate removal — it is the assistant's
+    ``Recommendation.opsec_risk`` vocabulary."""
+    assert Severity.INFO.value == "INFO"
     assert Severity.DANGER.value == "DANGER"
     assert Severity("WARN") == Severity.WARN
     assert Severity("ESCALATE") == Severity.ESCALATE
-
-
-def test_opsec_verdict_event_serializes_severity_as_string():
-    verdict = OpsecVerdictEvent(
-        source_event_id="evt_01HZX9KXXR8QF3T2ABCDEFGHJK",
-        severity=Severity.DANGER,
-        reason="lsass touch",
-        rule_id="mimikatz_logonpasswords",
-        suggestions=["use nanodump BOF", "or Rubeus /tgtdeleg"],
-    )
-    env = Envelope(
-        id="evt_01HZX9KXXR8QF3T2ABCDEFGHJK",
-        ts=datetime(2026, 5, 10, 14, 32, tzinfo=timezone.utc),
-        source=Source(adapter="core", version="0.1.0", engagement_id="eng_test"),
-        event=verdict,
-    )
-    d = env.to_dict()
-    assert d["event"]["severity"] == "DANGER"
-    assert d["event"]["type"] == "opsec.verdict"
-    assert d["event"]["suggestions"] == ["use nanodump BOF", "or Rubeus /tgtdeleg"]
 
 
 def test_envelope_to_dict_matches_protocol_schema():

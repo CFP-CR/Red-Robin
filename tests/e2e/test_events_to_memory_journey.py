@@ -33,7 +33,6 @@ def daemon(tmp_path, monkeypatch):
     root.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setenv("REDROBIN_ROOT", str(root))
-    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     monkeypatch.setenv("REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json"))
     monkeypatch.setenv("REDROBIN_EPISODIC_PATH", str(tmp_path / "ep.db"))
     monkeypatch.setenv("REDROBIN_LONGTERM_PATH", str(tmp_path / "lt.db"))

@@ -17,13 +17,12 @@ from pathlib import Path
 import pytest
 
 from redrobin.api.lifespan_helpers import (
-    start_adapters,
+    start_assistant,
+    start_dedup,
     start_engagement,
+    start_enricher,
     start_event_bus,
     start_l5_summarizer,
-    start_lesson_promoter,
-    start_pipeline,
-    start_rules,
     start_working_memory,
 )
 
@@ -32,7 +31,6 @@ def _setup_env(tmp_path: Path, monkeypatch) -> None:
     root = tmp_path / ".redrobin"
     root.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("REDROBIN_ROOT", str(root))
-    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     monkeypatch.setenv("REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json"))
     monkeypatch.setenv("REDROBIN_EPISODIC_PATH", str(tmp_path / "ep.db"))
     monkeypatch.setenv("REDROBIN_LONGTERM_PATH", str(tmp_path / "lt.db"))
@@ -44,12 +42,11 @@ def test_each_helper_is_importable():
     """If any helper doesn't exist, this test catches it immediately."""
     for fn in (
         start_event_bus,
-        start_rules,
-        start_working_memory,
         start_engagement,
-        start_pipeline,
-        start_adapters,
-        start_lesson_promoter,
+        start_dedup,
+        start_working_memory,
+        start_enricher,
+        start_assistant,
         start_l5_summarizer,
     ):
         assert callable(fn)
@@ -83,14 +80,11 @@ async def test_lifespan_still_works_end_to_end(tmp_path: Path, monkeypatch):
 
     app = create_app()
     async with app.router.lifespan_context(app):
-        assert app.state.rules_loader is not None
         assert app.state.event_bus is not None
-        assert app.state.verdict_pipeline is not None
         assert app.state.working_memory_repo is not None
         assert app.state.episodic_repo is not None
         assert app.state.longterm_repo is not None
         assert app.state.summary_repo is not None
-        assert hasattr(app.state, "cs_adapters")
-        assert hasattr(app.state, "promoter_task")
         assert hasattr(app.state, "summarizer_task")
         assert hasattr(app.state, "reducer_task")
+        assert hasattr(app.state, "enricher_task")

@@ -1,7 +1,14 @@
-# Task 9 Phase 1 Spike — Sleep HTTP latency budget.
+# Diagnostic — Sleep HTTP latency budget.
 #
-# Validates that the alias body's HTTP round-trip to localhost:7777 stays under
-# 150ms p95 for the two-tier verdict protocol (spec §1.2.1).
+# Measures the Sleep -> daemon HTTP round-trip on localhost:7777. This still
+# matters after the pre-flight gate's removal: the capture emits
+# (redrobin_emit_command_input / _command_output) run SYNCHRONOUSLY on the
+# operator's hook thread, so a slow daemon shows up as console lag while typing.
+# The 150ms bar below is inherited from the old sync-verdict budget and is now
+# just a conservative "does not feel laggy" threshold, not a protocol deadline.
+#
+# `rrlatency` is a standalone diagnostic command — it does NOT override any
+# Cobalt Strike built-in, and this spike file is never loaded by redrobin.cna.
 #
 # Requires the stub daemon at adapters/cobaltstrike/spike/stub_daemon.py running.
 # Start it before loading this .cna:
@@ -10,7 +17,6 @@
 # To use:
 #   1. CS Client → Scripts → Load → adapters/cobaltstrike/spike/test_http_latency.cna
 #   2. In any Beacon console: rrlatency
-#   3. Copy the [Red Robin Spike] output into docs/aggressor-alias-args.md
 
 import java.net.*;
 import java.io.*;
@@ -51,8 +57,8 @@ alias rrlatency {
     blog($1, "Max: " . $max . "ms");
     blog($1, "Budget: 150ms");
     if ($max < 150) {
-        blog($1, "Result: PASS — 150ms hard-timeout is viable for Layer A sync verdict.");
+        blog($1, "Result: PASS — synchronous capture emits will not lag the console.");
     } else {
-        blog($1, "Result: FAIL — bump budget to 250ms OR move all verdict logic to async.");
+        blog($1, "Result: FAIL — capture emits may lag operator typing; investigate the daemon.");
     }
 }

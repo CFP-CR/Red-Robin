@@ -53,7 +53,7 @@ facts = Table(
 )
 
 
-# Slice 10 — raw OPSEC verdict episodes feeding the LessonPromoter.
+# Slice 10 — raw episodes (one per issued command), the L3 audit trail.
 # Lives in the same database file as ``lessons`` (per-engagement episodic store).
 episodes = Table(
     "episodes",
@@ -62,21 +62,5 @@ episodes = Table(
     Column("engagement_id", String(128), nullable=False, index=True),
     Column("correlation_id", String(128), nullable=False),
     Column("command", Text, nullable=False),
-    Column("verdict", String(16), nullable=False),  # ALLOW|WARN|BLOCK|UNKNOWN
-    Column("reason", Text, nullable=False, default=""),
-    Column("created_at", DateTime, nullable=False),
-)
-
-
-# Slice 10 — structured (command, verdict) patterns promoted from recurring
-# episodes. Lives in the long-term database alongside ``facts``.
-promoted_lessons = Table(
-    "promoted_lessons",
-    metadata,
-    Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("command", Text, nullable=False, index=True),
-    Column("verdict", String(16), nullable=False),
-    Column("summary", Text, nullable=False),
-    Column("occurrence_count", Integer, nullable=False),
     Column("created_at", DateTime, nullable=False),
 )

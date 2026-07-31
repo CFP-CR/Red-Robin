@@ -73,54 +73,6 @@ async def test_beacon_initial_writes_session(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_opsec_block_verdict_appends_finding(tmp_path):
-    bus = EventBus()
-    repo = _new_repo(tmp_path, "eng-block")
-    _, task = await _start_reducer(bus, repo, "eng-block")
-
-    try:
-        await bus.publish(
-            {
-                "type": "opsec.verdict",
-                "payload": {
-                    "verdict": "BLOCK",
-                    "command": "mimikatz",
-                    "reason": "high signal",
-                    "beacon_id": "B-005",
-                },
-            }
-        )
-        for _ in range(50):
-            await asyncio.sleep(0.02)
-            findings = repo.load().findings
-            if findings:
-                break
-        findings = repo.load().findings
-        assert any(f.kind == "opsec_block" for f in findings)
-    finally:
-        await _drain(bus, task)
-
-
-@pytest.mark.asyncio
-async def test_opsec_allow_verdict_is_ignored(tmp_path):
-    bus = EventBus()
-    repo = _new_repo(tmp_path, "eng-allow")
-    _, task = await _start_reducer(bus, repo, "eng-allow")
-
-    try:
-        await bus.publish(
-            {
-                "type": "opsec.verdict",
-                "payload": {"verdict": "ALLOW", "command": "ls"},
-            }
-        )
-        await asyncio.sleep(0.1)
-        assert repo.load().findings == []
-    finally:
-        await _drain(bus, task)
-
-
-@pytest.mark.asyncio
 async def test_unknown_event_type_is_ignored(tmp_path):
     bus = EventBus()
     repo = _new_repo(tmp_path, "eng-unknown")
@@ -212,7 +164,15 @@ async def test_reducer_republishes_snapshot_after_mutation(tmp_path):
 
 @pytest.mark.asyncio
 async def test_lifespan_starts_reducer_task(tmp_path, monkeypatch):
-    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
+    # REDROBIN_ROOT first, and it is not optional. REDROBIN_WORKING_MEMORY_PATH
+    # below looks like enough isolation but is NOT: start_working_memory ignores
+    # that override whenever an engagement resolves, deriving the path from the
+    # engagement directory instead. With no root pinned, the engagement resolved
+    # was whatever the developer's ~/.redrobin/.active_engagement named — so this
+    # test merged its fake CORP\alice credential into a live engagement's
+    # working memory. Pinning the root also makes the degraded branch (which is
+    # what honours the override) deterministic instead of machine-dependent.
+    monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path))
     monkeypatch.setenv("REDROBIN_WORKING_MEMORY_PATH", str(tmp_path / "wm.json"))
     monkeypatch.setenv("REDROBIN_ENGAGEMENT_ID", "eng-test-001")
     monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")

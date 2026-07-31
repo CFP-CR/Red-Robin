@@ -2,29 +2,29 @@ manifest_version = "0.1.0"
 spec_versions_supported = ">=0.1.0,<0.2.0"
 name = "cs-aggressor"
 version = "1.0.0"
-description = "Cobalt Strike adapter via Aggressor companion script + REST API client"
+description = "Cobalt Strike adapter via Aggressor companion script (capture-only)"
 vendor = "CFP-CR"
 license = "MIT"
 homepage = "https://github.com/CFP-CR/Red-Robin"
 
 [capabilities]
-preflight_block_console = true
-preflight_block_tui = true
-tui_dispatch = true
-output_observe = true
-console_annotation = true
-emergency_kill_switch = true
-gate_scope = "per_operator"
+# Capture-only. The adapter observes the operator's commands and their output and
+# publishes events; it never dispatches, annotates, or modifies the command path.
+tui_dispatch = false          # the daemon has no outbound path to the team server
+output_observe = true         # set BEACON_OUTPUT
+console_annotation = false    # nothing writes to the beacon console (no blog/berror/bprint)
+emergency_kill_switch = false # clearCommandQueue went with the REST client
 command_modification = false
 
+# The three types the .cna actually emits (redrobin_emit_command_input /
+# _command_output / _beacon_initial). host.observation and credential.observed
+# come from other adapters, and adapter.heartbeat is a liveness GET, not an
+# emitted event -- the periodic fork is disabled pending #110.
 events_emitted = [
     "beacon.command_input",
     "beacon.command_output",
-    "host.observation",
-    "credential.observed",
-    "adapter.heartbeat",
+    "beacon.initial",
 ]
-events_consumed = ["opsec.verdict"]
 
 [requirements]
 cobalt_strike = ">=4.12"

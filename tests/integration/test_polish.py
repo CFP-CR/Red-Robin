@@ -11,11 +11,22 @@ from fastapi.testclient import TestClient
 from redrobin.api.app import create_app
 from redrobin.infrastructure.vector_store import VectorStore
 
+# The doctor tests below go through `cli.cmd_doctor`, which calls
+# `_load_env_for_cli` — so this module loads <cwd>/.env into os.environ
+# permanently, like the other four CLI-touching modules (issue #51). Run from a
+# checkout it leaked ten keys, the developer's real ANTHROPIC_API_KEY and
+# VOYAGE_API_KEY among them, into every module collected after it.
+pytestmark = pytest.mark.usefixtures("restore_environ")
+
 
 @pytest.fixture
 def _isolated_root(tmp_path, monkeypatch):
     """Same isolation pattern as test_http_auth — points REDROBIN_ROOT at tmp."""
     monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path / ".redrobin"))
+    # Boot validation exits(2) without API keys; the heartbeat test boots the
+    # daemon and asserts nothing about the LLM surface. Opt in explicitly rather
+    # than depending on keys leaked by an earlier test (issue #51).
+    monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
     (tmp_path / ".redrobin").mkdir(parents=True, exist_ok=True)
     yield tmp_path / ".redrobin"
 
@@ -29,7 +40,6 @@ def test_heartbeat_endpoint(tmp_path, monkeypatch, _isolated_root):
     so the operator sees "daemon unreachable" warnings the moment the
     daemon goes away.
     """
-    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     app = create_app()
     with TestClient(app) as client:
         resp = client.get("/v1/adapter/heartbeat?adapter=cs-main")
@@ -98,6 +108,11 @@ def test_doctor_exit_code_nonzero_on_failure(monkeypatch, tmp_path):
     """
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("VOYAGE_API_KEY", raising=False)
+    # ...and keep them deleted: cmd_doctor calls _load_env_for_cli, which reloads
+    # them from <cwd>/.env. Run from a checkout that is a developer's own file,
+    # so the keys came straight back and this passed for the ROOT_EXISTS reason
+    # rather than the missing-key reason the docstring states.
+    monkeypatch.chdir(tmp_path)
     # Point REDROBIN_ROOT at a fresh tmp so the rules-dir check is the only
     # other potential failure surface, and we control it.
     monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path / ".redrobin"))
@@ -110,6 +125,37 @@ def test_doctor_exit_code_nonzero_on_failure(monkeypatch, tmp_path):
     assert rc != 0
 
 
+def test_doctor_reports_the_engagement_the_daemon_would_resolve(monkeypatch, tmp_path, capsys):
+    """doctor's ENGAGEMENT line must mirror ``start_engagement``'s precedence.
+
+    ``init`` no longer pins ``REDROBIN_ENGAGEMENT_SLUG`` (it outranked the
+    ``.active_engagement`` marker and made ``engagement use`` a no-op), and
+    doctor only ever read that env var — so without this fallback it would now
+    report ``(none)`` on every correctly-set-up install.
+    """
+    from redrobin.application.engagement_service import EngagementService
+    from redrobin.cli_helpers.doctor_cmd import run_doctor
+    from redrobin.infrastructure.config import Settings
+
+    root = tmp_path / ".redrobin"
+    monkeypatch.setenv("REDROBIN_ROOT", str(root))
+    monkeypatch.delenv("REDROBIN_ENGAGEMENT_SLUG", raising=False)
+    svc = EngagementService(root=root)
+    svc.new("op-marker")
+    svc.use("op-marker")
+
+    run_doctor(settings=Settings(), quick=True)
+    assert "op-marker" in capsys.readouterr().out
+
+    # ...and the env var still wins when it IS set (its documented role).
+    svc.new("op-override")
+    monkeypatch.setenv("REDROBIN_ENGAGEMENT_SLUG", "op-override")
+    run_doctor(settings=Settings(), quick=True)
+    out = capsys.readouterr().out
+    assert "op-override" in out
+    assert "op-marker" not in out
+
+
 def test_doctor_exit_code_zero_when_all_pass(monkeypatch, tmp_path):
     """Sanity: all checks green → rc == 0 so a healthy daemon doesn't flag.
 
@@ -120,8 +166,8 @@ def test_doctor_exit_code_zero_when_all_pass(monkeypatch, tmp_path):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     monkeypatch.setenv("VOYAGE_API_KEY", "test-key")
     root = tmp_path / ".redrobin"
-    rules_dir = root / "rules"
-    rules_dir.mkdir(parents=True)
+    # doctor reports ROOT_EXISTS; create it so the run is OK, not DEGRADED.
+    root.mkdir(parents=True)
     monkeypatch.setenv("REDROBIN_ROOT", str(root))
     from redrobin.cli import cmd_doctor
 

@@ -23,15 +23,10 @@ async def test_snapshot_frame_updates_state_and_topbar():
 
 
 @pytest.mark.asyncio
-async def test_verdict_frame_appends_event():
+async def test_app_has_no_events_reactive_and_no_verdict_handler():
+    """The pre-flight gate is gone: nothing publishes ``opsec.verdict``, so the
+    frame handler and the ``events`` reactive it fed are both removed."""
+    assert not REGISTRY.has_handler("opsec.verdict")
     app = RedRobinApp(start_worker=False)
     async with app.run_test():
-        REGISTRY.dispatch(
-            target=app,
-            frame={
-                "type": "opsec.verdict",
-                "payload": {"verdict": "BLOCK", "command": "mimikatz", "source": "layer_a"},
-            },
-        )
-        assert len(app.events) == 1
-        assert app.events[0]["verdict"] == "BLOCK"
+        assert not hasattr(app, "events")

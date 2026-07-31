@@ -1,220 +1,116 @@
-# Red Robin smoke test (v0.1.x)
+# Verify the capture path without a Beacon
 
-A 5-minute smoke test confirming the full operator journey works end-to-end.
-Run after `git clone` + `uv sync` against a fresh checkout. Each step is
-verifiable; if a step fails see the "Troubleshooting" section.
+A five-minute check that the whole daemon-side chain works: an adapter POSTs wire
+events, the daemon validates and persists them, the reducer folds them into
+working memory, and the TUI renders the result. No Cobalt Strike, no Beacon, no
+`.cna`.
 
-The longer setup walkthrough lives in [`operator-setup.md`](operator-setup.md);
-this guide is the abbreviated "is everything wired up" pass.
+Assumes you have finished [operator-setup.md](operator-setup.md) — a daemon that
+starts, a TUI that connects, and an active engagement.
 
-## Prereqs
+The `.cna` itself is **not** covered here. Aggressor changes are accepted by a
+live-Beacon operator smoke only — see
+[adapters/cobaltstrike/README.md](../adapters/cobaltstrike/README.md#acceptance-testing).
 
-- Python 3.11+, [`uv`](https://docs.astral.sh/uv/getting-started/installation/) installed.
-- An `ANTHROPIC_API_KEY` and a `VOYAGE_API_KEY` (or you'll run with `--allow-degraded`).
-- Two shells. The daemon blocks on `daemon start`; everything else runs in the second shell.
-- Bash, zsh, or PowerShell — both flavours are spelt out below where they diverge.
+## Run it
 
-## Step 1 — Init the operator layout
-
-Bash / zsh:
+Three terminals. In the first, start the daemon and leave it:
 
 ```bash
-uv run redrobin init \
-  --non-interactive \
-  --root ./.rr \
-  --anthropic-key "$ANTHROPIC_API_KEY" \
-  --voyage-key "$VOYAGE_API_KEY" \
-  --engagement-slug op-smoke
+uv run redrobin daemon start
 ```
 
-PowerShell:
-
-```powershell
-uv run redrobin init `
-  --non-interactive `
-  --root .\.rr `
-  --anthropic-key $env:ANTHROPIC_API_KEY `
-  --voyage-key $env:VOYAGE_API_KEY `
-  --engagement-slug op-smoke
-```
-
-What this verifies:
-
-- `init` creates `./.rr/{rules/shared,engagements,adapters}/` and the
-  `engagements/op-smoke/engagement.yaml` placeholder.
-- `.env` written with the supplied keys (and `chmod 600` on POSIX).
-- Sample `rules/shared/sample-lazagne.yaml` dropped.
-- Idempotent — re-running never clobbers your existing files.
-
-Expected: `Done. Next steps: ...` and exit code 0.
-
-## Step 2 — Verify setup
-
-`cd` into the init root so the dotenv pin picks up `./.rr/.env`:
+In the second, connect the TUI and leave it visible:
 
 ```bash
-cd ./.rr
+uv run --no-sync redrobin tui
 ```
 
-Quick check (env-var presence only, no network — useful in CI):
+In the third, replay a recorded Sliver scenario against the daemon:
 
 ```bash
-uv run redrobin doctor --quick
+uv run --no-sync python adapters/sliver-mock/adapter.py \
+  --scenario acme_corp \
+  --daemon http://127.0.0.1:7777
 ```
 
-Full probe (Anthropic, Voyage, every configured CS adapter):
+```
+[sliver-mock] connected as session ses_01KYMRTWQF06204NSRK4XGDCF5
+[sliver-mock] sent beacon.initial
+[sliver-mock] sent host.observation
+[sliver-mock] sent beacon.command_input
+[sliver-mock] sent beacon.command_output
+[sliver-mock] sent credential.observed
+[sliver-mock] sent host.observation
+[sliver-mock] sent beacon.command_input
+[sliver-mock] disconnected
+```
+
+The mock reads its bearer token from `REDROBIN_TOKEN`, falling back to
+`~/.redrobin/transport.token`. Set `REDROBIN_TOKEN` explicitly if your root is
+somewhere else.
+
+## What should happen
+
+- **Sessions** gains `WS-FINANCE-04.acme.local` / `acme\jdoe`. This leg is
+  deterministic — no LLM involved.
+- `engagements/<slug>/events.jsonl` gains **seven lines** on a fresh engagement,
+  one per wire event. The adapter's connect and disconnect frames are not stored.
+- **Working Memory** gains a *finding* a few seconds later, once the enricher has
+  called out and back (about two seconds in practice — do not stop the daemon the
+  instant the replay finishes or you will race it):
+
+  ```
+  findings: [{"kind": "domain_admin_membership",
+              "summary": "Domain Admins group contains 3 members: ...",
+              "source_beacon_id": "win_ws01"}]
+  ```
+
+- **`hosts` and `credentials` stay empty — that is correct for this scenario**,
+  even with a working Anthropic key. The only command output is a `net group
+  "Domain Admins"` listing, which names no host, and its three bare usernames
+  carry no secret material for a credential to attach to.
+
+Then press `c` in the TUI and ask *"what do you know about this host?"*. You
+should get an answer grounded in the Beacon shown in Sessions. Unprompted
+advisories are **not** a pass criterion — the assistant is deliberately
+selective, and silence during a short replay is correct. The direct question is
+the deterministic check.
+
+Finally:
 
 ```bash
-uv run redrobin doctor
+uv run --no-sync redrobin daemon stop
 ```
 
-Expected: `[+] Doctor finished: OK` and exit code 0. If any probe fails, the
-output names which key/adapter — fix and retry. The daemon will start in
-degraded mode if any LLM key is missing; doctor surfaces the failure
-explicitly so the operator notices.
+The daemon drains its background tasks before closing the bus, so its stdout
+should show no tracebacks on shutdown.
 
-## Step 3 — Start the daemon
+## If a step fails
 
-```bash
-uv run redrobin daemon start --host 127.0.0.1 --port 7777
-```
+- **Replay exits 401.** The mock's token did not match. Set `REDROBIN_TOKEN` to
+  the contents of your root's `transport.token`.
+- **Replay exits 400 with `envelope_errors` / `event_errors`.** `/v1/events`
+  validates against `protocol/schemas/v0.1/`, and the schemas are
+  `additionalProperties: false`, so an unknown key is a hard reject. If you
+  hand-edited a scenario, diff it against `protocol/fixtures/v0.1/valid/`.
+- **Replay succeeded but nothing reached the TUI.** Check the daemon banner for
+  `Engagement: (none)`. With no active engagement `/v1/events` returns
+  `stored: false` and writes nothing. Run `redrobin engagement use <slug>` and
+  restart the daemon.
+- **TUI says the WebSocket failed.** The daemon is not running, or it bound a
+  different host/port than the TUI's default `ws://127.0.0.1:7777/v1/tui`.
+- **Chat never answers.** Confirm `REDROBIN_ASSISTANT_ENABLED=1` in your `.env`
+  and that `redrobin doctor` shows `[OK ] anthropic` — not merely
+  `ANTHROPIC_API_KEY: set`.
 
-This shell blocks. The Slice 7 startup banner prints to stderr — confirm it
-shows the resolved root, engagement (`op-smoke`), rules count (>= 1),
-adapter list (empty unless you wired one), and key status
-(`set` or `MISSING (degraded)`). Slice 7 / Slice 8 / Slice 11 features:
+## What this proves
 
-```
-======================================================================
-  Red Robin v0.1.0
-======================================================================
-  Listening:  http://127.0.0.1:7777
-  Root:       /.../op-smoke/.rr
-  Engagement: op-smoke
-  Rules:      1
-  Adapters:   (none)
-  Anthropic:  set
-  Voyage:     set
-  L5 window:  25 (every 30.0s)
-  Promoter:   min=3 (every 60.0s)
-======================================================================
-```
+`init` produced a working layout; the daemon boots its lifespan in order; the
+capture path holds end to end (adapter → `POST /v1/events` → schema validation →
+`events.jsonl` → event bus → reducer → TUI); the enricher fills working memory
+from captured output; the assistant answers grounded in it; and shutdown is
+clean.
 
-If a key is missing the banner will say `MISSING (degraded)`. The daemon
-exits 2 in that case unless `--allow-degraded` (or `REDROBIN_ALLOW_DEGRADED=1`)
-was passed.
-
-## Step 4 — Connect TUI (second shell)
-
-In a new shell, from the same `./.rr` directory:
-
-```bash
-uv run redrobin tui \
-  --connect-ws ws://127.0.0.1:7777/v1/tui \
-  --connect-http http://127.0.0.1:7777
-```
-
-(The defaults match those flags, so `uv run redrobin tui` alone also works.)
-The TUI reads the bearer token from `./.rr/transport.token` automatically.
-
-Type `lazagne` and press Enter. Expected: the verdict pane shows BLOCK with
-the `rule-sample-lazagne` rule id and the reason "LaZagne is loud — prefer
-in-memory creds extraction". This confirms the sample rule from `init`
-loaded into Layer A and Layer A is reachable from the TUI.
-
-## Step 5 — Drop a rule live (hot-reload)
-
-In a third shell (or back in shell 2 after pressing `q` to exit the TUI):
-
-Bash / zsh:
-
-```bash
-cat > ./.rr/rules/shared/block-exotic.yaml <<'YAML'
-id: rule-block-exotic
-description: Block exotic_tool
-severity: DANGER
-match:
-  command: exotic_tool
-reason: Sample hot-reload rule
-YAML
-```
-
-PowerShell:
-
-```powershell
-@'
-id: rule-block-exotic
-description: Block exotic_tool
-severity: DANGER
-match:
-  command: exotic_tool
-reason: Sample hot-reload rule
-'@ | Set-Content -Encoding utf8 .\.rr\rules\shared\block-exotic.yaml
-```
-
-`severity: DANGER` is the native Red Robin severity that maps to
-`VerdictAction.BLOCK` — Sigma-format rules use `level: high` in a separate
-`detection` block (see [`sigma-support.md`](sigma-support.md)).
-
-Wait ~2 seconds for the watchdog observer to fire. Back in the TUI, type
-`exotic_tool` and Enter. Expected: BLOCK verdict referencing
-`rule-block-exotic`. This verifies the Slice 11 hot-reload watchdog
-hands new rules to Layer A without a daemon restart.
-
-## Step 6 — Stop the daemon cleanly
-
-```bash
-uv run redrobin daemon stop
-```
-
-Expected: `daemon stopped (pid=<n>)`, the PID file removed, no leftover
-processes. The Slice 10 shutdown order drains background tasks before
-closing the adapter REST clients, so the daemon's stdout should NOT show
-"httpx client closed" tracebacks during shutdown.
-
-## Troubleshooting
-
-- **`doctor` fails on the Anthropic probe with `HTTP 401`.** Check
-  `ANTHROPIC_API_KEY` in `./.rr/.env`. `init` is idempotent and will not
-  rewrite the file — edit it manually or delete and re-run `init`.
-- **`doctor` fails on the Voyage probe with `HTTP 401`.** Same fix path
-  for `VOYAGE_API_KEY`.
-- **`doctor` fails on the CS adapter.** Check
-  `./.rr/adapters/cs-main.yaml` `teamserver_url` / `operator_user` /
-  `operator_password`, and `verify_ssl: false` if the team server uses a
-  self-signed cert. The CS adapter is optional; doctor only probes
-  adapters you've configured.
-- **Daemon won't start.** Read the banner. The two most common causes:
-  - `ERROR: ANTHROPIC_API_KEY required ...` — set the key or pass
-    `--allow-degraded` (Layer B disabled, Layer A still works).
-  - `ERROR: REDROBIN_ROOT does not exist ...` — you `cd`'d somewhere
-    without a `.env` and `REDROBIN_ROOT` resolves to a path that does
-    not exist. Either `cd` back to `./.rr` or pass `--root` explicitly.
-- **Daemon binds the wrong port.** Default is `127.0.0.1:7777`. Pass
-  `--host` / `--port` to override.
-- **TUI shows "WebSocket connection failed".** The daemon isn't running,
-  or the `--connect-ws` URL doesn't match the host/port the daemon bound.
-- **Hot-reload doesn't fire.** Confirm the YAML file is well-formed
-  (`uv run python -c "import yaml; yaml.safe_load(open('rules/shared/block-exotic.yaml'))"`).
-  The watchdog logs malformed YAML at WARN level and skips it; check the
-  daemon stderr for the diagnostic.
-- **Rule never matches a command.** Native rules use `INFO` / `WARN` /
-  `DANGER` for `severity`; Sigma rules use `level: low|medium|high|critical`
-  inside the `detection` block. Mixing the two (`severity: HIGH`)
-  silently fails to load because the loader's enum has no `HIGH` entry.
-
-## What this smoke test validates
-
-- Slice 1 + 2 + 5: `redrobin init` produces a working layout.
-- Slice 6: `doctor` connectivity probes.
-- Slice 7: structured banner reflects the resolved config.
-- Slice 8: daemon lifespan boots all eight `start_*` helpers in order.
-- Slice 11: extended Sigma matcher loads sample rules and hot-reload
-  picks up new ones without a restart.
-- Slice 10: graceful shutdown drains background tasks before closing
-  adapters and the bus.
-- Slice 13: operator-facing CLI commands (`init`, `doctor`,
-  `daemon start/stop`, `tui`) all work end-to-end.
-
-If every step above completes with the expected output, the v0.1.x
-operator journey is wired correctly.
+It does **not** prove anything about the Cobalt Strike `.cna`. Only a live Beacon
+can.

@@ -1,91 +1,113 @@
 # Developer onboarding
 
-This is the 30-minute tour of Red Robin for a developer joining the project.
-
-## Read these first
-
-1. `Projects/red-robin-architecture-design.md` (spec, ~2600 lines) — start
-   with §1 (Mission), §3 (System Topology), §4 (Component Architecture).
-2. `Projects/red-robin-v0.1-implementation-plan.md` (plan) — see which tasks
-   are open + their dependencies.
+The 30-minute tour for a developer joining Red Robin. Get the operator setup
+working first — [operator-setup.md](operator-setup.md) — then come back here.
 
 ## Repo tour
 
 ```
 Red-Robin/
 ├── redrobin/                # main package
-│   ├── domain/              # business logic (events, opsec, rules, memory schemas) — mypy strict
-│   ├── application/         # use cases / orchestrators (Layer A, Layer B, verdict pipeline) — mypy strict
+│   ├── domain/              # business logic (events, assistant, chat, memory schemas) — mypy strict
+│   ├── application/         # use cases / orchestrators (assistant agent, enricher, WM reducer) — mypy strict
 │   ├── infrastructure/      # I/O concretes (DB, HTTP, LLM clients, filesystem) — mypy gradual
 │   ├── api/                 # FastAPI routes (HTTP entry points)
-│   └── tui/                 # prompt_toolkit TUI (panels, slash commands, inspector)
+│   ├── tui/                 # Textual TUI (textual_ui/: panels, chat, inspector)
+│   ├── cli.py               # argparse + dispatch only
+│   └── cli_helpers/         # one module per subcommand body
 ├── protocol/                # wire protocol v0.1 (schemas + fixtures + validator)
 ├── adapters/                # C2 adapters
-│   ├── cobaltstrike/        # CS adapter (.cna + Python connector)
+│   ├── cobaltstrike/        # the .cna capture hook (capture-only, no dispatch)
 │   └── sliver-mock/         # synthetic Sliver event replayer
-├── rules/                   # YAML rule packs (Layer A bootstrap + passthrough whitelist)
 ├── migrations/              # async Alembic migrations
-├── tests/                   # unit + integration tests
+├── tests/                   # unit + integration + e2e
 └── docs/                    # human-facing docs
 ```
 
-## Run the test suite
+Architecture rules and the layering contracts CI enforces are in
+[CONTRIBUTING.md](../CONTRIBUTING.md). The canonical wire API — event types,
+routes, enums, field names — is `.claude/rules/wire-protocol.md`. For why the
+system is shaped this way, read [architecture-design.md](architecture-design.md)
+first.
+
+## Run the tests
 
 ```bash
-uv run pytest tests/ adapters/cobaltstrike/tests/
-uv run pytest adapters/sliver-mock/tests/  # separate run — different `tests` package
+uv run pytest tests/       # the CI suite
+uv run pytest adapters/    # adapter tests — a separate CI step
 ```
 
-## Run the daemon locally
+Add `--no-sync` to any `uv run` while a daemon is running; `uv` cannot replace
+the locked `redrobin.exe` otherwise.
+
+## Feed the daemon an event by hand
+
+The same thing the `.cna` does for real:
 
 ```bash
-export ANTHROPIC_API_KEY="sk-ant-..."
-export VOYAGE_API_KEY="pa-..."
-uv run redrobin init
-uv run redrobin daemon start &
-uv run redrobin doctor
-```
-
-In another terminal:
-
-```bash
-# Send a verdict request (Path 1 simulation)
-curl -X POST http://127.0.0.1:7777/v1/verdict/quick \
+curl -X POST http://127.0.0.1:7777/v1/events \
   -H "Authorization: Bearer $(cat ~/.redrobin/transport.token)" \
   -H "Content-Type: application/json" \
-  -d '{"bid": "b1", "command": "mimikatz", "raw": "mimikatz logonpasswords"}'
+  -d '{
+    "spec_version": "0.1.0",
+    "id": "evt_01HZXAB9MK2P6Q9TFGHJKRMNPQ",
+    "ts": "2026-07-28T14:32:00.000Z",
+    "source": {"adapter": "cobaltstrike", "version": "0.1.0", "engagement_id": "acme-q2-2026"},
+    "event": {
+      "type": "beacon.command_input",
+      "bid": "bid_4291",
+      "operator": "alice",
+      "command": "shell",
+      "raw": "shell whoami /priv"
+    }
+  }'
 ```
 
-Expected: BLOCK verdict if bootstrap rules are loaded.
+Expected: `{"ok":true,"stored":true}` — `stored` is `false` when no engagement is
+active. The envelope is validated against `protocol/schemas/v0.1/`, appended to
+the engagement's `events.jsonl`, and republished on the event bus so the reducer
+and the TUI both see it. Valid fixtures for every event type live in
+`protocol/fixtures/v0.1/valid/` — build your payloads from those; the schemas are
+`additionalProperties: false`, so any extra key is a hard reject.
+
+Liveness: `GET /v1/healthz` returns `{"status":"ok"}` immediately;
+`GET /v1/readyz` returns `{"status":"ready"}` only once the lifespan has finished
+booting.
 
 ## Where do I start?
 
-| If you want to... | Open this |
+| If you want to… | Open this |
 |---|---|
-| Add a rule | `rules/shared/<new_rule>.yaml` |
 | Add an adapter | `adapters/<new_adapter>/` |
-| Touch the verdict pipeline | `redrobin/application/verdict_pipeline.py` + `verdict_pipeline_factory.py` |
-| Add a TUI panel | `redrobin/tui/panels/` |
-| Add a CLI command | `redrobin/cli.py` |
+| Change what the assistant says | `redrobin/application/agents/assistant/` (`agent.py` prompt, `triggers.py` speak/stay-quiet gate, `tools.py` KB + journal retrieval) |
+| Change what lands in working memory | `redrobin/application/working_memory_reducer.py` + `redrobin/application/agents/enricher/` |
+| Add a TUI panel | `redrobin/tui/textual_ui/panels.py` (+ `theme.tcss`) |
+| Add a CLI command | `redrobin/cli.py` + `redrobin/cli_helpers/` |
 | Add a new event type | `protocol/schemas/v0.1/events/` + `redrobin/domain/events.py` + fixtures + tests |
-| Debug a Layer B verdict | `redrobin/application/layer_b_engine.py` |
-| Tweak the .cna alias gate | `adapters/cobaltstrike/redrobin.cna` + `adapters/cobaltstrike/aliases/*.sleep` |
+| Change what the `.cna` captures | `adapters/cobaltstrike/redrobin.cna` (`on beacon_input`, `set BEACON_OUTPUT`, `on beacon_initial`) |
+| Change how the daemon boots | `redrobin/api/lifespan_helpers.py` |
 
 ## Common gotchas
 
-- **`import-linter` failures**: you imported from `infrastructure` in
-  `api/` or `tui/`. Fix: route through an `application/` facade (see existing
-  `application/transport_auth.py`, `application/event_ingestion.py`).
-- **mypy strict failure on domain**: domain code must be fully typed.
+- **`import-linter` failures.** You imported `infrastructure` from `api/` or
+  `tui/`. Route it through an `application/` facade — see
+  `application/transport_auth.py`, `application/event_ingestion.py`.
+- **mypy strict on domain.** `domain` and `application` must be fully typed;
   `infrastructure` is gradual.
-- **Aggressor alias `$2` is the first token**, not the full arg string. Use
-  the canonical `substr($0, strlen("<cmd> ")+1)` pattern (see Phase 1 spike
-  validation in `docs/aggressor-alias-args.md`).
-- **API key in config.toml**: programmatically refused at startup. Use env
-  vars only.
+- **The `.cna` must stay passthrough.** It is a capture hook, not a gate: no
+  `alias` overrides, and `BEACON_OUTPUT` always returns `$2` unchanged. Anything
+  that can throw before that return suppresses the operator's output — wrap it.
+- **CI never runs the `.cna`.** Aggressor changes are accepted by a live-Beacon
+  operator smoke. See `.claude/skills/smoke-test/`.
+- **Engagement state binds at daemon startup.** Working memory, episodic history
+  and the assistant's scope are resolved once, in the lifespan. `events.jsonl`
+  is resolved per request. Switching engagements under a running daemon splits
+  the two — see
+  [configuration.md](configuration.md#switching-engagements).
+- **A daemon that captures but never speaks** is usually configuration:
+  `REDROBIN_ASSISTANT_ENABLED` or a key that is `set` but not *valid*.
 
 ## Ask questions
 
-- Slack/Discord: TBD
-- GitHub Issues: `https://github.com/CFP-CR/Red-Robin/issues`
-- Architecture/spec questions: tag spec discussion issues with `architecture`.
+- GitHub Issues: <https://github.com/CFP-CR/Red-Robin/issues>
+- Tag spec discussions with `architecture`.

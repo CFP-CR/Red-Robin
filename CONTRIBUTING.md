@@ -12,7 +12,9 @@ project. Here's how to work with us.
   the pattern).
 - **Adapter is the sole C2 boundary**: Red Robin core speaks the wire protocol
   only. C2-specific knowledge (REST API, Aggressor primitives, gRPC stubs)
-  lives entirely inside `adapters/<name>/`.
+  lives entirely inside `adapters/<name>/`. The adapter **captures** (observes
+  commands + output and publishes events); the core **advises**. An adapter
+  never gates or intercepts the operator's command path.
 
 ## Development setup
 
@@ -41,40 +43,58 @@ uv run pre-commit install
 
 ## Pull request flow
 
-1. Create a topic branch from `main` (`feat-X`, `fix-Y`, `docs-Z`).
-2. Open a PR against `main`.
+1. Create a topic branch from the integration branch `dev` (`feat-X`, `fix-Y`, `docs-Z`).
+2. Open a PR back into `dev`. `main` is updated from `dev` via PR at release.
 3. CI must pass: ruff + mypy + import-linter + pytest.
 4. Code review by another operator before merge.
 5. Squash-merge for small PRs; preserve atomic commits for larger ones.
 
 ## Branch protection
 
-- `main` is protected. PRs only.
-- `dev-jose` / `dev-juan` are operator working branches (do not push directly).
+- `main` is protected (production) — PRs only, no direct pushes.
+- `dev` is the shared integration branch — PRs only, no direct pushes.
 
 ## Tests
 
 - All new code requires tests.
-- Tests live in `tests/unit/` (pure unit) or `tests/integration/` (HTTP/integration).
+- `tests/unit/` (pure logic), `tests/integration/` (HTTP), `tests/e2e/` (whole flow).
 - Adapter tests live in `adapters/<name>/tests/`.
+- Run `pytest` from a directory with no `.env` (e.g. `tools/`) — a `.env` in the
+  working directory is picked up by the CLI code under test and can mask failures.
+- Full gate list and the live-Beacon acceptance procedures: [TESTING.md](TESTING.md).
 
-## Adding a rule
+## Interactive subcommands
 
-1. Create YAML in `rules/shared/<rule_id>.yaml` (or `rules/personal/` for
-   operator-private rules).
-2. Schema: `id`, `match.command`, `match.arg_pattern` (optional), `severity`
-   (INFO/WARN/DANGER), `reason`, optional `suggestions`, `sources`.
-3. Add a test in `tests/integration/test_bootstrap_rules.py` if it's a core rule.
+`redrobin init` set the pattern; anything that prompts should follow it.
+
+1. Interactive by default — prompt for missing input via `getpass` (secrets) or
+   `input()` (everything else).
+2. Every required value is also an explicit flag (`--anthropic-key`,
+   `--engagement-slug`). A flag skips its prompt.
+3. `--non-interactive` suppresses all prompts. A missing required value exits 2
+   with a stderr error that **names the flag to pass**.
+4. Refuse to prompt when `sys.stdin.isatty()` is false, regardless. Exit 2
+   pointing at `--non-interactive`. This covers CI, `< file`, and pipes, where
+   `getpass` would silently fall back to plain-text echo.
+5. Idempotent on disk. Re-running never rewrites an existing operator-owned file.
+
+Reference implementation: `redrobin/cli_helpers/init_cmd.py::run_init`.
 
 ## Adding an adapter
 
-1. Create `adapters/<name>/{__init__.py, adapter.py, manifest.toml}`.
-2. Manifest schema defined in spec §4 Componente 8.
-3. Adapter speaks only the wire protocol (see `protocol/schemas/v0.1/`).
-4. Adapter tests in `adapters/<name>/tests/`.
+1. Create `adapters/<name>/{__init__.py, adapter.py, manifest.toml}`. Copy the
+   manifest shape from `adapters/cobaltstrike/manifest.toml`.
+2. The adapter speaks only the wire protocol — see `protocol/schemas/v0.1/` and
+   `.claude/rules/wire-protocol.md`.
+3. Adapter tests in `adapters/<name>/tests/`.
 
 ## Code of conduct
 
 Be respectful. We're building offensive security tooling — that comes with
 ethical responsibility. Don't ship features that primarily enable
 non-authorized targets.
+
+## Claude Code
+
+This repo ships committed Claude Code config under `.claude/` (path-scoped `rules/`, `skills/`) plus a
+root `CLAUDE.md`. Run `/memory` inside a session to see which instructions and rules are loaded.

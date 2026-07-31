@@ -36,18 +36,6 @@ def test_derive_key_command_input_with_correlation_id() -> None:
     assert derive_key(event) == "B-1|abc123|beacon.command_input"
 
 
-def test_derive_key_opsec_verdict_with_correlation_id() -> None:
-    event = {
-        "type": "opsec.verdict",
-        "beacon_id": "B-1",
-        "correlation_id": "abc123",
-        "verdict": "BLOCK",
-    }
-    # opsec.verdict uses `beacon_id` (not `bid`) per its schema; derive_key
-    # accepts either as the producer-attached identity.
-    assert derive_key(event) == "B-1|abc123|opsec.verdict"
-
-
 def test_derive_key_beacon_initial_is_passthrough() -> None:
     # Group D: beacon.initial is NOT deduped — it is idempotent at the reducer
     # (upsert_session replaces by bid), so deduping it only breaks the .cna

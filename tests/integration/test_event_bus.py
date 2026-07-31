@@ -59,9 +59,13 @@ async def test_close_unblocks_subscribers():
 
 @pytest.mark.asyncio
 async def test_app_state_has_event_bus(tmp_path, monkeypatch):
-    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     from redrobin.api.app import create_app
 
+    monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path))
+    # Boot validation exits(2) without API keys. This test owns the bus, not the
+    # LLM surface, so opt into degraded explicitly rather than depending on keys
+    # some earlier test happened to leak into os.environ (issue #51).
+    monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
     app = create_app()
     async with app.router.lifespan_context(app):
         assert isinstance(app.state.event_bus, EventBus)

@@ -3,7 +3,7 @@
 Per spec §5.2: working memory lives at `~/.redrobin/engagements/<slug>/working_memory.json`.
 Mutable (no immutable history); operator-curated + auto-updated from events.
 
-Reducer helpers (``upsert_session``, ``append_finding``, ``list_credentials``)
+Reducer helpers (``upsert_session``, ``list_credentials``)
 and the single-writer batch merge ``apply_deltas`` (the sole working-memory
 enrichment path since Plan B2 retired the command-output regex). Each helper
 is a synchronous load → mutate → save against the single-engagement JSON file;
@@ -26,6 +26,7 @@ from redrobin.domain.memory import (
     Finding,
     Host,
     Objective,
+    PendingMilestone,
     Session,
     ToolUsage,
     WorkingMemory,
@@ -89,12 +90,6 @@ class WorkingMemoryRepo:
         wm.sessions.append(session)
         self.save(wm)
 
-    def append_finding(self, finding: Finding) -> None:
-        """Append a finding (no dedup — findings are an audit stream)."""
-        wm = self.load()
-        wm.findings.append(finding)
-        self.save(wm)
-
     def apply_deltas(self, deltas: WorkingMemoryDeltas) -> None:
         """Merge a whole deltas batch in one load->merge->save (single writer).
 
@@ -129,6 +124,49 @@ class WorkingMemoryRepo:
         for defense in deltas.defenses_observed:
             if defense not in wm.defenses_observed:
                 wm.defenses_observed.append(defense)
+        self.save(wm)
+
+    def apply_milestone(
+        self,
+        *,
+        phase: str,
+        milestone_id: str,
+        status: str,
+        progress_pct: int,
+        pending: bool = False,
+        drop: bool = False,
+        prompt: str = "",
+    ) -> None:
+        """Apply an engagement.milestone (spec §6.C). ``pending`` records a proposal
+        without applying it; ``drop`` removes a pending proposal (a rejected confirm);
+        otherwise COMMIT: set current_phase, the objective's status/progress_pct (by
+        id), kill_chain_status, and consume any matching pending. Single-writer."""
+        wm = self.load()
+        wm.pending_milestones = [p for p in wm.pending_milestones if p.milestone_id != milestone_id]
+        if drop:
+            self.save(wm)
+            return
+        if pending:
+            wm.pending_milestones.append(
+                PendingMilestone(
+                    milestone_id=milestone_id,
+                    phase=phase,
+                    status=status,
+                    progress_pct=progress_pct,
+                    prompt=prompt,
+                )
+            )
+            self.save(wm)
+            return
+        # commit
+        if phase:
+            wm.current_phase = phase
+        for obj in wm.objectives:
+            if obj.id == milestone_id:
+                obj.status = status
+                obj.progress_pct = progress_pct
+        if milestone_id:
+            wm.kill_chain_status[milestone_id] = status
         self.save(wm)
 
     @staticmethod
@@ -204,4 +242,5 @@ class WorkingMemoryRepo:
             credentials=[Credential(**c) for c in data.get("credentials", [])],
             findings=[Finding(**f) for f in data.get("findings", [])],
             sessions=[Session(**s) for s in data.get("sessions", [])],
+            pending_milestones=[PendingMilestone(**p) for p in data.get("pending_milestones", [])],
         )

@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
+import pytest
+
 from redrobin.application.engagement_loader import EngagementLoader
+
+# These tests run `redrobin init` and then further CLI commands, so the second
+# command loads the .env init just wrote into os.environ — permanently, without
+# this (issue #51). That .env now carries REDROBIN_ASSISTANT_ENABLED=1, which
+# would otherwise switch the assistant on for every later test in the session.
+pytestmark = pytest.mark.usefixtures("restore_environ")
 
 
 def test_cli_new_with_scope_flags_round_trips(tmp_path, monkeypatch):
@@ -46,7 +54,6 @@ def test_new_then_boot_yields_usable_scope(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     monkeypatch.setenv("REDROBIN_ROOT", str(tmp_path / ".redrobin"))
-    monkeypatch.setenv("REDROBIN_RULES_DIR", str(tmp_path / "rules"))
     monkeypatch.setenv("REDROBIN_ALLOW_DEGRADED", "1")
     monkeypatch.setenv("REDROBIN_ENGAGEMENT_SLUG", "acme")
     from redrobin.cli import main
@@ -60,6 +67,6 @@ def test_new_then_boot_yields_usable_scope(tmp_path, monkeypatch):
     with TestClient(app):
         assert app.state.engagement is not None
         assert app.state.scope_empty is False
-        scope = app.state.scope
-        assert scope.check(["10.10.0.5"]) is None  # in-scope -> PASS
-        assert scope.check(["8.8.8.8"]) is not None  # out-of-scope -> BLOCK
+        # The scope DATA survives on the loaded engagement (and is projected onto
+        # working memory for the assistant); only the synchronous checker is gone.
+        assert app.state.engagement.in_scope == ["10.10.0.0/16"]

@@ -1,19 +1,18 @@
 # adapters/cobaltstrike/redrobin.cna
 # Red Robin CS Adapter — Aggressor master script.
 #
-# Loaded in CS Client; intercepts operator input via alias overrides.
-# Talks to the Red Robin daemon on localhost:7777 via HTTP.
+# Loaded in CS Client; OBSERVES operator activity and ships it to the Red Robin
+# daemon on localhost:7777 via HTTP. This script is a capture hook only.
 #
-# Per spec §1.2.1 two-tier verdict protocol:
-#   - quick_query: hard timeout 150ms; Layer A sync, Layer B async retroactive
-#   - on PASS/WARN: call &b<cmd> Sleep function (forwards to teamserver)
-#   - on BLOCK: berror + return (command NEVER reaches teamserver)
+# It does NOT intercept, gate, block, or modify any command. The synchronous
+# OPSEC pre-flight gate — the alias overrides, the /v1/verdict/quick round-trip
+# and the Layer B verdict console messages — was removed wholesale; the
+# operator's console behaves exactly as stock Cobalt Strike.
 #
-# Per spec §4 Componente 1 / Closed Decision 14:
-#   - alias plane (console parser) is independent of Sleep function plane (&b*)
-#   - No recursion when alias body calls &b<cmd>()
-#   - bang-suffix (! e.g. &bmimikatz!) is the QUIET variant (suppress task ack)
-#     — orthogonal to gate, NOT a "call original" mechanism
+# The three capture surfaces, all passthrough-safe:
+#   - on beacon_input    -> beacon.command_input
+#   - set BEACON_OUTPUT  -> beacon.command_output (always returns $2 unchanged)
+#   - on beacon_initial  -> beacon.initial (+ a load-time backfill)
 
 import java.net.*;
 import java.io.*;
@@ -140,13 +139,11 @@ sub redrobin_escape_json {
 #   1. The raw token value (covers any place it appears verbatim).
 #   2. `Authorization: Bearer <token>` header pattern.
 #   3. `?token=<value>` / `&token=<value>` URL query params — added
-#      for #111. RedRobinEventStream builds its WS URL as
-#      `ws://.../v1/adapters/events?token=<bearer>` (see
-#      RedRobinEventStream.java:51). The JAR does not log the URL today,
-#      but any future Java exception whose message embeds the URI
-#      (URISyntaxException, IOException with cause) would leak the
+#      for #111. No caller passes the token in a query string today,
+#      but any Java exception whose message embeds a URI
+#      (URISyntaxException, IOException with cause) could leak the
 #      token here. This redaction is defensive and a no-op against
-#      today's logs.
+#      today's logs — keep it.
 sub redrobin_sanitize_error {
     local('$err_str');
     $err_str = "" . $1;
@@ -167,7 +164,8 @@ sub redrobin_sanitize_error {
 # S1ckB0y1337/Cobalt-Strike-CheatSheet. Audit pass 2 #2.4: &binfo("integrity")
 # is NOT a documented Aggressor key, so we MUST derive from the user string.
 # If a future CS release drops the " *" separator this check returns $null
-# (safe-fail — Sigma rules with IntegrityLevel: High simply don't fire).
+# (safe-fail — the consumer is beacon.initial's optional integrity_level field,
+# so the daemon simply records the session without one).
 # Distinguishing Medium/Low/System requires a beacon-side BOF (deferred to v0.2).
 sub redrobin_integrity_level {
     local('$u');
@@ -175,72 +173,6 @@ sub redrobin_integrity_level {
     if ($u is $null) { return $null; }
     if (right($u, 2) eq " *") { return "High"; }
     return $null;
-}
-
-
-sub redrobin_query_quick {
-    local('$bid $cmd $raw $body $response $il');
-    ($bid, $cmd, $raw) = @_;
-    $body = '{"bid":"' . redrobin_escape_json($bid) .
-            '","command":"' . redrobin_escape_json($cmd) .
-            '","raw":"' . redrobin_escape_json($raw) . '"';
-    $il = redrobin_integrity_level($bid);
-    if ($il !is $null) {
-        $body .= ',"integrity_level":"' . $il . '"';
-    }
-    $body .= '}';
-    $response = redrobin_http_post("/v1/verdict/quick", $body);
-    if ($response eq "") {
-        return %(action => "UNAVAILABLE", reason => "daemon unreachable -- command NOT vetted");
-    }
-
-    # STATELESS parse. Sleep's hasmatch is a STATEFUL iterator (caches its Matcher by
-    # string-value+pattern, toggles true/false across successive identical strings) — used
-    # as a one-shot boolean it intermittently returned false on identical BLOCK responses
-    # -> fail-open (#144, confirmed by operator smoke 2026-05-25). ismatch is a single
-    # full-anchored match (stateless); the '.*...*' wrap lets the whole JSON line match.
-    if ($response ismatch '.*"action":"BLOCK".*') {
-        local('$reason');
-        if ($response ismatch '.*"reason":"([^"]+)".*') { $reason = matched()[0]; }
-        else { $reason = "see daemon log"; }
-        return %(action => "BLOCK", reason => $reason);
-    } else if ($response ismatch '.*"action":"WARN".*') {
-        local('$reason');
-        if ($response ismatch '.*"reason":"([^"]+)".*') { $reason = matched()[0]; }
-        else { $reason = ""; }
-        return %(action => "WARN", reason => $reason);
-    } else if ($response ismatch '.*"action":"ESCALATE".*') {
-        return %(action => "ESCALATE", reason => "Layer B reviewing");
-    } else {
-        return %(action => "PASS", reason => "");
-    }
-}
-
-
-# ===== Central gate sub (called by every alias body) =====
-sub redrobin_gate {
-    local('$bid $cmd $raw $dangerous $verdict');
-    ($bid, $cmd, $raw, $dangerous) = @_;
-    $verdict = redrobin_query_quick($bid, $cmd, $raw);
-    if ($verdict['action'] eq "UNAVAILABLE") {
-        if ($dangerous) {
-            berror($bid, "[Red Robin] gate UNAVAILABLE (daemon unreachable) -- BLOCKING " . $cmd . " (dangerous, cannot verify). Retry once the daemon is reachable.");
-            return false;
-        }
-        berror($bid, "[Red Robin] gate UNAVAILABLE (daemon unreachable) -- " . $cmd . " NOT vetted, proceeding. Check the daemon.");
-        return true;
-    }
-    if ($verdict['action'] eq "BLOCK") {
-        berror($bid, "[Red Robin] DANGER: " . $verdict['reason']);
-        return false;
-    }
-    if ($verdict['action'] eq "WARN") {
-        blog($bid, "[Red Robin] WARN: " . $verdict['reason']);
-    }
-    if ($verdict['action'] eq "ESCALATE") {
-        blog($bid, "[Red Robin] novel pattern — Layer B reviewing async");
-    }
-    return true;
 }
 
 
@@ -252,10 +184,17 @@ sub redrobin_gate {
 # explicit envelope_errors / event_errors).
 sub redrobin_envelope {
     global('$REDROBIN_HTTP $REDROBIN_SESSION_ID');
-    local('$event_json');
+    local('$event_json $evt_id');
     $event_json = $1;
+    # Guard the ulid deref. If $REDROBIN_HTTP is null (init/handshake failed after a
+    # daemon restart without a clean .cna reload), `[$REDROBIN_HTTP ulid]` throws an
+    # uncaught NPE. Every emit sub calls this BEFORE its try/catch, so that NPE escapes
+    # the sub — and in the `set BEACON_OUTPUT` filter it aborts the hook before `return $2`,
+    # SUPPRESSING the operator's beacon output (commands task with no result). The capture
+    # path must NEVER be able to suppress operator output — fall back to a client-free id.
+    $evt_id = iff($REDROBIN_HTTP !is $null, "evt_" . [$REDROBIN_HTTP ulid], "evt_noclient");
     return '{"spec_version":"0.1.0",' .
-           '"id":"evt_' . [$REDROBIN_HTTP ulid] . '",' .
+           '"id":"' . $evt_id . '",' .
            '"ts":"' . [[java.time.Instant now] toString] . '",' .
            '"source":{"adapter":"cs-aggressor","version":"1.0.0","engagement_id":"unknown"' .
            iff(strlen($REDROBIN_SESSION_ID) > 0, ',"adapter_session_id":"' . $REDROBIN_SESSION_ID . '"', "") . '},' .
@@ -360,11 +299,10 @@ sub redrobin_emit_beacon_initial {
 sub redrobin_handshake_with_retry {
     local('$manifest_json $response $attempt $delay');
     $manifest_json = '{"manifest":{"manifest_version":"0.1.0","spec_versions_supported":">=0.1.0,<0.2.0",' .
-                     '"name":"cs-aggressor","version":"1.0.0","capabilities":{"preflight_block_console":true,' .
-                     '"preflight_block_tui":false,"tui_dispatch":true,"output_observe":true,' .
-                     '"console_annotation":true,"emergency_kill_switch":true,"gate_scope":"per_operator",' .
+                     '"name":"cs-aggressor","version":"1.0.0","capabilities":{"tui_dispatch":false,' .
+                     '"output_observe":true,"console_annotation":false,"emergency_kill_switch":false,' .
                      '"command_modification":false},"events_emitted":["beacon.command_input","beacon.command_output",' .
-                     '"host.observation","credential.observed","beacon.initial"],"events_consumed":["opsec.verdict"],' .
+                     '"beacon.initial"],' .
                      '"requirements":{"cobalt_strike":">=4.12"}}}';
 
     $attempt = 1;
@@ -406,32 +344,9 @@ sub redrobin_init_http {
 }
 
 
-# ===== Event stream init =====
-# Load com.redrobin.aggressor.RedRobinEventStream from the same JAR as
-# RedRobinHttp + sibling json-20240303.jar (org.json parser). The stream's
-# WebSocket connection lives in a Java background thread — Sleep just polls
-# the resulting queue.
-sub redrobin_init_event_stream {
-    global('$REDROBIN_EVENT_STREAM');
-    local('$jar_path $json_jar_path $jar_url $json_url $loader $cls $string_cls $ctor');
-
-    $jar_path = script_resource() . '/jars/redrobin-aggressor-http-1.0.2.jar';
-    $json_jar_path = script_resource() . '/jars/json-20240303.jar';
-    $jar_url = [[[new java.io.File: $jar_path] toURI] toURL];
-    $json_url = [[[new java.io.File: $json_jar_path] toURI] toURL];
-    $loader = [new java.net.URLClassLoader: @($jar_url, $json_url)];
-
-    $cls = [java.lang.Class forName: 'com.redrobin.aggressor.RedRobinEventStream', false, $loader];
-    $string_cls = [java.lang.Class forName: 'java.lang.String'];
-    $ctor = [$cls getConstructor: @($string_cls, $string_cls)];
-    $REDROBIN_EVENT_STREAM = [$ctor newInstance: @($REDROBIN_URL, $REDROBIN_TOKEN)];
-}
-
-
 # ===== Boot =====
 $REDROBIN_TOKEN = redrobin_load_token();
 redrobin_init_http();
-redrobin_init_event_stream();
 redrobin_handshake_with_retry();
 
 # Backfill beacon.initial for beacons that checked in BEFORE this .cna loaded
@@ -441,13 +356,6 @@ redrobin_handshake_with_retry();
 foreach $_rr_b (beacons()) {
     redrobin_emit_beacon_initial($_rr_b['id']);
 }
-
-
-# ===== Load alias templates =====
-include(script_resource("aliases/tier1a_gate.sleep"));
-include(script_resource("aliases/tier1b_wrapper.sleep"));
-include(script_resource("aliases/tier2_warn.sleep"));
-include(script_resource("aliases/popup_beacon.sleep"));
 
 
 # ===== Path 3 — Output observation (passthrough-safe filter hook) =====
@@ -465,8 +373,11 @@ set BEACON_OUTPUT {
     # treats our blog() output as beacon output and the hook re-POSTs it.
     #
     # Uses `!is $null` + `ismatch` — both are the file's established Sleep
-    # idioms (`!is $null` x15 occurrences; `ismatch` x10+ for verdict parsing
-    # at lines ~86-92, ~202-212, ~373). The earlier candidate using
+    # idioms (see the error-classification chain in redrobin_http_post).
+    # NOTE: `ismatch` is deliberate — Sleep's `hasmatch` is a STATEFUL iterator
+    # that toggles true/false across successive identical strings, which once
+    # caused a silent fail-open (#144). Never swap it back. The earlier
+    # candidate using
     # `[$str startsWith "X"]` (Sleep's Java-HOA-on-scalar) had ZERO precedent
     # in this `.cna` — and since this hook is smoke-only (no CI), the first
     # regression would surface on the operator's keyboard. Stay in-idiom.
@@ -507,21 +418,21 @@ on beacon_initial {
 }
 
 
-println("[Red Robin] .cna loaded; gate active.");
+println("[Red Robin] .cna loaded; capture active (observe-only, no interception).");
 
 
 # ===== Heartbeat — surface daemon outages in the CS event log =====
-# Without this loop the operator would silently keep typing while the alias
-# gate fails open. Hitting /v1/adapter/heartbeat every 30s gives them a
+# Without this loop the operator would silently keep working while capture is
+# dropping on the floor. Hitting /v1/adapter/heartbeat every 30s gives them a
 # visible warning when the daemon goes away mid-engagement.
 sub redrobin_heartbeat {
     local('$result $code');
     $result = redrobin_http_get("/v1/adapter/heartbeat?adapter=cs-main");
     $code = $result["code"];
     if ($code == 0) {
-        warn("[Red Robin] daemon unreachable; alias gates will fail-open");
+        warn("[Red Robin] daemon unreachable; command capture is being dropped");
     } else if ($code != 200) {
-        warn("[Red Robin] daemon heartbeat returned " . $code . "; alias gates may fail-open");
+        warn("[Red Robin] daemon heartbeat returned " . $code . "; command capture may be dropping");
     }
 }
 
@@ -534,10 +445,10 @@ sub redrobin_heartbeat {
 # constructed from scratch.
 #
 # Operational impact of disabling: zero. Every redrobin_http_post call
-# (for handshake + per-alias verdict queries) already catches network
+# (handshake + the per-command capture emits) already catches network
 # errors and emits "[Red Robin] daemon connection refused at ..." warn
-# lines. The operator sees daemon outages at the moment they trigger an
-# alias — not 30s later via a proactive heartbeat. Adequate for v0.1.
+# lines. The operator sees daemon outages at the moment they type a
+# command — not 30s later via a proactive heartbeat. Adequate for v0.1.
 #
 # Re-enable in v0.1.x via Sleep's lambda(...) to explicitly capture
 # variables INTO the fork closure (Task #110). Pattern:
@@ -552,51 +463,20 @@ sub redrobin_heartbeat {
 # });
 
 
-# ===== Layer B verdict consumer (heartbeat-driven) =====
-# Async LLM judge (Layer B) finishes 10-30s after the operator typed a
-# command and publishes opsec.verdict events onto a Java BlockingQueue
-# inside RedRobinEventStream. This handler drains any queued verdicts on
-# every Aggressor heartbeat_5s tick (main script thread, full scope) and
-# surfaces each to the relevant beacon console via blog($bid, ...).
-#
-# Why heartbeat_5s and not fork(): empirical testing 2026-05-23 (T14
-# smoke) proved that fork() + lambda($_x => $GLOBAL) does NOT propagate
-# $GLOBAL into the spawned ScriptInstance — the bound $_x is null in the
-# fork's scope. Same scope-isolation root cause as Task #110. heartbeat_5s
-# runs on the main thread, so $REDROBIN_EVENT_STREAM is directly visible.
-# Latency cost: up to 5s vs. ~instant — acceptable for v0.1 (Layer B
-# itself takes 10-30s, so 5s drain cadence is well within the budget).
-on heartbeat_5s {
-    local('$evt $msg');
-    if ($REDROBIN_EVENT_STREAM is $null) { return; }
-    while (1) {
-        $evt = [$REDROBIN_EVENT_STREAM pollEvent: 0];   # non-blocking drain
-        if ($evt is $null) { break; }
-        if ([$evt source] eq "layer_b") {
-            $msg = "[Red Robin] Layer B " . [$evt verdict] . ": " . [$evt reason];
-            blog([$evt beaconId], $msg);
-        }
-    }
-}
-
-
 # ===== Script unload cleanup =====
-# Each .cna load creates a fresh RedRobinEventStream (Java) with a
-# daemon-thread ScheduledExecutorService + persistent WebSocket. The
-# instance is reachable only from $REDROBIN_EVENT_STREAM. On reload,
-# Sleep clears that global, but the Java instance leaks: its thread
-# keeps running, the WS stays open, and the BlockingQueue (~512KB)
-# remains in memory. Over ~10-20 .cna iterations this becomes
-# observable in JVM memory + thread dumps.
+# CURRENTLY A NO-OP, DELIBERATELY KEPT.
 #
-# close() (added by Task #115/Task 9 of the adapter-event-stream plan)
-# does the right teardown: shutdown flag, sendClose on the WS, then
-# scheduler.shutdownNow(). Safe to call multiple times (idempotent
-# behind the volatile shutdown flag).
+# This hook existed to close the Java event-stream client that consumed
+# opsec.verdict frames. That consumer was removed with the pre-flight gate,
+# so nothing assigns $REDROBIN_EVENT_STREAM any more and the `!is $null`
+# guard short-circuits on every unload. That is exactly the edge case the
+# guard was written for (unload firing before the stream was ever created),
+# so the hook is safe as-is.
 #
-# The $REDROBIN_EVENT_STREAM !is $null guard handles two edge cases:
-# (a) script_unload firing before init_event_stream ran (script load
-# failed early), (b) operator manually nulling the global for debug.
+# It is retained rather than deleted because it is the established teardown
+# seam: if this adapter ever again owns a background Java resource (a
+# long-lived client, a watcher thread), its close() belongs here. Deleting
+# the hook would just mean re-deriving it later.
 #
 # Event-name verification: Aggressor's `on script_unload` event is
 # documented in the Cobalt Strike Aggressor Script Manual (Fortra),
